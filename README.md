@@ -1,17 +1,25 @@
 # Byte E2E Agent
 
-FastAPI 后端 + React (Vite) 前端的 Hello World 项目骨架。
+FastAPI 后端 + React (Vite) 前端。内含 ReAct 智能体模块，通过独立 CLI 启动。
 
 ## 项目结构
 
 ```
 byte_e2e_agent/
-├── backend/                  # FastAPI 后端（Python 3.14+）
-│   ├── main.py               # 入口，定义 / 和 /api/hello
-│   └── pyproject.toml        # 依赖声明（uv / pip 通用）
-├── frontend/                 # React 前端（Vite）
+├── backend/
+│   ├── main.py               # FastAPI 入口（Hello World 端点）
+│   ├── cli.py                # ReAct 智能体交互式 CLI
+│   ├── pyproject.toml        # 依赖声明（uv 用）
+│   ├── requirements.txt      # 依赖声明（pip 用，由 uv export 生成）
+│   ├── .env.example          # 环境变量模板
+│   └── agent/                # ReAct 智能体模块
+│       ├── llm.py            # LLM 客户端（OpenAI 兼容）
+│       ├── react.py          # ReAct 循环 + Prompt 模板
+│       ├── plan_manager.py   # 计划状态机
+│       └── tools/            # 工具集（Bash/Read/Write/Edit/Search/SubTask）
+├── frontend/
 │   ├── src/App.jsx           # 页面组件
-│   └── vite.config.js        # 含开发代理配置
+│   └── vite.config.js        # 含 /api 开发代理
 └── .gitignore
 ```
 
@@ -25,13 +33,20 @@ byte_e2e_agent/
 
 ## 快速开始
 
-### 1. 后端
+### 1. 配置环境变量
+
+```bash
+cp backend/.env.example backend/.env
+# 编辑 backend/.env，填入 LLM_API_KEY 等必填项
+```
+
+### 2. 后端（FastAPI 服务器）
 
 #### 方式 A：使用 uv（推荐）
 
 ```bash
 cd backend
-uv sync                        # 自动创建 venv 并安装依赖
+uv sync
 uv run uvicorn main:app --reload --port 8000
 ```
 
@@ -41,13 +56,13 @@ uv run uvicorn main:app --reload --port 8000
 cd backend
 python3.14 -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install fastapi "uvicorn[standard]"
+pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
 启动后访问 `http://localhost:8000/docs` 查看 Swagger 文档。
 
-### 2. 前端
+### 3. 前端
 
 ```bash
 cd frontend
@@ -55,13 +70,36 @@ npm install
 npm run dev
 ```
 
-打开 `http://localhost:5173`，页面会展示前端问候语并自动调用后端接口。
+打开 `http://localhost:5173`。
+
+## ReAct 智能体 CLI
+
+独立于前后端框架的交互式智能体：
+
+```bash
+cd backend
+uv run python cli.py            # uv 用户
+python cli.py                   # venv / pip 用户（需先激活环境）
+```
+
+进入交互界面后直接输入问题即可。支持命令：
+
+| 命令 | 说明 |
+|------|------|
+| `/clear` | 清空对话上下文 |
+| `/exit` | 退出 |
+| `Ctrl+C` | 退出 |
+
+## API 端点（FastAPI）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/` | Hello World |
+| `GET` | `/api/hello` | Hello World（含 status） |
 
 ## 开发代理说明
 
-开发模式下，前端 Vite 服务器监听 `5173` 端口，并将所有 `/api/*` 请求代理到后端 `localhost:8000`。因此前端代码中可以直接写 `fetch("/api/hello")`，无需关注跨域或绝对路径。
-
-后端同样配置了 CORS 中间件，允许来自 `localhost:5173` 的请求。如果你使用不同的端口，需要修改 `backend/main.py` 中的 `allow_origins`。
+Vite 开发服务器将 `/api/*` 代理到 `localhost:8000`，前端可直接写 `fetch("/api/hello")`。
 
 ## 常用命令
 
@@ -70,9 +108,6 @@ npm run dev
 cd backend && uvicorn main:app --host 0.0.0.0 --port 8000
 
 # 前端 — 生产构建
-cd frontend && npm run build    # 产物在 frontend/dist/
-npm run preview                 # 本地预览构建结果
-
-# 前端 — 代码检查
-cd frontend && npm run lint
+cd frontend && npm run build
+npm run preview
 ```
