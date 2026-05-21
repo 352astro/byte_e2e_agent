@@ -13,3 +13,8 @@ dependencies = [
     "json-repair>=0.20.0",
     "socksio>=1.0.0",
 ]
+
+[tool.uv.workspace]
+members = [
+    "double_pendulum_simulation",
+]

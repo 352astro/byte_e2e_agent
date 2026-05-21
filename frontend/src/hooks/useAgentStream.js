@@ -74,6 +74,24 @@ export default function useAgentStream() {
           updateCurrentStep((s) => ({ ...s, events: [...s.events, event] }));
           break;
 
+        case "terminal_chunk":
+          updateCurrentStep((s) => {
+            const events = [...s.events];
+            const last = events[events.length - 1];
+            if (last && last.type === "terminal_stream") {
+              // Append to existing stream buffer
+              events[events.length - 1] = {
+                ...last,
+                output: last.output + event.chunk,
+              };
+            } else {
+              // Start new stream buffer
+              events.push({ type: "terminal_stream", output: event.chunk });
+            }
+            return { ...s, events };
+          });
+          break;
+
         case "finish":
           if (currentStepRef.current !== null) finalizeStep();
           setAnswer(event.answer);

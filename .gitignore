@@ -1,6 +1,5 @@
 # ─── Python ──────────────────────────────────────────
 __pycache__/
-backend/agent_workspace/
 *.py[cod]
 *.egg-info/
 dist/

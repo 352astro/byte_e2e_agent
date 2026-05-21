@@ -160,6 +160,18 @@
   color: #444;
 }
 
+.terminal-output pre {
+  margin: 0;
+  padding: 4px 8px;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, monospace;
+}
+
 .tool-result pre {
   margin: 0;
   padding: 4px 8px;

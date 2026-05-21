@@ -27,8 +27,8 @@ except ImportError:
 # ── 加载 .env ──────────────────────────────────────────
 load_dotenv()
 
-# ── 工作目录沙箱：agent 所有文件操作限定在此目录下 ────
-_AGENT_WORKSPACE = os.path.join(os.path.dirname(__file__), "agent_workspace")
+# ── 工作目录沙箱（默认 = 启动目录，可通过 AGENT_WORKSPACE 环境变量覆盖）
+_AGENT_WORKSPACE = os.environ.get("AGENT_WORKSPACE", os.getcwd())
 os.makedirs(_AGENT_WORKSPACE, exist_ok=True)
 set_workspace_root(_AGENT_WORKSPACE)
 

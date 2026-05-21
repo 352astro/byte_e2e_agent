@@ -97,6 +97,13 @@ export default function AgentDemo() {
                     </div>
                   );
                 }
+                if (ev.type === "terminal_stream") {
+                  return (
+                    <div key={evIdx} className="event terminal-output">
+                      <pre>{ev.output}</pre>
+                    </div>
+                  );
+                }
                 if (ev.type === "error") {
                   return (
                     <div key={evIdx} className="event error">

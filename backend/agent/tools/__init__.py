@@ -11,12 +11,12 @@ from typing import Annotated, Any, Dict, Union
 from pydantic import Field
 
 from agent.tools.base import BaseTool
-from agent.tools.bash import Bash
 from agent.tools.edit import Edit, EditOp
 from agent.tools.finish import Finish
 from agent.tools.plan import PlanAdvance, PlanItem, PlanRewrite
 from agent.tools.read import Read
 from agent.tools.search import Search
+from agent.tools.shell import Shell
 from agent.tools.subtask import SubTask
 from agent.tools.workspace import get_workspace_root, set_workspace_root
 from agent.tools.write import Write
@@ -27,13 +27,13 @@ from agent.tools.write import Write
 
 # 顶层 agent：全部工具
 Tool = Annotated[
-    Union[Finish, Search, Bash, Read, Write, Edit, PlanRewrite, PlanAdvance, SubTask],
+    Union[Finish, Search, Shell, Read, Write, Edit, PlanRewrite, PlanAdvance, SubTask],
     Field(discriminator="kind"),
 ]
 
 # 子 agent：排除 SubTask（禁止递归）
 SubTool = Annotated[
-    Union[Finish, Search, Bash, Read, Write, Edit, PlanRewrite, PlanAdvance],
+    Union[Finish, Search, Shell, Read, Write, Edit, PlanRewrite, PlanAdvance],
     Field(discriminator="kind"),
 ]
 
@@ -44,7 +44,7 @@ SubTool = Annotated[
 _ALL_TOOL_CLASSES: list[type[BaseTool]] = [
     Finish,
     Search,
-    Bash,
+    Shell,
     Read,
     Write,
     Edit,
@@ -56,7 +56,7 @@ _ALL_TOOL_CLASSES: list[type[BaseTool]] = [
 _SUB_TOOL_CLASSES: list[type[BaseTool]] = [
     Finish,
     Search,
-    Bash,
+    Shell,
     Read,
     Write,
     Edit,
@@ -117,7 +117,6 @@ def _build_schemas(
 
 __all__ = [
     "BaseTool",
-    "Bash",
     "Edit",
     "EditOp",
     "Finish",
@@ -126,6 +125,7 @@ __all__ = [
     "PlanRewrite",
     "Read",
     "Search",
+    "Shell",
     "SubTask",
     "Write",
     "Tool",

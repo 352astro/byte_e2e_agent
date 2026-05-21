@@ -8,7 +8,14 @@ from agent._json import safe_parse_json
 from agent._term import dim, error, info, step, success, tool, warn
 from agent.llm import HelloAgentsLLM
 from agent.plan_manager import PlanManager
+from agent.terminal import (
+    PersistentTerminal,
+    reset_terminal,
+    set_terminal,
+)
 from agent.tools import Finish, SubTool, Tool, get_sub_tool_classes
+from agent.tools.shell import Shell, get_platform_hint
+from agent.tools.workspace import get_workspace_root
 from agent.tools.plan import PlanAdvance, PlanRewrite
 from agent.tools.subtask import SubTask
 
@@ -59,8 +66,10 @@ You MUST respond with valid JSON only, strictly following the schema below.
   * PlanAdvance — move the current active plan item forward
   * SubTask    — delegate a complex sub-task to a fresh sub-agent
   * Finish     — conclude with a final answer (no more tools needed)
-  * Bash / Read / Write / Edit / Search — executable tools
+  * Shell / Read / Write / Edit / Search — executable tools
+- {platform_hint}
 - Every response MUST include both "thought" and "action" fields.
+- {platform_hint}
 """
 
 
@@ -81,6 +90,7 @@ class ReActAgent:
         self._system_msg: dict | None = None  # cached system message
         self._question_msg: dict | None = None  # current user question
         self._turns: list[dict] = []  # past assistant + user(tool) msgs
+        self._terminal: PersistentTerminal | None = None
 
     # ── Backward-compat history property (for CLI /clear) ──
 
@@ -100,6 +110,9 @@ class ReActAgent:
         self._system_msg = None
         self._question_msg = None
         self._turns = []
+        if self._terminal is not None:
+            reset_terminal()
+            self._terminal = None
 
     # ── CLI loop (thin wrapper over run_stream) ────────────
 
@@ -147,6 +160,9 @@ class ReActAgent:
 
             elif kind == "tool_call":
                 print(f"{tool('[Tool]')} {event['tool']}")
+
+            elif kind == "terminal_chunk":
+                print(event["chunk"], end="", flush=True)
 
             elif kind == "tool_result":
                 print(event["result"])
@@ -228,7 +244,7 @@ class ReActAgent:
         if self._system_msg is None:
             self._system_msg = {
                 "role": "system",
-                "content": SYSTEM_PROMPT.format(schema=response_schema),
+                "content": SYSTEM_PROMPT.format(schema=response_schema, platform_hint=get_platform_hint()),
             }
 
         # ── archive previous question (multi-turn support) ─
@@ -236,6 +252,12 @@ class ReActAgent:
             self._turns.append(self._question_msg)
 
         self._question_msg = {"role": "user", "content": question}
+
+        # ── ensure persistent terminal ────────────────────
+        if self._terminal is None or not self._terminal.alive:
+            self._terminal = PersistentTerminal()
+            self._terminal.start(get_workspace_root())
+            set_terminal(self._terminal)
 
         # ── main loop ─────────────────────────────────────
         while current_step < max_steps:
@@ -360,6 +382,31 @@ class ReActAgent:
                 tool_params = {}
             yield {"type": "tool_call", "tool": tool_name, "params": tool_params}
 
+            # ── Bash: streaming terminal output ──────
+            if isinstance(action, Shell):
+                output_parts: list[str] = []
+                try:
+                    for chunk in self._terminal.run_stream(
+                        action.command, action.timeout_ms
+                    ):
+                        output_parts.append(chunk)
+                        yield {"type": "terminal_chunk", "chunk": chunk}
+                    exit_code = self._terminal._last_exit_code
+                except Exception as exc:
+                    output_parts = [f"Error: {exc}"]
+                    exit_code = -1
+                raw_output = "".join(output_parts)
+                if exit_code != 0:
+                    result = f"{raw_output.rstrip()}\n[exit code: {exit_code}]"
+                else:
+                    result = raw_output.rstrip() if raw_output.strip() else "(no output)"
+                yield {"type": "tool_result", "result": result}
+                self._turns.append(
+                    {"role": "user", "content": f"Tool Shell returned:\n{result}"},
+                )
+                continue
+
+            # ── other tools ──────────────────────────
             try:
                 fn = getattr(action, "execute", None)
                 if callable(fn):
