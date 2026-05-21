@@ -4,7 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
-from agent._term import error, info, step, success, tool, warn
+from agent._json import safe_parse_json
+from agent._term import dim, error, info, step, success, tool, warn
 from agent.llm import HelloAgentsLLM
 from agent.plan_manager import PlanManager
 from agent.tools import Finish, SubTool, Tool, get_sub_tool_classes
@@ -42,39 +43,24 @@ class SubResponse(BaseModel):
     )
 
 
-# ── Prompt template (cache-friendly paragraph order) ────────
-#
-#   1. static (system / schema)   - cached forever
-#   2. stable (question)          - per-run static, establishes task
-#   3. high-churn (history)       - appended every step
-#   4. low-churn  (plan)          - changes on auto-advance, tiny, last = zero tail cost
+# ── System prompt (static, cached per schema version) ──────
 
-REACT_PROMPT_TEMPLATE = """
+SYSTEM_PROMPT = """\
 You are an intelligent assistant capable of using external tools and following a plan.
 You MUST respond with valid JSON only, strictly following the schema below.
 
 ## Response JSON Schema (defines all available tools and their parameters)
-{response_schema}
+{schema}
 
-Field descriptions:
+## Rules
 - thought: your analysis, reasoning, and decision-making process (string)
-- action: the tool invocation. Output the tool's JSON object directly.
-  Tools are discriminated by the "kind" field; all available tools are
-  enumerated in the schema above (see the action field's anyOf).
-  * Use PlanRewrite to replace the ENTIRE plan (CAUTION: discards all progress).
-  * Use PlanAdvance to move the current active item forward.
-  * Use SubTask (if available) to delegate a complex sub-task to a fresh sub-agent.
-  * Use Finish to conclude with a final answer.
-  * Every tool call MUST include the correct "kind" field.
-
-## Current Question
-Question: {question}
-
-## History
-{history}
-
-## Current Plan
-{plan}
+- action: the tool invocation JSON object, discriminated by "kind"
+  * PlanRewrite — replace the entire plan (CAUTION: discards all progress)
+  * PlanAdvance — move the current active plan item forward
+  * SubTask    — delegate a complex sub-task to a fresh sub-agent
+  * Finish     — conclude with a final answer (no more tools needed)
+  * Bash / Read / Write / Edit / Search — executable tools
+- Every response MUST include both "thought" and "action" fields.
 """
 
 
@@ -84,13 +70,38 @@ Question: {question}
 
 
 class ReActAgent:
-    """ReAct agent with built-in PlanManager and configurable tool set."""
+    """ReAct agent with built-in PlanManager and configurable tool set.
+
+    Maintains a proper role-based message list (system → user → assistant → user …)
+    instead of cramming everything into a single user message.
+    """
 
     def __init__(self, llm_client: HelloAgentsLLM) -> None:
         self.llm_client = llm_client
-        self.history: list[str] = []
+        self._system_msg: dict | None = None  # cached system message
+        self._question_msg: dict | None = None  # current user question
+        self._turns: list[dict] = []  # past assistant + user(tool) msgs
 
-    # ── main loop ────────────────────────────────────────
+    # ── Backward-compat history property (for CLI /clear) ──
+
+    @property
+    def history(self) -> list[dict]:
+        return self._turns
+
+    @history.setter
+    def history(self, value: list) -> None:
+        if not value:
+            self.clear()
+        else:
+            self._turns = value
+
+    def clear(self) -> None:
+        """Reset all conversation state (called by CLI /clear)."""
+        self._system_msg = None
+        self._question_msg = None
+        self._turns = []
+
+    # ── CLI loop (thin wrapper over run_stream) ────────────
 
     def run(
         self,
@@ -100,14 +111,106 @@ class ReActAgent:
         response_cls: Any = Response,
         tool_classes: Any = None,
     ) -> str:
-        """Run the ReAct loop.
+        """Run the ReAct loop (CLI mode).
 
-        Args:
-            question:      user question
-            max_steps:     max reasoning steps
-            response_cls:  Pydantic model for validating LLM output
-                           (Response=all tools, SubResponse=restricted)
-            tool_classes:  available tool classes; None = all top-level tools
+        Thin wrapper around run_stream() — consumes structured events
+        and formats them for the terminal with ANSI colours.
+        """
+        answer: str | None = None
+        in_reasoning = False
+
+        for event in self.run_stream(
+            question,
+            max_steps,
+            response_cls=response_cls,
+            tool_classes=tool_classes,
+        ):
+            kind = event["type"]
+
+            if kind == "step_start":
+                print(step(f"--- Step {event['step']} ---"))
+
+            elif kind == "reasoning_token":
+                if not in_reasoning:
+                    print(dim("  [Deep Think]"))
+                    in_reasoning = True
+                print(dim(event["token"]), end="", flush=True)
+
+            elif kind == "thought_token":
+                if in_reasoning:
+                    print()
+                    in_reasoning = False
+                print(event["token"], end="", flush=True)
+
+            elif kind == "thought_end":
+                print()
+
+            elif kind == "tool_call":
+                print(f"{tool('[Tool]')} {event['tool']}")
+
+            elif kind == "tool_result":
+                print(event["result"])
+
+            elif kind == "plan_rewrite":
+                items = event.get("items", [])
+                desc = items[0]["description"] if items else "?"
+                print(info(f"[Plan] Rewrite: {len(items)} item(s), first: {desc}"))
+
+            elif kind == "plan_advance":
+                print(info(f"[Plan] Advance: {event.get('summary', '?')}"))
+
+            elif kind == "subtask_start":
+                print(
+                    info(
+                        f"[SubTask] launching subagent "
+                        f"(max {event['max_steps']} steps): "
+                        f"{event['prompt'][:80]}..."
+                    )
+                )
+
+            elif kind == "subtask_end":
+                result = event.get("result", "")
+                print(info(f"[SubTask] result: {result[:120]}..."))
+
+            elif kind == "finish":
+                if event["answer"] == (
+                    "Maximum steps reached; could not produce a final answer."
+                ):
+                    answer = event["answer"]
+                    print(warn(event["answer"]))
+                else:
+                    answer = event["answer"]
+                    print(f"{success('[Done]')} {answer}")
+                if in_reasoning:
+                    print()
+                    in_reasoning = False
+
+            elif kind == "error":
+                print(warn(event["message"]))
+
+        return answer or "Maximum steps reached; could not produce a final answer."
+
+    # ── Streaming loop (SSE / Web UI) ────────────────────
+
+    def run_stream(
+        self,
+        question: str,
+        max_steps: int = 10,
+        *,
+        response_cls: Any = Response,
+        tool_classes: Any = None,
+    ):
+        """Run the ReAct loop and yield structured event dicts for SSE streaming.
+
+        Builds a proper role-based message list:
+            system (instructions + schema)
+            user   (question)
+            … alternating assistant (JSON response) / user (tool result) …
+
+        Event types (same as before):
+            step_start, reasoning_token, thought_token, thought_end,
+            tool_call, tool_result, plan_rewrite, plan_advance,
+            subtask_start, subtask_end, finish, error
         """
         if tool_classes is None:
             from agent.tools import get_all_tool_classes as _all
@@ -117,72 +220,112 @@ class ReActAgent:
         plan_manager = PlanManager()
         current_step = 0
 
-        # pre-generate response schema (tool info included)
         response_schema = json.dumps(
             response_cls.model_json_schema(), indent=2, ensure_ascii=False
         )
 
+        # ── initialise system message once ────────────────
+        if self._system_msg is None:
+            self._system_msg = {
+                "role": "system",
+                "content": SYSTEM_PROMPT.format(schema=response_schema),
+            }
+
+        # ── archive previous question (multi-turn support) ─
+        if self._question_msg is not None:
+            self._turns.append(self._question_msg)
+
+        self._question_msg = {"role": "user", "content": question}
+
+        # ── main loop ─────────────────────────────────────
         while current_step < max_steps:
             current_step += 1
-            print(step(f"--- Step {current_step} ---"))
+            yield {"type": "step_start", "step": current_step}
 
-            # 1. format prompt
-            history_str = "\n".join(self.history) if self.history else "(None)"
+            # 1. build message list for this step
+            step_messages: list[dict] = [
+                self._system_msg,
+                self._question_msg,
+                *self._turns,
+            ]
+
+            # inject current plan as ephemeral user message
             plan_str = plan_manager.get_plan_string()
-            prompt = REACT_PROMPT_TEMPLATE.format(
-                response_schema=response_schema,
-                question=question,
-                history=history_str,
-                plan=plan_str,
-            )
+            if plan_str != "(No plan yet — consider using PlanRewrite to create one.)":
+                step_messages.append(
+                    {"role": "user", "content": f"## Current Plan\n{plan_str}"}
+                )
 
-            # 2. call LLM
-            messages = [{"role": "user", "content": prompt}]
-            response_text = self.llm_client.think(messages=messages)
+            # 2. call LLM (streaming) — split reasoning from content
+            full_text_parts: list[str] = []
+            reasoning_parts: list[str] = []
+            for ev in self.llm_client.think_stream(messages=step_messages):
+                if ev["kind"] == "reasoning":
+                    yield {"type": "reasoning_token", "token": ev["token"]}
+                    reasoning_parts.append(ev["token"])
+                else:
+                    yield {"type": "thought_token", "token": ev["token"]}
+                    full_text_parts.append(ev["token"])
+            yield {"type": "thought_end"}
 
-            if not response_text:
-                print(error("LLM returned empty response."))
+            response_text = "".join(full_text_parts)
+
+            if not response_text.strip():
+                yield {"type": "error", "message": "LLM returned empty response."}
                 break
 
-            # 3. parse response
+            # 3. parse response (with json-repair fallback)
             try:
-                response = response_cls.model_validate_json(response_text)
+                response = safe_parse_json(response_text, response_cls)
             except ValidationError as e:
-                print(warn("JSON parse failed; feeding error back to LLM."))
-                self.history.append(
-                    f"System: Your last output did not conform to the JSON Schema. "
-                    f"Please follow the schema strictly. Error details: {e}"
+                # both direct parse and repair failed —
+                # feed parse error back as a user message
+                self._turns.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your last output did not conform to the JSON Schema. "
+                            f"Please follow the schema strictly. Error: {e}"
+                        ),
+                    }
                 )
+                yield {"type": "error", "message": f"JSON parse failed: {e}"}
                 continue
 
-            # 4. record thought
-            self.history.append(f"Thought: {response.thought}")
+            # 4. record assistant message (with reasoning if DeepSeek thinking is on)
+            assistant_msg: dict = {"role": "assistant", "content": response_text}
+            if reasoning_parts:
+                assistant_msg["reasoning_content"] = "".join(reasoning_parts)
+            self._turns.append(assistant_msg)
 
             # 5. dispatch action
             action = response.action
 
-            # -- 5a. Plan --
+            # -- Plan --
             if isinstance(action, PlanRewrite):
-                result = plan_manager.rewrite(action.items)
-                print(info(f"[Plan] Rewrite: {result.split(chr(10))[0]}"))
-                self.history.append(f"Plan: {result}")
+                plan_manager.rewrite(action.items)
+                yield {
+                    "type": "plan_rewrite",
+                    "items": [it.model_dump() for it in action.items],
+                }
                 continue
 
             if isinstance(action, PlanAdvance):
-                result = plan_manager.advance(action.state)
-                print(info(f"[Plan] Advance: {result}"))
-                self.history.append(f"Plan: {result}")
+                plan_manager.advance(action.state)
+                yield {
+                    "type": "plan_advance",
+                    "state": action.state,
+                    "summary": f"item advanced to {action.state}",
+                }
                 continue
 
-            # -- 5b. SubTask sub-agent --
+            # -- SubTask --
             if isinstance(action, SubTask):
-                print(
-                    info(
-                        f"[SubTask] launching subagent "
-                        f"(max {action.max_steps} steps): "
-                        f"{action.prompt[:80]}..."
-                    )
-                )
+                yield {
+                    "type": "subtask_start",
+                    "prompt": action.prompt,
+                    "max_steps": action.max_steps,
+                }
                 sub_agent = ReActAgent(self.llm_client)
                 sub_result = sub_agent.run(
                     question=action.prompt,
@@ -190,24 +333,33 @@ class ReActAgent:
                     response_cls=SubResponse,
                     tool_classes=get_sub_tool_classes(),
                 )
-                print(info(f"[SubTask] result: {sub_result[:120]}..."))
-                self.history.append(
-                    f"SubTask ({action.prompt[:60]}...) -> {sub_result}"
+                # record sub-task as a user message
+                self._turns.append(
+                    {
+                        "role": "user",
+                        "content": f"SubTask completed. Result: {sub_result}",
+                    }
                 )
+                yield {"type": "subtask_end", "result": sub_result}
                 continue
 
-            # -- 5c. Finish --
+            # -- Finish --
             if isinstance(action, Finish):
                 answer = action.answer
-                print(f"{success('[Done]')} {answer}")
-                # persist Q&A in history for multi-turn context inheritance
-                self.history.append(f"Question: {question}")
-                self.history.append(f"Answer: {answer}")
-                return answer
+                # archive Q&A into turns so multi-turn context carries over
+                self._turns.append(self._question_msg)
+                self._question_msg = None
+                yield {"type": "finish", "answer": answer}
+                return
 
-            # -- 5d. regular tool --
+            # -- regular tool --
             tool_name: str = getattr(action, "kind", "?")
-            print(f"{tool('[Tool]')} {tool_name}")
+            try:
+                tool_params = action.model_dump(exclude={"kind"})
+            except Exception:
+                tool_params = {}
+            yield {"type": "tool_call", "tool": tool_name, "params": tool_params}
+
             try:
                 fn = getattr(action, "execute", None)
                 if callable(fn):
@@ -216,21 +368,31 @@ class ReActAgent:
                     result = f"Error: tool '{tool_name}' does not implement execute()"
             except Exception as exc:
                 result = f"Error: {exc}"
-            self.history.append(f"Action: {tool_name} -> {result}")
 
-        return "Maximum steps reached; could not produce a final answer."
+            yield {"type": "tool_result", "result": result}
+
+            # record tool result as a user message
+            self._turns.append(
+                {
+                    "role": "user",
+                    "content": f"Tool {tool_name} returned:\n{result}",
+                }
+            )
+
+        yield {
+            "type": "finish",
+            "answer": "Maximum steps reached; could not produce a final answer.",
+        }
 
 
 # ============================================================
 # Demo
 # ============================================================
 if __name__ == "__main__":
-    # Response with Finish
     r1 = Response(thought="Done.", action=Finish(answer="Hello, world!"))
     print("========== Response (Finish) ==========")
     print("model_dump_json:", r1.model_dump_json(indent=2))
 
-    # Response with SubTask
     r2 = Response(
         thought="Too complex; delegate to subagent.",
         action=SubTask(prompt="Analyze the data", max_steps=3),
@@ -238,7 +400,6 @@ if __name__ == "__main__":
     print("\n========== Response (SubTask) ==========")
     print("model_dump_json:", r2.model_dump_json(indent=2))
 
-    # SubResponse rejects SubTask
     print("\n========== SubResponse rejects SubTask ==========")
     try:
         SubResponse.model_validate_json(
@@ -248,7 +409,6 @@ if __name__ == "__main__":
     except ValidationError:
         print("Correctly rejected: SubTask not in SubTool union")
 
-    # SubResponse accepts Search
     sr = SubResponse.model_validate_json(
         '{"thought": "need info", "action": {"kind": "Search", "query": "weather"}}'
     )

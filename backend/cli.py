@@ -70,7 +70,7 @@ def main() -> None:
             break
 
         if question.lower() in ("/clear", "clear"):
-            agent.history = []
+            agent.clear()
             print(f"  {warn('[Clear]')} 上下文已重置。\n")
             continue
 

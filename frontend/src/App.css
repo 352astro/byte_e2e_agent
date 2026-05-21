@@ -1,15 +1,23 @@
 .app {
-  max-width: 640px;
-  margin: 80px auto;
-  text-align: center;
-  font-family: system-ui, sans-serif;
+    max-width: 780px;
+    margin: 40px auto;
+    font-family: system-ui, sans-serif;
+    padding: 0 16px;
 }
 
 .app h1 {
-  color: #333;
+    color: #333;
+    text-align: center;
 }
 
 .app p {
-  color: #555;
-  font-size: 1.1rem;
+    color: #555;
+    font-size: 1.1rem;
+    text-align: center;
+}
+
+.divider {
+    margin: 32px 0;
+    border: none;
+    border-top: 1px solid #ddd;
 }

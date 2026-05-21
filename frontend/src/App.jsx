@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import AgentDemo from "./components/AgentDemo";
 import "./App.css";
 
 function App() {
@@ -17,6 +18,10 @@ function App() {
       <p>
         Backend says: <strong>{backendMessage}</strong>
       </p>
+
+      <hr className="divider" />
+
+      <AgentDemo />
     </div>
   );
 }

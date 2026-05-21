@@ -1,0 +1,218 @@
+/* ── Agent Demo ─────────────────────────────── */
+
+.agent-demo h2 {
+  font-size: 1.2rem;
+  color: #444;
+  margin-bottom: 12px;
+}
+
+.agent-input {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.agent-input input {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 0.95rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  outline: none;
+}
+.agent-input input:focus {
+  border-color: #7c3aed;
+}
+
+.agent-input button {
+  padding: 8px 18px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  background: #7c3aed;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.agent-input button:disabled {
+  background: #b4a0e0;
+  cursor: not-allowed;
+}
+
+/* ── Step Card ──────────────────────────────── */
+
+.step-card {
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.step-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 14px;
+  background: #f8f8f8;
+  cursor: pointer;
+  user-select: none;
+}
+.step-header:hover {
+  background: #f0f0f0;
+}
+
+.step-num {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.step-toggle {
+  font-size: 0.8rem;
+  color: #999;
+}
+
+.step-body {
+  padding: 10px 14px;
+  background: #fafafa;
+  font-size: 0.88rem;
+}
+
+/* ── Reasoning (DeepSeek Deep Think) ────────── */
+
+.reasoning-block {
+  margin-bottom: 10px;
+}
+
+.reasoning-summary {
+  cursor: pointer;
+  color: #7c3aed;
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 2px 0;
+}
+
+.reasoning-text {
+  margin: 6px 0 0 0;
+  padding: 8px 10px;
+  background: #f5f3ff;
+  border-radius: 4px;
+  color: #6d28d9;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* ── Thought ────────────────────────────────── */
+
+.thought-block {
+  margin-bottom: 10px;
+}
+
+.thought-summary {
+  cursor: pointer;
+  color: #666;
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 2px 0;
+}
+
+.thought-text {
+  margin: 6px 0 0 0;
+  padding: 8px 10px;
+  background: #f9fafb;
+  border-radius: 4px;
+  color: #555;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+/* ── Tool Events ────────────────────────────── */
+
+.event {
+  margin-bottom: 6px;
+  font-size: 0.87rem;
+  line-height: 1.4;
+}
+.event:last-child {
+  margin-bottom: 0;
+}
+
+.event .label {
+  font-weight: 600;
+}
+
+.tool-call {
+  color: #2563eb;
+}
+.tool-call .params {
+  margin: 4px 0 0 0;
+  padding: 4px 8px;
+  background: #eef2ff;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  color: #444;
+}
+
+.tool-result pre {
+  margin: 0;
+  padding: 4px 8px;
+  background: #f0fdf4;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.expand-btn {
+  margin-top: 4px;
+  padding: 2px 10px;
+  font-size: 0.78rem;
+  color: #7c3aed;
+  background: transparent;
+  border: 1px solid #d4c4f0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.expand-btn:hover {
+  background: #f5f3ff;
+}
+
+.event.error {
+  color: #dc2626;
+  background: #fef2f2;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.83rem;
+}
+
+/* ── Answer ─────────────────────────────────── */
+
+.agent-answer {
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+}
+
+.agent-answer h3 {
+  margin: 0 0 6px 0;
+  font-size: 1rem;
+  color: #166534;
+}
+
+.agent-answer p {
+  margin: 0;
+  color: #333;
+  text-align: left;
+  font-size: 0.95rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

@@ -10,4 +10,6 @@ dependencies = [
     "openai>=1.0.0",
     "python-dotenv>=1.0.0",
     "serpapi>=0.1.0",
+    "json-repair>=0.20.0",
+    "socksio>=1.0.0",
 ]
