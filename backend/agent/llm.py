@@ -3,7 +3,7 @@ from typing import Dict, Iterator, List
 
 from openai import OpenAI
 
-from agent._term import dim, error, info, success
+from agent.utils._term import dim, error, info, success
 
 
 class HelloAgentsLLM:

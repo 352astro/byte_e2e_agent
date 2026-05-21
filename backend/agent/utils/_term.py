@@ -2,7 +2,7 @@
 终端 ANSI 转义序列 — 用颜色替代 emoji。
 
 用法：
-    from agent._term import G, info, success, warn, error, tool, prompt, step, reset
+    from agent.utils._term import G, info, success, warn, error, tool, prompt, step, reset
 
     print(f"{step('[Step 1]')} 正在思考...")
     print(info("正在调用模型..."))

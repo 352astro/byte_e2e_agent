@@ -14,7 +14,7 @@ import os
 
 from dotenv import load_dotenv
 
-from agent._term import bold, dim, prompt, success, warn
+from agent.utils._term import bold, dim, prompt, success, warn
 from agent.llm import HelloAgentsLLM
 from agent.react import ReActAgent
 from agent.tools.workspace import set_workspace_root

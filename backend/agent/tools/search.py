@@ -4,7 +4,7 @@ from typing import Literal
 import serpapi
 from pydantic import Field
 
-from agent._term import magenta
+from agent.utils._term import magenta
 from agent.tools.base import BaseTool
 
 
