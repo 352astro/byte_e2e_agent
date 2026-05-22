@@ -1,4 +1,6 @@
-import useAgentStream, { RESULT_PREVIEW_LINES } from "../hooks/useAgentStream";
+import { useRef } from "react";
+import useAgentStream from "../hooks/useAgentStream";
+import StepCard from "./StepCard";
 import "./AgentDemo.css";
 
 export default function AgentDemo() {
@@ -13,118 +15,81 @@ export default function AgentDemo() {
     expandResult,
   } = useAgentStream();
 
+  const composingRef = useRef(false);
+
+  const onKeyDown = (e) => {
+    if (e.key === "Enter") {
+      if (e.ctrlKey || e.metaKey || e.shiftKey) {
+        return;
+      }
+      if (composingRef.current) {
+        return;
+      }
+      e.preventDefault();
+      handleRun();
+    }
+  };
+
+  const MAX_ROWS = 10;
+
+  const handleChange = (e) => {
+    setQuestion(e.target.value);
+    const lines = e.target.value.split("\n").length;
+    e.target.rows = Math.min(Math.max(lines, 1), MAX_ROWS);
+  };
+
   return (
     <div className="agent-demo">
-      <h2>Agent Demo</h2>
+      {/* ── scrollable content ──────────────────── */}
+      <div className="agent-scroll">
+        <div className="agent-scroll-inner">
+          {steps.map((step, i) => (
+            <StepCard
+              key={step.step}
+              step={step}
+              isLatest={i === steps.length - 1}
+              index={i}
+              onToggle={toggleStep}
+              onExpandResult={expandResult}
+            />
+          ))}
 
-      {/* ── input ──────────────────────────────── */}
-      <div className="agent-input">
-        <input
-          type="text"
-          placeholder="Ask the agent something..."
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleRun()}
-          disabled={running}
-        />
-        <button onClick={handleRun} disabled={running || !question.trim()}>
-          {running ? "Thinking..." : "Run"}
-        </button>
-      </div>
-
-      {/* ── step cards ──────────────────────────── */}
-      {steps.map((step, i) => (
-        <div key={step.step} className="step-card">
-          <div className="step-header" onClick={() => toggleStep(i)}>
-            <span className="step-num">Step {step.step}</span>
-            <span className="step-toggle">{step.open ? "\u25BE" : "\u25B8"}</span>
-          </div>
-
-          {step.open && (
-            <div className="step-body">
-              {/* Deep Think */}
-              {step.reasoning && (
-                <details className="reasoning-block">
-                  <summary className="reasoning-summary">
-                    {"\uD83D\uDC9C"} Deep Think ({step.reasoning.length} chars)
-                  </summary>
-                  <pre className="reasoning-text">{step.reasoning}</pre>
-                </details>
-              )}
-
-              {/* Thought */}
-              {step.thought && (
-                <details className="thought-block" open>
-                  <summary className="thought-summary">
-                    {"\uD83D\uDCAD"} Thought ({step.thought.length} chars)
-                  </summary>
-                  <pre className="thought-text">{step.thought}</pre>
-                </details>
-              )}
-
-              {/* Tool events */}
-              {step.events.map((ev, evIdx) => {
-                if (ev.type === "tool_call") {
-                  return (
-                    <div key={evIdx} className="event tool-call">
-                      <span className="label">{"\uD83D\uDD27"} {ev.tool}</span>
-                      {ev.params && Object.keys(ev.params).length > 0 && (
-                        <pre className="params">
-                          {JSON.stringify(ev.params, null, 2)}
-                        </pre>
-                      )}
-                    </div>
-                  );
-                }
-                if (ev.type === "tool_result") {
-                  const lines = (ev.result || "").split("\n");
-                  const truncated =
-                    lines.length > RESULT_PREVIEW_LINES && !ev.expanded;
-                  const display = truncated
-                    ? lines.slice(0, RESULT_PREVIEW_LINES).join("\n")
-                    : ev.result;
-                  return (
-                    <div key={evIdx} className="event tool-result">
-                      <pre>{display}</pre>
-                      {truncated && (
-                        <button
-                          className="expand-btn"
-                          onClick={() => expandResult(i, evIdx)}
-                        >
-                          Show all ({lines.length} lines)
-                        </button>
-                      )}
-                    </div>
-                  );
-                }
-                if (ev.type === "terminal_stream") {
-                  return (
-                    <div key={evIdx} className="event terminal-output">
-                      <pre>{ev.output}</pre>
-                    </div>
-                  );
-                }
-                if (ev.type === "error") {
-                  return (
-                    <div key={evIdx} className="event error">
-                      {"\u26A0\uFE0F"} {ev.message}
-                    </div>
-                  );
-                }
-                return null;
-              })}
+          {answer !== null && (
+            <div className="agent-answer">
+              <h3>{"\u2705"} Answer</h3>
+              <p>{answer}</p>
             </div>
           )}
-        </div>
-      ))}
 
-      {/* ── answer ──────────────────────────────── */}
-      {answer !== null && (
-        <div className="agent-answer">
-          <h3>{"\u2705"} Answer</h3>
-          <p>{answer}</p>
+          <div className="agent-bottom-spacer" />
         </div>
-      )}
+      </div>
+
+      {/* ── fixed input bar ─────────────────────── */}
+      <div className="agent-input-bar">
+        <textarea
+          className="agent-textarea"
+          placeholder="Ask the agent something… (Enter to send, Ctrl/Shift+Enter for newline)"
+          value={question}
+          onChange={handleChange}
+          onKeyDown={onKeyDown}
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            composingRef.current = false;
+          }}
+          disabled={running}
+          rows={1}
+        />
+        <button
+          className="agent-send-btn"
+          onClick={handleRun}
+          disabled={running || !question.trim()}
+        >
+          {running ? "…" : "Send"}
+        </button>
+      </div>
     </div>
   );
 }

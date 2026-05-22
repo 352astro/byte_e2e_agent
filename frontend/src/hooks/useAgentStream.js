@@ -10,7 +10,7 @@ export default function useAgentStream() {
 
   const currentStepRef = useRef(null);
   const reasoningRef = useRef("");
-  const thoughtRef = useRef("");
+  const actionRef = useRef("");
 
   // ── helpers ──────────────────────────────────────
 
@@ -29,7 +29,7 @@ export default function useAgentStream() {
       const idx = prev.length - 1;
       if (idx < 0) return prev;
       const copy = [...prev];
-      copy[idx] = { ...copy[idx], open: false, thoughtFinal: true };
+      copy[idx] = { ...copy[idx], open: false, actionFinal: true };
       return copy;
     });
   }, []);
@@ -43,10 +43,10 @@ export default function useAgentStream() {
           if (currentStepRef.current !== null) finalizeStep();
           currentStepRef.current = event.step;
           reasoningRef.current = "";
-          thoughtRef.current = "";
+          actionRef.current = "";
           setSteps((prev) => [
             ...prev,
-            { step: event.step, reasoning: "", thought: "", events: [], open: true },
+            { step: event.step, reasoning: "", action: "", events: [], open: true },
           ]);
           break;
         }
@@ -57,12 +57,12 @@ export default function useAgentStream() {
           break;
 
         case "thought_token":
-          thoughtRef.current += event.token;
-          updateCurrentStep((s) => ({ ...s, thought: thoughtRef.current }));
+          actionRef.current += event.token;
+          updateCurrentStep((s) => ({ ...s, action: actionRef.current }));
           break;
 
         case "thought_end":
-          updateCurrentStep((s) => ({ ...s, thoughtFinal: true }));
+          updateCurrentStep((s) => ({ ...s, actionFinal: true }));
           break;
 
         case "tool_call":
@@ -93,7 +93,7 @@ export default function useAgentStream() {
           break;
 
         case "finish":
-          if (currentStepRef.current !== null) finalizeStep();
+          // Keep last step expanded for review
           setAnswer(event.answer);
           break;
 
@@ -115,7 +115,7 @@ export default function useAgentStream() {
     setAnswer(null);
     currentStepRef.current = null;
     reasoningRef.current = "";
-    thoughtRef.current = "";
+    actionRef.current = "";
 
     try {
       const res = await fetch("/api/agent/stream", {

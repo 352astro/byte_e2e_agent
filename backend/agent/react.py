@@ -4,8 +4,6 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from agent.utils._json import safe_validate_json
-from agent.utils._term import dim, error, info, step, success, tool, warn
 from agent.llm import HelloAgentsLLM
 from agent.plan_manager import PlanManager
 from agent.terminal import (
@@ -21,6 +19,8 @@ from agent.tools.skill import get_skills_summary
 from agent.tools.subtask import SubTask
 from agent.tools.toolset import ToolSet
 from agent.tools.workspace import get_workspace_root
+from agent.utils._json import safe_validate_json
+from agent.utils._term import dim, error, info, step, success, tool, warn
 
 # ── System prompt ────────────────────────────────────────
 
@@ -324,7 +324,7 @@ class ReActAgent:
                     if exit_code != 0
                     else raw_output.rstrip() or "(no output)"
                 )
-                yield {"type": "tool_result", "result": result}
+                # terminal_chunk already streamed output; skip duplicate tool_result
                 self._turns.append(
                     {
                         "role": "user",
