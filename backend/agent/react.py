@@ -234,6 +234,11 @@ class ReActAgent:
                 ):
                     yield event
 
+        # archive pending question if loop exhausted (max_steps)
+        if self._question_msg is not None:
+            self._messages.append(self._question_msg)
+            self._question_msg = None
+
         yield {
             "type": "finish",
             "answer": "Maximum steps reached; could not produce a final answer.",

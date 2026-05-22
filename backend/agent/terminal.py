@@ -1,24 +1,28 @@
 """
-持久 Shell 会话 — 跨平台、零外部依赖。
+持久 Shell 会话 — 跨平台。
 
-通过 subprocess.Popen + 管道维持长期存活 shell 进程，
-用唯一结束标记分割命令输出。每个 SandBox 持有独立实例。
+Linux / macOS  — PTY (os.openpty) + select + os.read
+                信号通过 os.killpg 精准送达前台进程组
+Windows        — threading + queue (pipe)
 
-平台适配：
-  Linux / macOS  — select + os.read
-  Windows        — threading + queue
+用法不变：run_stream() / run() / alive / start / stop。
 """
 
 from __future__ import annotations
 
 import os
+import re
 import select
+import signal
 import subprocess
 import sys
 import time
 import uuid
 from dataclasses import dataclass
 from typing import AsyncIterator, Iterator
+
+if sys.platform != "win32":
+    import termios
 
 
 @dataclass
@@ -27,8 +31,18 @@ class TerminalResult:
     exit_code: int = -1
 
 
+# ── ANSI escape stripping ──────────────────────────────
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b\][0-9;]*\x1b\\\\")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from terminal output."""
+    return _ANSI_RE.sub("", text)
+
+
 class PersistentTerminal:
-    """跨平台持久 shell，通过管道与子进程通信。"""
+    """跨平台持久 shell — Unix 使用 PTY, Windows 使用 pipe。"""
 
     def __init__(self, shell: list[str] | None = None) -> None:
         if shell is not None:
@@ -39,6 +53,7 @@ class PersistentTerminal:
             self._shell = ["bash", "--norc"]
 
         self._proc: subprocess.Popen | None = None
+        self._master_fd: int | None = None  # PTY master (Unix only)
         self._cwd: str = ""
         self._last_exit_code: int = -1
 
@@ -53,6 +68,33 @@ class PersistentTerminal:
         if sys.platform != "win32":
             env["TERM"] = "dumb"
 
+        if sys.platform == "win32":
+            self._start_win32(env)
+        else:
+            self._start_unix(env)
+
+    def _start_unix(self, env: dict) -> None:
+        master_fd, slave_fd = os.openpty()
+
+        # Disable echo on the slave side so our commands don't echo back
+        attrs = termios.tcgetattr(slave_fd)
+        attrs[3] &= ~termios.ECHO  # local flags: clear ECHO
+        termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
+
+        self._proc = subprocess.Popen(
+            self._shell,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd=self._cwd,
+            env=env,
+            preexec_fn=os.setsid,  # new session → own process group
+        )
+        os.close(slave_fd)  # child inherited it, parent doesn't need it
+        self._master_fd = master_fd
+        self._drain_startup()
+
+    def _start_win32(self, env: dict) -> None:
         self._proc = subprocess.Popen(
             self._shell,
             stdin=subprocess.PIPE,
@@ -68,7 +110,9 @@ class PersistentTerminal:
         if self._proc is None:
             return
         try:
-            self._proc.stdin.close()
+            if self._master_fd is not None:
+                os.close(self._master_fd)
+                self._master_fd = None
         except Exception:
             pass
         try:
@@ -99,16 +143,25 @@ class PersistentTerminal:
 
         marker = f"__TERM_MARK_{uuid.uuid4().hex[:8]}__"
         wrapped = self._build_wrapped(command, marker)
-        self._proc.stdin.write(wrapped)
-        self._proc.stdin.flush()
+        self._write_stdin(wrapped)
 
         self._last_exit_code = -1
         deadline = time.monotonic() + timeout_ms / 1000.0
+        marker_found = False
 
         if sys.platform == "win32":
-            yield from self._read_stream_win32(marker, deadline)
+            for chunk in self._read_stream_win32(marker, deadline):
+                yield chunk
+            marker_found = self._last_exit_code != -1
         else:
-            yield from self._read_stream_unix(marker, deadline)
+            for chunk in self._read_stream_unix(marker, deadline):
+                yield chunk
+            marker_found = self._last_exit_code != -1
+
+        # If marker never appeared, the command is still running (e.g. npm run dev).
+        # Send SIGINT to the process group to interrupt it.
+        if not marker_found and self.alive:
+            self._recover_after_timeout()
 
     def get_cwd(self) -> str:
         if not self.alive:
@@ -123,6 +176,24 @@ class PersistentTerminal:
         return self._cwd or self._cwd
 
     # ── 内部 ──────────────────────────────────────────
+
+    def _write_stdin(self, data: str) -> None:
+        """Write data to the shell's stdin, platform-appropriate."""
+        if sys.platform == "win32":
+            assert self._proc is not None
+            self._proc.stdin.write(data)
+            self._proc.stdin.flush()
+        else:
+            assert self._master_fd is not None
+            os.write(self._master_fd, data.encode("utf-8"))
+
+    def _read_fd(self) -> int:
+        """Return the file descriptor to read from."""
+        if sys.platform == "win32":
+            return self._proc.stdout.fileno()
+        else:
+            assert self._master_fd is not None
+            return self._master_fd
 
     def _drain_startup(self) -> None:
         if self._proc is None:
@@ -140,11 +211,37 @@ class PersistentTerminal:
                     pass
                 os.set_blocking(self._proc.stdout.fileno(), True)
             else:
+                fd = self._master_fd
+                assert fd is not None
                 while True:
-                    r, _, _ = select.select([self._proc.stdout], [], [], 0.1)
+                    r, _, _ = select.select([fd], [], [], 0.1)
                     if not r:
                         break
-                    _ = os.read(self._proc.stdout.fileno(), 4096)
+                    os.read(fd, 4096)
+        except Exception:
+            pass
+
+    def _recover_after_timeout(self) -> None:
+        """Interrupt the stuck process and drain residual output.
+
+        Unix: sends SIGINT to the entire process group (bash + its children).
+              The TTY layer translates this into a clean ^C for the foreground
+              job — no byte pollution in stdin.
+        """
+        if not self.alive:
+            return
+        try:
+            if sys.platform == "win32":
+                # Fallback: write \x03 (less reliable, but only option on Windows)
+                self._write_stdin("\x03")
+                time.sleep(0.3)
+            else:
+                assert self._proc is not None
+                pgid = os.getpgid(self._proc.pid)
+                os.killpg(pgid, signal.SIGINT)
+                time.sleep(0.3)
+                # Drain anything that the signal triggered
+                self._drain_startup()
         except Exception:
             pass
 
@@ -155,36 +252,48 @@ class PersistentTerminal:
             return f"{command} 2>&1; echo {marker}$?{marker}\n"
 
     def _read_stream_unix(self, marker: str, deadline: float) -> Iterator[str]:
-        fd = self._proc.stdout.fileno()
+        fd = self._master_fd
+        assert fd is not None
         buf = ""
+        first_marker_found = False
 
         while time.monotonic() < deadline:
-            r, _, _ = select.select([self._proc.stdout], [], [], 0.05)
+            r, _, _ = select.select([fd], [], [], 0.05)
             if not r:
                 continue
 
-            chunk = os.read(fd, 4096).decode("utf-8", errors="replace")
-            if not chunk:
+            raw = os.read(fd, 4096).decode("utf-8", errors="replace")
+            if not raw:
                 break
+            chunk = _strip_ansi(raw)
+            if not chunk:
+                continue
 
             buf += chunk
-            idx = buf.find(marker)
-            if idx == -1:
-                safe_len = max(0, len(buf) - len(marker))
-                if safe_len > 0:
-                    yield buf[:safe_len]
-                    buf = buf[safe_len:]
-            else:
-                yield buf[:idx]
-                rest = buf[idx + len(marker) :]
-                idx2 = rest.find(marker)
+
+            if not first_marker_found:
+                idx = buf.find(marker)
+                if idx == -1:
+                    safe_len = max(0, len(buf) - len(marker))
+                    if safe_len > 0:
+                        yield buf[:safe_len]
+                        buf = buf[safe_len:]
+                else:
+                    # Found opening marker — yield command output
+                    yield buf[:idx]
+                    first_marker_found = True
+                    buf = buf[idx + len(marker) :]  # keep exit_code + closing marker
+
+            if first_marker_found:
+                idx2 = buf.find(marker)
                 if idx2 != -1:
-                    exit_str = rest[:idx2].strip()
+                    # Found closing marker — parse exit code
+                    exit_str = buf[:idx2].strip()
                     try:
                         self._last_exit_code = int(exit_str)
                     except ValueError:
-                        self._last_exit_code = -1
-                break
+                        self._last_exit_code = 0  # marker found, exit code unreadable
+                    break
 
     def _read_stream_win32(self, marker: str, deadline: float) -> Iterator[str]:
         import threading
@@ -208,6 +317,7 @@ class PersistentTerminal:
         t.start()
 
         buf = ""
+        first_marker_found = False
         try:
             while time.monotonic() < deadline:
                 try:
@@ -216,23 +326,30 @@ class PersistentTerminal:
                     continue
 
                 buf += line
-                idx = buf.find(marker)
-                if idx == -1:
-                    safe_len = max(0, len(buf) - len(marker))
-                    if safe_len > 0:
-                        yield buf[:safe_len]
-                        buf = buf[safe_len:]
-                else:
-                    yield buf[:idx]
-                    rest = buf[idx + len(marker) :]
-                    idx2 = rest.find(marker)
+
+                if not first_marker_found:
+                    idx = buf.find(marker)
+                    if idx == -1:
+                        safe_len = max(0, len(buf) - len(marker))
+                        if safe_len > 0:
+                            yield buf[:safe_len]
+                            buf = buf[safe_len:]
+                    else:
+                        yield buf[:idx]
+                        first_marker_found = True
+                        buf = buf[idx + len(marker) :]
+
+                if first_marker_found:
+                    idx2 = buf.find(marker)
                     if idx2 != -1:
-                        exit_str = rest[:idx2].strip()
+                        exit_str = buf[:idx2].strip()
                         try:
                             self._last_exit_code = int(exit_str)
                         except ValueError:
-                            self._last_exit_code = -1
-                    break
+                            self._last_exit_code = (
+                                0  # marker found, exit code unreadable
+                            )
+                        break
         finally:
             stop.set()
             t.join(timeout=1)
