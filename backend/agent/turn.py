@@ -1,4 +1,4 @@
-"""Turn — 一轮对话的规范化快照，_turns 与前端共用的前置模型。"""
+"""Turn — 一轮对话的规范化快照，供前端 history API 序列化。"""
 
 from __future__ import annotations
 

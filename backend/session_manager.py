@@ -6,10 +6,11 @@
 
 import json
 import uuid
+from dataclasses import asdict
 from pathlib import Path
 
 from agent.llm import HelloAgentsLLM
-from agent.react import ReActAgent, _turn_to_dict
+from agent.react import ReActAgent
 from agent.sandbox import SandBox
 from agent.turn import ToolStep, Turn
 
@@ -59,8 +60,8 @@ class SessionManager:
             data[sid] = {
                 "system_msg": agent._system_msg,
                 "question_msg": agent._question_msg,
-                "turns": agent._turns,
-                "turns_history": [_turn_to_dict(t) for t in agent._turns_history],
+                "messages": agent._messages,
+                "turns": [asdict(t) for t in agent._turns],
             }
         self._save_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self._save_path, "w", encoding="utf-8") as f:
@@ -80,8 +81,8 @@ class SessionManager:
             agent = ReActAgent(llm_client=self.llm, sandbox=sandbox)
             agent._system_msg = sdata.get("system_msg")
             agent._question_msg = sdata.get("question_msg")
-            agent._turns = sdata.get("turns", [])
-            agent._turns_history = [
+            agent._messages = sdata.get("messages", [])
+            agent._turns = [
                 Turn(
                     role=t["role"],
                     question=t.get("question", ""),
@@ -97,7 +98,7 @@ class SessionManager:
                     ],
                     finish_answer=t.get("finish_answer"),
                 )
-                for t in sdata.get("turns_history", [])
+                for t in sdata.get("turns", [])
             ]
             self._sessions[sid] = agent
 
