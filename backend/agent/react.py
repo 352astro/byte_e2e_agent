@@ -6,12 +6,12 @@ from typing import Any, AsyncIterator
 from agent.llm import HelloAgentsLLM
 from agent.plan_manager import PlanManager
 from agent.sandbox import SandBox
-from agent.tools.shell import Shell, get_platform_hint
+from agent.tools.shell import get_platform_hint
 from agent.tools.skill import get_skills_summary
 from agent.tools.subtask import SubTask
 from agent.tools.toolset import ToolSet
 from agent.turn import ToolStep, Turn
-from agent.utils._term import dim, error, info, step, success, tool, warn
+from agent.utils._term import dim, info, step, success, tool, warn
 
 # ── System prompt（不再注入 JSON schema）──────────────────
 
@@ -201,7 +201,9 @@ class ReActAgent:
             # 4. handle finish
             if output.finish_reason == "stop":
                 answer = output.content.strip() or "Done."
+                # Archive user question + assistant answer into LLM context
                 self._messages.append(self._question_msg)
+                self._messages.append({"role": "assistant", "content": answer})
                 self._question_msg = None
                 assist_turn.finish_answer = answer
                 yield {"type": "finish", "answer": answer}
@@ -353,6 +355,9 @@ class ReActAgent:
                 "type": "plan_rewrite",
                 "items": [it.model_dump() for it in action.items],
             }
+            assist_turn.tool_calls.append(
+                ToolStep(name=func_name, arguments=tool_params, result="plan rewritten")
+            )
             return
 
         if name == "PlanAdvance":
@@ -369,6 +374,13 @@ class ReActAgent:
                 "state": action.state,
                 "summary": f"item advanced to {action.state}",
             }
+            assist_turn.tool_calls.append(
+                ToolStep(
+                    name=func_name,
+                    arguments=tool_params,
+                    result=f"item advanced to {action.state}",
+                )
+            )
             return
 
         if name == "SubTask":
@@ -393,6 +405,13 @@ class ReActAgent:
                 }
             )
             yield {"type": "subtask_end", "result": sub_result_text}
+            assist_turn.tool_calls.append(
+                ToolStep(
+                    name=func_name,
+                    arguments=tool_params,
+                    result=sub_result_text,
+                )
+            )
             return
 
         # Other SandBox tools (Read, Write, Edit, Search, LoadSkill)
@@ -405,6 +424,9 @@ class ReActAgent:
             {"role": "tool", "tool_call_id": tool_call_id, "content": result_str}
         )
         yield {"type": "tool_result", "result": result_str}
+        assist_turn.tool_calls.append(
+            ToolStep(name=func_name, arguments=tool_params, result=result_str)
+        )
 
 
 # ── helpers ────────────────────────────────────────────────
