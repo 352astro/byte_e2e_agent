@@ -1,40 +1,33 @@
 """
 ReAct 智能体 — 交互式问答 CLI 入口。
 
-run() 不会在每次调用时清空 history，
-因此多轮对话自动继承上下文。
-
 用法:
     cd backend
     uv run python cli.py          # uv 用户
-    python cli.py                 # venv / pip 用户（需先激活环境）
+    python cli.py                 # venv / pip 用户
 """
 
+import asyncio
 import os
 
 from dotenv import load_dotenv
 
-from agent.utils._term import bold, dim, prompt, success, warn
 from agent.llm import HelloAgentsLLM
 from agent.react import ReActAgent
-from agent.tools.workspace import set_workspace_root
+from agent.sandbox import SandBox
+from agent.utils._term import bold, dim, prompt, success, warn
 
 try:
-    import readline  # 启用行编辑和历史记录（Unix）
+    import readline
 except ImportError:
     pass
 
-# ── 加载 .env ──────────────────────────────────────────
 load_dotenv()
 
-# ── 工作目录沙箱（默认 = 启动目录，可通过 AGENT_WORKSPACE 环境变量覆盖）
 _AGENT_WORKSPACE = os.environ.get("AGENT_WORKSPACE", os.getcwd())
-os.makedirs(_AGENT_WORKSPACE, exist_ok=True)
-set_workspace_root(_AGENT_WORKSPACE)
 
 
-def main() -> None:
-    # 1. 创建 LLM 客户端（从 .env 读取配置）
+async def async_main() -> None:
     try:
         llm = HelloAgentsLLM()
     except ValueError as e:
@@ -42,8 +35,8 @@ def main() -> None:
         print(dim("请检查 backend/.env 文件是否已配置。"))
         return
 
-    # 2. 创建 ReAct 智能体（单例，history 跨轮持久）
-    agent = ReActAgent(llm_client=llm)
+    sandbox = SandBox(_AGENT_WORKSPACE)
+    agent = ReActAgent(llm_client=llm, sandbox=sandbox)
 
     print(bold("=" * 50))
     print(bold("  ReAct Agent  --  Interactive Q&A"))
@@ -70,14 +63,16 @@ def main() -> None:
             break
 
         if question.lower() in ("/clear", "clear"):
-            agent.clear()
+            await agent.clear()
             print(f"  {warn('[Clear]')} 上下文已重置。\n")
             continue
 
         print()
-        answer = agent.run(question, max_steps=50)
+        answer = await agent.run(question, max_steps=50)
         print(f"\n  {success('Answer')}  {answer}\n")
+
+    await sandbox.shutdown()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(async_main())

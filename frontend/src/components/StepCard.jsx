@@ -26,14 +26,12 @@ export default function StepCard({
             </details>
           )}
 
-          {/* Action (LLM tool-call output) */}
+          {/* Response (LLM text output) */}
           {step.action && (
-            <details className="action-block" open={isLatest}>
-              <summary className="action-summary">
-                {"\u26A1"} Action ({step.action.length} chars)
-              </summary>
-              <pre className="action-text">{step.action}</pre>
-            </details>
+            <div className="response-block">
+              <span className="response-label">{"\uD83D\uDCAC"} Response</span>
+              <pre className="response-text">{step.action}</pre>
+            </div>
           )}
 
           {/* Tool events — delegated to specialized renderers */}

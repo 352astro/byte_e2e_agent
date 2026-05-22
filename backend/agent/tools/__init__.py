@@ -7,7 +7,6 @@ Tool / SubTool 等旧式声明已移除。
 
 from agent.tools.base import BaseTool
 from agent.tools.edit import Edit, EditOp
-from agent.tools.finish import Finish
 from agent.tools.plan import PlanAdvance, PlanItem, PlanRewrite
 from agent.tools.read import Read
 from agent.tools.search import Search
@@ -15,13 +14,11 @@ from agent.tools.shell import Shell
 from agent.tools.skill import LoadSkill
 from agent.tools.subtask import SubTask
 from agent.tools.toolset import ToolSet
-from agent.tools.workspace import get_workspace_root, set_workspace_root
 from agent.tools.write import Write
 
 # ── 默认工具注册表 ──────────────────────────────────────
 
 _ALL_TOOL_CLASSES: list[type[BaseTool]] = [
-    Finish,
     Search,
     Shell,
     Read,
@@ -43,7 +40,6 @@ __all__ = [
     "BaseTool",
     "Edit",
     "EditOp",
-    "Finish",
     "PlanAdvance",
     "PlanItem",
     "LoadSkill",
@@ -55,6 +51,4 @@ __all__ = [
     "ToolSet",
     "Write",
     "get_all_tool_classes",
-    "get_workspace_root",
-    "set_workspace_root",
 ]

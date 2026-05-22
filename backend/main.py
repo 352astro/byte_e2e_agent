@@ -9,17 +9,12 @@ from pydantic import BaseModel, Field
 
 from agent.llm import HelloAgentsLLM
 from agent.react import ReActAgent
-from agent.tools.workspace import set_workspace_root
+from agent.sandbox import SandBox
 
-# ── 加载 .env ──────────────────────────────────────────
 load_dotenv()
 
-# ── 工作目录沙箱（默认 = 启动目录，可通过 AGENT_WORKSPACE 环境变量覆盖）
+# ── workspace（可通过 AGENT_WORKSPACE 环境变量覆盖） ────
 _AGENT_WORKSPACE = os.environ.get("AGENT_WORKSPACE", os.getcwd())
-os.makedirs(_AGENT_WORKSPACE, exist_ok=True)
-set_workspace_root(_AGENT_WORKSPACE)
-
-# ── FastAPI app ────────────────────────────────────────
 
 app = FastAPI(title="Byte E2E Agent Backend")
 
@@ -42,28 +37,27 @@ def hello() -> dict[str, str]:
     return {"message": "Hello World from FastAPI!", "status": "ok"}
 
 
-# ── Agent SSE 流式端点 ─────────────────────────────────
-
-
 class AgentStreamRequest(BaseModel):
     question: str = Field(..., description="Question or task for the agent")
     max_steps: int = Field(default=50, ge=1, le=200, description="Max reasoning steps")
 
 
 @app.post("/api/agent/stream")
-def agent_stream(req: AgentStreamRequest):
-    """Run the ReAct agent and stream events via Server-Sent Events."""
-
-    def event_generator():
+async def agent_stream(req: AgentStreamRequest):
+    async def event_generator():
         try:
             llm = HelloAgentsLLM()
         except ValueError as e:
             yield f"data: {json.dumps({'type': 'error', 'message': f'LLM not configured: {e}'})}\n\n"
             return
 
-        agent = ReActAgent(llm_client=llm)
-        for event in agent.run_stream(req.question, max_steps=req.max_steps):
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        sandbox = SandBox(_AGENT_WORKSPACE)
+        agent = ReActAgent(llm_client=llm, sandbox=sandbox)
+        try:
+            async for event in agent.run_stream(req.question, max_steps=req.max_steps):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        finally:
+            await sandbox.shutdown()
 
     return StreamingResponse(
         event_generator(),

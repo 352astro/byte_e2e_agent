@@ -1,37 +1,86 @@
 """
-ToolSet — 动态工具集。
+ToolSet — 动态工具集，为 OpenAI 原生 function calling 服务。
 
-替代硬编码的 Tool / SubTool 联合类型。通过 Python 动态类型能力
-在运行时生成 Pydantic discriminated union，支持按需排除工具（如子 agent 禁用 SubTask）。
+替代旧的 Pydantic discriminated union 方案。
+每个工具生成一个 OpenAI function definition，
+通过函数名分发反序列化。
 
 用法:
-    toolset = ToolSet([Finish, Shell, Read, Write, ...])
-    adapter = toolset.adapter          # TypeAdapter — 用于 validate_json()
-    schema  = toolset.json_schema      # dict — 注入 system prompt
-
-    restricted = toolset.without(SubTask)  # 子 agent 用
+    ts = ToolSet([Shell, Read, Write, ...])
+    ts.openai_tools            # → list[dict] 传给 API
+    ts.parse(name, arguments)  # → BaseTool 实例
+    ts.without(SubTask)        # → 新 ToolSet
 """
 
 from __future__ import annotations
 
-import json
-from typing import Union
-
-from pydantic import Field, TypeAdapter
-from typing_extensions import Annotated
-
 from agent.tools.base import BaseTool
+
+# ── Pydantic schema → OpenAI parameters ────────────────────
+
+_SKIP_TOP = frozenset({"title", "description", "$defs", "$schema"})
+
+
+def _strip_pydantic_noise(schema: dict) -> dict:
+    """递归去掉 Pydantic JSON Schema 中 OpenAI 不需要的顶层字段。"""
+    if isinstance(schema, dict):
+        return {
+            k: _strip_pydantic_noise(v) for k, v in schema.items() if k not in _SKIP_TOP
+        }
+    if isinstance(schema, list):
+        return [_strip_pydantic_noise(i) for i in schema]
+    return schema
+
+
+def _ensure_strict(schema: dict) -> dict:
+    """为所有 object 节点添加 required 和 additionalProperties: false（strict 模式）。"""
+    if schema.get("type") == "object" and "properties" in schema:
+        props = schema["properties"]
+        if isinstance(props, dict) and props:
+            schema["required"] = list(props.keys())
+        schema["additionalProperties"] = False
+    for v in schema.values():
+        if isinstance(v, dict):
+            _ensure_strict(v)
+        elif isinstance(v, list):
+            for item in v:
+                if isinstance(item, dict):
+                    _ensure_strict(item)
+    return schema
+
+
+def _build_function_def(cls: type[BaseTool]) -> dict:
+    """从 Pydantic 工具类生成单个 OpenAI function definition。"""
+    raw = cls.model_json_schema()
+    # 去掉 kind 字段（函数名已承担分发职责）
+    if "properties" in raw and "kind" in raw["properties"]:
+        del raw["properties"]["kind"]
+    if "required" in raw:
+        raw["required"] = [r for r in raw["required"] if r != "kind"]
+    params = _ensure_strict(_strip_pydantic_noise(raw))
+    return {
+        "type": "function",
+        "function": {
+            "name": cls.function_name(),
+            "description": (cls.__doc__ or "").strip().split("\n")[0],
+            "parameters": params,
+        },
+    }
+
+
+# ── ToolSet ────────────────────────────────────────────────
 
 
 class ToolSet:
-    """一组工具的集合，可动态生成 Pydantic 鉴别联合类型。"""
+    """按名称注册工具的集合，生成 OpenAI function 列表。"""
 
     def __init__(self, tools: list[type[BaseTool]]) -> None:
         if not tools:
             raise ValueError("ToolSet must contain at least one tool.")
         self._tools: tuple[type[BaseTool], ...] = tuple(tools)
-        self._adapter: TypeAdapter | None = None
-        self._schema: dict | None = None
+        self._registry: dict[str, type[BaseTool]] = {
+            t.function_name(): t for t in tools
+        }
 
     # ── 属性 ──────────────────────────────────────────
 
@@ -40,29 +89,21 @@ class ToolSet:
         return self._tools
 
     @property
-    def adapter(self) -> TypeAdapter:
-        """返回可校验任意一个工具 JSON 的 TypeAdapter。"""
-        if self._adapter is None:
-            union = Union[self._tools]  # type: ignore[valid-type]
-            self._adapter = TypeAdapter(Annotated[union, Field(discriminator="kind")])
-        return self._adapter
+    def openai_tools(self) -> list[dict]:
+        """生成 OpenAI / DeepSeek tools 参数列表。"""
+        return [_build_function_def(t) for t in self._tools]
 
-    @property
-    def json_schema(self) -> dict:
-        """返回工具联合类型的 JSON Schema（用于注入 system prompt）。"""
-        if self._schema is None:
-            self._schema = self.adapter.json_schema()
-        return self._schema
+    # ── 工具操作 ──────────────────────────────────────
 
-    @property
-    def json_schema_str(self) -> str:
-        """返回格式化的 JSON Schema 字符串。"""
-        return json.dumps(self.json_schema, indent=2, ensure_ascii=False)
-
-    # ── 工具集操作 ────────────────────────────────────
+    def parse(self, name: str, arguments: str) -> BaseTool:
+        """根据函数名和 JSON arguments 反序列化为工具实例。"""
+        cls = self._registry.get(name)
+        if cls is None:
+            raise KeyError(f"Unknown tool: {name}. Available: {list(self._registry)}")
+        return cls.model_validate_json(arguments)
 
     def without(self, *exclude: type[BaseTool]) -> "ToolSet":
-        """返回一个新 ToolSet，排除指定工具。"""
+        """返回排除指定工具的新 ToolSet。"""
         return ToolSet([t for t in self._tools if t not in exclude])
 
     def __contains__(self, tool_cls: type[BaseTool]) -> bool:

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal
 
 from pydantic import Field
 
@@ -118,14 +117,12 @@ class LoadSkill(BaseTool):
     技能的简要信息已在 system prompt 中列出。
     """
 
-    kind: Literal["LoadSkill"] = "LoadSkill"
-
     name: str = Field(
         ...,
         description="Name of the skill to load (directory name under skills/).",
     )
 
-    def execute(self) -> str:
+    async def execute(self, sandbox=None) -> str:
         """读取并返回 Skill.md 的完整内容。"""
         skill = get_skill(self.name)
         if skill is None:

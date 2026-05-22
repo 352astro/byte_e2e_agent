@@ -136,6 +136,31 @@
     overflow-y: auto;
 }
 
+/* ── Response (LLM text output) ─────────────── */
+
+.response-block {
+    margin-bottom: 10px;
+}
+.response-label {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: #666;
+    display: block;
+    margin-bottom: 2px;
+}
+.response-text {
+    margin: 4px 0 0 0;
+    padding: 8px 10px;
+    background: #f9fafb;
+    border-radius: 4px;
+    color: #333;
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 160px;
+    overflow-y: auto;
+}
+
 /* ── Action (LLM tool-call output) ──────────── */
 
 .action-block {
@@ -176,6 +201,27 @@
 
 .event .label {
     font-weight: 600;
+}
+
+.tool-stream {
+    color: #9333ea;
+    margin-bottom: 6px;
+    font-size: 0.83rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.tool-stream .label {
+    font-weight: 600;
+}
+.tool-stream-progress {
+    color: #999;
+    font-size: 0.78rem;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
 }
 
 .tool-call {

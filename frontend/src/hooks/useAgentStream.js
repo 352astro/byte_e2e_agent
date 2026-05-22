@@ -65,6 +65,27 @@ export default function useAgentStream() {
           updateCurrentStep((s) => ({ ...s, actionFinal: true }));
           break;
 
+        case "tool_call_stream":
+          updateCurrentStep((s) => {
+            const events = [...s.events];
+            const last = events[events.length - 1];
+            if (last && last.type === "tool_stream") {
+              events[events.length - 1] = {
+                ...last,
+                name: event.name || last.name,
+                argsLen: event.args_len,
+              };
+            } else {
+              events.push({
+                type: "tool_stream",
+                name: event.name || "",
+                argsLen: event.args_len,
+              });
+            }
+            return { ...s, events };
+          });
+          break;
+
         case "tool_call":
         case "tool_result":
         case "plan_rewrite":

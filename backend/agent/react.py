@@ -1,47 +1,37 @@
-# ReAct 智能体 — 核心循环
-import json
-from typing import Any
-
-from pydantic import ValidationError
+# ReAct 智能体 — 核心循环（原生 tool_calls）
+import asyncio
+from typing import Any, AsyncIterator
 
 from agent.llm import HelloAgentsLLM
 from agent.plan_manager import PlanManager
-from agent.terminal import (
-    PersistentTerminal,
-    reset_terminal,
-    set_terminal,
-)
-from agent.tools.base import BaseTool
-from agent.tools.finish import Finish
-from agent.tools.plan import PlanAdvance, PlanRewrite
+from agent.sandbox import SandBox
 from agent.tools.shell import Shell, get_platform_hint
 from agent.tools.skill import get_skills_summary
 from agent.tools.subtask import SubTask
 from agent.tools.toolset import ToolSet
-from agent.tools.workspace import get_workspace_root
-from agent.utils._json import safe_validate_json
 from agent.utils._term import dim, error, info, step, success, tool, warn
 
-# ── System prompt ────────────────────────────────────────
+# ── System prompt（不再注入 JSON schema）──────────────────
 
 SYSTEM_PROMPT = """\
 You are an intelligent assistant capable of using external tools and following a plan.
-You MUST respond with a single tool-call JSON object, choosing from the schema below.
-Output ONLY the tool JSON — no wrapper, no markdown fences, no extra text.
-
-## Response JSON Schema (defines all available tools and their parameters)
-{schema}
+Use the provided functions to interact with the system.
 
 ## Rules
-- Pick the tool that best fits the current situation.
+- Pick the function that best fits the current situation.
 - PlanRewrite — replace the entire plan (CAUTION: discards all progress)
 - PlanAdvance — move the current active plan item forward
 - SubTask    — delegate to a fresh sub-agent
-- Finish     — conclude with final answer (no more tools needed)
 - Shell / Read / Write / Edit / Search / LoadSkill — executable tools
 - {platform_hint}
 - {skills_summary}
 """
+
+
+def _default_toolset() -> ToolSet:
+    from agent.tools import get_all_tool_classes as _all
+
+    return ToolSet(_all())
 
 
 # ============================================================
@@ -50,21 +40,20 @@ Output ONLY the tool JSON — no wrapper, no markdown fences, no extra text.
 
 
 class ReActAgent:
-    """ReAct agent with dynamic ToolSet and proper role-based message list."""
+    """ReAct agent with native function calling and per-instance SandBox."""
 
     def __init__(
         self,
         llm_client: HelloAgentsLLM,
         toolset: ToolSet | None = None,
+        sandbox: SandBox | None = None,
     ) -> None:
         self.llm_client = llm_client
         self._toolset = toolset or _default_toolset()
+        self._sandbox = sandbox or SandBox()
         self._system_msg: dict | None = None
         self._question_msg: dict | None = None
         self._turns: list[dict] = []
-        self._terminal: PersistentTerminal | None = None
-
-    # ── Backward-compat history property (for CLI /clear) ──
 
     @property
     def history(self) -> list[dict]:
@@ -77,127 +66,92 @@ class ReActAgent:
         else:
             self._turns = value
 
-    def clear(self) -> None:
-        """Reset all conversation state."""
+    async def clear(self) -> None:
         self._system_msg = None
         self._question_msg = None
         self._turns = []
-        if self._terminal is not None:
-            reset_terminal()
-            self._terminal = None
+        await self._sandbox.shutdown()
 
-    # ── CLI loop (thin wrapper over run_stream) ────────────
+    # ── CLI loop ─────────────────────────────────────────
 
-    def run(self, question: str, max_steps: int = 10) -> str:
-        """Run the ReAct loop (CLI mode)."""
+    async def run(self, question: str, max_steps: int = 10) -> str:
         answer: str | None = None
         in_reasoning = False
 
-        for event in self.run_stream(question, max_steps):
+        async for event in self.run_stream(question, max_steps):
             kind = event["type"]
-
             if kind == "step_start":
                 print(step(f"--- Step {event['step']} ---"))
-
             elif kind == "reasoning_token":
                 if not in_reasoning:
                     print(dim("  [Deep Think]"))
                     in_reasoning = True
                 print(dim(event["token"]), end="", flush=True)
-
             elif kind == "thought_token":
                 if in_reasoning:
                     print()
                     in_reasoning = False
                 print(event["token"], end="", flush=True)
-
             elif kind == "thought_end":
                 print()
-
             elif kind == "tool_call":
                 print(f"{tool('[Tool]')} {event['tool']}")
-
             elif kind == "terminal_chunk":
                 print(event["chunk"], end="", flush=True)
-
             elif kind == "tool_result":
                 print(event["result"])
-
             elif kind == "plan_rewrite":
                 items = event.get("items", [])
                 desc = items[0]["description"] if items else "?"
                 print(info(f"[Plan] Rewrite: {len(items)} item(s), first: {desc}"))
-
             elif kind == "plan_advance":
                 print(info(f"[Plan] Advance: {event.get('summary', '?')}"))
-
             elif kind == "subtask_start":
-                print(
-                    info(
-                        f"[SubTask] launching subagent "
-                        f"(max {event['max_steps']} steps): "
-                        f"{event['prompt'][:80]}..."
-                    )
-                )
-
+                print(info(f"[SubTask] launching: {event['prompt'][:80]}..."))
             elif kind == "subtask_end":
-                result = event.get("result", "")
-                print(info(f"[SubTask] result: {result[:120]}..."))
-
+                print(info(f"[SubTask] result: {event.get('result', '')[:120]}..."))
             elif kind == "finish":
-                if event["answer"] == (
-                    "Maximum steps reached; could not produce a final answer."
-                ):
-                    answer = event["answer"]
-                    print(warn(event["answer"]))
+                answer = event["answer"]
+                if answer == "Maximum steps reached; could not produce a final answer.":
+                    print(warn(answer))
                 else:
-                    answer = event["answer"]
                     print(f"{success('[Done]')} {answer}")
                 if in_reasoning:
                     print()
                     in_reasoning = False
-
             elif kind == "error":
                 print(warn(event["message"]))
 
         return answer or "Maximum steps reached; could not produce a final answer."
 
-    # ── Streaming loop (SSE / Web UI) ────────────────────
+    # ── Streaming loop ──────────────────────────────────
 
-    def run_stream(self, question: str, max_steps: int = 10):
-        """Run the ReAct loop and yield structured event dicts for SSE streaming."""
+    async def run_stream(
+        self, question: str, max_steps: int = 10
+    ) -> AsyncIterator[dict[str, Any]]:
         plan_manager = PlanManager()
         current_step = 0
 
-        # ── initialise system message once ────────────────
+        # init system message once
         if self._system_msg is None:
-            schema = self._toolset.json_schema_str
             self._system_msg = {
                 "role": "system",
                 "content": SYSTEM_PROMPT.format(
-                    schema=schema,
                     platform_hint=get_platform_hint(),
                     skills_summary=get_skills_summary(),
                 ),
             }
 
-        # ── archive previous question ─────────────────────
+        # archive previous question
         if self._question_msg is not None:
             self._turns.append(self._question_msg)
         self._question_msg = {"role": "user", "content": question}
 
-        # ── ensure persistent terminal ────────────────────
-        if self._terminal is None or not self._terminal.alive:
-            self._terminal = PersistentTerminal()
-            self._terminal.start(get_workspace_root())
-            set_terminal(self._terminal)
-
-        # ── main loop ─────────────────────────────────────
         while current_step < max_steps:
             current_step += 1
             yield {"type": "step_start", "step": current_step}
 
-            # 1. build message list
+            # 1. build messages
             step_messages: list[dict] = [
                 self._system_msg,
                 self._question_msg,
@@ -209,168 +163,247 @@ class ReActAgent:
                     {"role": "user", "content": f"## Current Plan\n{plan_str}"}
                 )
 
-            # 2. call LLM (streaming)
-            full_text_parts: list[str] = []
+            # 2. call LLM with native tools
+            tools = self._toolset.openai_tools
+            content_parts: list[str] = []
             reasoning_parts: list[str] = []
-            for ev in self.llm_client.think_stream(messages=step_messages):
+            tool_calls_raw: list[dict] = []
+            finish_reason: str | None = None
+
+            async for ev in self.llm_client.think_stream(
+                messages=step_messages, tools=tools
+            ):
                 if ev["kind"] == "reasoning":
                     yield {"type": "reasoning_token", "token": ev["token"]}
                     reasoning_parts.append(ev["token"])
-                else:
+                elif ev["kind"] == "content":
                     yield {"type": "thought_token", "token": ev["token"]}
-                    full_text_parts.append(ev["token"])
+                    content_parts.append(ev["token"])
+                elif ev["kind"] == "tool_call_chunk":
+                    tc = ev["tool_call"]
+                    # Accumulate tool call chunks
+                    idx = tc.get("index", 0)
+                    while len(tool_calls_raw) <= idx:
+                        tool_calls_raw.append(
+                            {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+                        )
+                    if tc.get("id"):
+                        tool_calls_raw[idx]["id"] = tc["id"]
+                    if tc.get("function", {}).get("name"):
+                        tool_calls_raw[idx]["function"]["name"] += tc["function"][
+                            "name"
+                        ]
+                    if tc.get("function", {}).get("arguments"):
+                        tool_calls_raw[idx]["function"]["arguments"] += tc["function"][
+                            "arguments"
+                        ]
+                    # Stream progress to frontend
+                    yield {
+                        "type": "tool_call_stream",
+                        "index": idx,
+                        "name": tc.get("function", {}).get("name") or None,
+                        "args_len": len(tc.get("function", {}).get("arguments", "")),
+                    }
+                elif ev["kind"] == "finish_reason":
+                    finish_reason = ev["finish_reason"]
+
             yield {"type": "thought_end"}
+            content_text = "".join(content_parts)
 
-            response_text = "".join(full_text_parts)
-
-            if not response_text.strip():
-                yield {"type": "error", "message": "LLM returned empty response."}
-                break
-
-            # 3. parse — directly into tool via TypeAdapter (with json-repair)
-            try:
-                action = safe_validate_json(response_text, self._toolset.adapter)
-            except ValidationError as e:
-                self._turns.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "Your last output did not conform to the JSON Schema. "
-                            f"Please follow the schema strictly. Error: {e}"
-                        ),
-                    }
-                )
-                yield {"type": "error", "message": f"JSON parse failed: {e}"}
-                continue
-
-            # 4. record assistant message
-            assistant_msg: dict = {"role": "assistant", "content": response_text}
-            if reasoning_parts:
-                assistant_msg["reasoning_content"] = "".join(reasoning_parts)
-            self._turns.append(assistant_msg)
-
-            # 5. dispatch action
-            if isinstance(action, PlanRewrite):
-                plan_manager.rewrite(action.items)
-                yield {
-                    "type": "plan_rewrite",
-                    "items": [it.model_dump() for it in action.items],
-                }
-                continue
-
-            if isinstance(action, PlanAdvance):
-                plan_manager.advance(action.state)
-                yield {
-                    "type": "plan_advance",
-                    "state": action.state,
-                    "summary": f"item advanced to {action.state}",
-                }
-                continue
-
-            if isinstance(action, SubTask):
-                yield {
-                    "type": "subtask_start",
-                    "prompt": action.prompt,
-                    "max_steps": action.max_steps,
-                }
-                sub_agent = ReActAgent(
-                    self.llm_client,
-                    toolset=self._toolset.without(SubTask),
-                )
-                sub_result = sub_agent.run(
-                    question=action.prompt,
-                    max_steps=action.max_steps,
-                )
-                self._turns.append(
-                    {
-                        "role": "user",
-                        "content": f"SubTask completed. Result: {sub_result}",
-                    }
-                )
-                yield {"type": "subtask_end", "result": sub_result}
-                continue
-
-            if isinstance(action, Finish):
-                answer = action.answer
+            # 3. handle finish
+            if finish_reason == "stop":
+                answer = content_text.strip() or "Done."
                 self._turns.append(self._question_msg)
                 self._question_msg = None
                 yield {"type": "finish", "answer": answer}
                 return
 
-            # -- regular tool --
-            tool_name: str = getattr(action, "kind", "?")
-            try:
-                tool_params = action.model_dump(exclude={"kind"})
-            except Exception:
-                tool_params = {}
-            yield {"type": "tool_call", "tool": tool_name, "params": tool_params}
+            # 4. handle tool_calls
+            if not tool_calls_raw:
+                yield {
+                    "type": "error",
+                    "message": "LLM returned no tool_calls and no content.",
+                }
+                break
 
-            # Shell: streaming terminal output
-            if isinstance(action, Shell):
-                output_parts: list[str] = []
+            # Build assistant message with tool_calls
+            assistant_msg: dict = {
+                "role": "assistant",
+                "content": content_text or None,
+                "tool_calls": tool_calls_raw,
+            }
+            if reasoning_parts:
+                assistant_msg["reasoning_content"] = "".join(reasoning_parts)
+            self._turns.append(assistant_msg)
+
+            # 5. dispatch each tool call
+            for tc in tool_calls_raw:
+                func_name = tc["function"]["name"]
+                func_args = tc["function"]["arguments"]
+                tool_call_id = tc["id"]
+                tool_params = _safe_json_loads(func_args)
+
+                # Emit tool_call event (with kind for frontend)
+                kind_val = _get_kind(func_name)
+                yield {
+                    "type": "tool_call",
+                    "tool": kind_val or func_name,
+                    "params": tool_params,
+                }
+
+                # Parse into Pydantic model
                 try:
-                    for chunk in self._terminal.run_stream(
+                    action = self._toolset.parse(func_name, func_args)
+                except Exception as exc:
+                    result = f"Error parsing {func_name}: {exc}"
+                    self._turns.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "content": result,
+                        }
+                    )
+                    yield {"type": "tool_result", "result": result}
+                    continue
+
+                # ── Dispatch by type ──────────────────
+                if func_name == "Shell":
+                    # Shell streaming: yield terminal_chunk events inline
+                    output_parts = []
+                    async for chunk in self._sandbox.stream_shell(
                         action.command, action.timeout_ms
                     ):
                         output_parts.append(chunk)
                         yield {"type": "terminal_chunk", "chunk": chunk}
-                    exit_code = self._terminal._last_exit_code
-                except Exception as exc:
-                    output_parts = [f"Error: {exc}"]
-                    exit_code = -1
-                raw_output = "".join(output_parts)
-                result = (
-                    f"{raw_output.rstrip()}\n[exit code: {exit_code}]"
-                    if exit_code != 0
-                    else raw_output.rstrip() or "(no output)"
-                )
-                # terminal_chunk already streamed output; skip duplicate tool_result
-                self._turns.append(
-                    {
-                        "role": "user",
-                        "content": f"Tool Shell returned:\n{result}",
-                    }
-                )
-                continue
+                    exit_code = self._sandbox.terminal._last_exit_code
+                    raw = "".join(output_parts)
+                    result_str = (
+                        f"{raw.rstrip()}\n[exit code: {exit_code}]"
+                        if exit_code != 0
+                        else raw.rstrip() or "(no output)"
+                    )
+                    self._turns.append({
+                        "role": "tool", "tool_call_id": tool_call_id,
+                        "content": result_str,
+                    })
+                    continue
 
-            # Other tools: call execute()
-            try:
-                fn = getattr(action, "execute", None)
-                if callable(fn):
-                    result = fn()
-                else:
-                    result = f"Error: tool '{tool_name}' does not implement execute()"
-            except Exception as exc:
-                result = f"Error: {exc}"
-
-            yield {"type": "tool_result", "result": result}
-            self._turns.append(
-                {
-                    "role": "user",
-                    "content": f"Tool {tool_name} returned:\n{result}",
-                }
-            )
+                result, should_return = await self._dispatch(
+                    action, tool_call_id, plan_manager, question
+                )
+                if result is not None:
+                    yield result
+                if should_return:
+                    return
 
         yield {
             "type": "finish",
             "answer": "Maximum steps reached; could not produce a final answer.",
         }
 
+    # ── Tool dispatch ────────────────────────────────────
 
-# ── Default toolset factory ───────────────────────────────
+    async def _dispatch(self, action, tool_call_id, plan_manager, question):
+        """Return (extra_event | None, should_return_bool)."""
+        name = action.function_name()
+
+        # Plan
+        if name == "PlanRewrite":
+            plan_manager.rewrite(action.items)
+            self._turns.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": "plan rewritten",
+                }
+            )
+            return (
+                {
+                    "type": "plan_rewrite",
+                    "items": [it.model_dump() for it in action.items],
+                },
+                False,
+            )
+
+        if name == "PlanAdvance":
+            plan_manager.advance(action.state)
+            self._turns.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": "plan advanced",
+                }
+            )
+            return (
+                {
+                    "type": "plan_advance",
+                    "state": action.state,
+                    "summary": f"item advanced to {action.state}",
+                },
+                False,
+            )
+
+        # SubTask
+        if name == "SubTask":
+            yield_event = {
+                "type": "subtask_start",
+                "prompt": action.prompt,
+                "max_steps": action.max_steps,
+            }
+            sub_agent = ReActAgent(
+                self.llm_client,
+                toolset=self._toolset.without(SubTask),
+                sandbox=self._sandbox,
+            )
+            sub_result_text = await sub_agent.run(
+                question=action.prompt, max_steps=action.max_steps
+            )
+            self._turns.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": f"SubTask completed. Result: {sub_result_text}",
+                }
+            )
+            return (
+                {"type": "subtask_end", "result": sub_result_text},
+                False,
+            )
+
+        # Shell: streaming — handle inline for terminal_chunk events
+        if name == "Shell":
+            return ("__SHELL_STREAMING__", False)
+
+        # Other SandBox tools
+        try:
+            result_str = await action.execute(sandbox=self._sandbox)
+        except Exception as exc:
+            result_str = f"Error: {exc}"
+
+        self._turns.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": result_str,
+            }
+        )
+        return ({"type": "tool_result", "result": result_str}, False)
 
 
-def _default_toolset() -> ToolSet:
-    from agent.tools import get_all_tool_classes as _all
-
-    return ToolSet(_all())
 
 
-# ============================================================
-# Demo
-# ============================================================
-if __name__ == "__main__":
-    ts = _default_toolset()
-    print(f"ToolSet: {ts}")
-    print(f"Schema keys: {list(ts.json_schema.keys())}")
-    print("All demo tests passed!")
+# ── helpers ────────────────────────────────────────────────
+
+
+def _safe_json_loads(s: str) -> dict:
+    import json
+
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        return {}
+
+
+def _get_kind(func_name: str) -> str:
+    """Map function name back to kind string if different."""
+    return func_name  # our function names ARE the kind values

@@ -55,8 +55,6 @@ class PlanRewrite(BaseTool):
     step-by-step progress.
     """
 
-    kind: Literal["PlanRewrite"] = "PlanRewrite"
-
     items: list[PlanItem] = Field(
         ...,
         description=(
@@ -83,8 +81,6 @@ class PlanAdvance(BaseTool):
       todo / failed  ->  in_progress / done / failed
       in_progress     ->  done / failed
     """
-
-    kind: Literal["PlanAdvance"] = "PlanAdvance"
 
     state: State = Field(
         ...,

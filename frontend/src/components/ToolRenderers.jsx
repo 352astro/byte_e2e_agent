@@ -10,6 +10,19 @@ export default function renderToolEvent(ev, evIdx, stepIdx, expandResult) {
     );
   }
 
+  // ── tool_stream (in-progress) ──────────────────
+  if (ev.type === "tool_stream") {
+    const name = ev.name || "…";
+    return (
+      <div key={evIdx} className="event tool-stream">
+        <span className="label">{"\u23F3"} {name}</span>
+        <span className="tool-stream-progress">
+          …writing {ev.argsLen} tokens
+        </span>
+      </div>
+    );
+  }
+
   // ── tool_call ──────────────────────────────────
   if (ev.type === "tool_call") {
     // Shell: render command as styled bash block with timeout badge

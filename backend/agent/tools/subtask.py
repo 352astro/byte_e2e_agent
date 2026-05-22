@@ -5,7 +5,6 @@ SubTask 不走 execute()——由 ReActAgent 循环拦截，
 使用受限工具集（无 SubTask）启动一个新的 ReActAgent。
 """
 
-from typing import Literal
 
 from pydantic import Field
 
@@ -18,8 +17,6 @@ class SubTask(BaseTool):
 
     子智能体完成后，其最终答案作为本工具的结果返回。
     """
-
-    kind: Literal["SubTask"] = "SubTask"
 
     prompt: str = Field(
         ...,
