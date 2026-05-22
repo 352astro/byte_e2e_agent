@@ -9,6 +9,7 @@ from agent.tools.shell import Shell, get_platform_hint
 from agent.tools.skill import get_skills_summary
 from agent.tools.subtask import SubTask
 from agent.tools.toolset import ToolSet
+from agent.turn import ToolStep, Turn
 from agent.utils._term import dim, error, info, step, success, tool, warn
 
 # ── System prompt（不再注入 JSON schema）──────────────────
@@ -54,22 +55,27 @@ class ReActAgent:
         self._system_msg: dict | None = None
         self._question_msg: dict | None = None
         self._turns: list[dict] = []
+        self._turns_history: list[Turn] = []
 
     @property
     def history(self) -> list[dict]:
         return self._turns
 
     @history.setter
-    def history(self, value: list) -> None:
+    async def history(self, value: list) -> None:
         if not value:
-            self.clear()
+            await self.clear()
         else:
             self._turns = value
+
+    def get_history(self) -> list[dict]:
+        return [_turn_to_dict(t) for t in self._turns_history]
 
     async def clear(self) -> None:
         self._system_msg = None
         self._question_msg = None
         self._turns = []
+        self._turns_history = []
         await self._sandbox.shutdown()
 
     # ── CLI loop ─────────────────────────────────────────
@@ -146,6 +152,7 @@ class ReActAgent:
         if self._question_msg is not None:
             self._turns.append(self._question_msg)
         self._question_msg = {"role": "user", "content": question}
+        self._turns_history.append(Turn(role="user", question=question))
 
         while current_step < max_steps:
             current_step += 1
@@ -185,7 +192,11 @@ class ReActAgent:
                     idx = tc.get("index", 0)
                     while len(tool_calls_raw) <= idx:
                         tool_calls_raw.append(
-                            {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+                            {
+                                "id": "",
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            }
                         )
                     if tc.get("id"):
                         tool_calls_raw[idx]["id"] = tc["id"]
@@ -210,15 +221,24 @@ class ReActAgent:
             yield {"type": "thought_end"}
             content_text = "".join(content_parts)
 
-            # 3. handle finish
+            # 3. build assistant Turn (before dispatch, so it exists for both stop and tool_calls)
+            assist_turn = Turn(
+                role="assistant",
+                reasoning="".join(reasoning_parts),
+                content=content_text,
+            )
+            self._turns_history.append(assist_turn)
+
+            # 4. handle finish
             if finish_reason == "stop":
                 answer = content_text.strip() or "Done."
                 self._turns.append(self._question_msg)
                 self._question_msg = None
+                assist_turn.finish_answer = answer
                 yield {"type": "finish", "answer": answer}
                 return
 
-            # 4. handle tool_calls
+            # 5. handle tool_calls
             if not tool_calls_raw:
                 yield {
                     "type": "error",
@@ -282,17 +302,34 @@ class ReActAgent:
                         if exit_code != 0
                         else raw.rstrip() or "(no output)"
                     )
-                    self._turns.append({
-                        "role": "tool", "tool_call_id": tool_call_id,
-                        "content": result_str,
-                    })
+                    self._turns.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "content": result_str,
+                        }
+                    )
+                    assist_turn.tool_calls.append(
+                        ToolStep(
+                            name=func_name, arguments=tool_params, result=result_str
+                        )
+                    )
                     continue
 
-                result, should_return = await self._dispatch(
+                result_event, should_return = await self._dispatch(
                     action, tool_call_id, plan_manager, question
                 )
-                if result is not None:
-                    yield result
+                if result_event is not None:
+                    yield result_event
+                    # Record tool result in Turn
+                    if result_event.get("type") == "tool_result":
+                        assist_turn.tool_calls.append(
+                            ToolStep(
+                                name=func_name,
+                                arguments=tool_params,
+                                result=result_event["result"],
+                            )
+                        )
                 if should_return:
                     return
 
@@ -390,8 +427,6 @@ class ReActAgent:
         return ({"type": "tool_result", "result": result_str}, False)
 
 
-
-
 # ── helpers ────────────────────────────────────────────────
 
 
@@ -407,3 +442,17 @@ def _safe_json_loads(s: str) -> dict:
 def _get_kind(func_name: str) -> str:
     """Map function name back to kind string if different."""
     return func_name  # our function names ARE the kind values
+
+
+def _turn_to_dict(t: Turn) -> dict:
+    return {
+        "role": t.role,
+        "question": t.question,
+        "reasoning": t.reasoning,
+        "content": t.content,
+        "tool_calls": [
+            {"name": ts.name, "arguments": ts.arguments, "result": ts.result}
+            for ts in t.tool_calls
+        ],
+        "finish_answer": t.finish_answer,
+    }

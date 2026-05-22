@@ -1,6 +1,12 @@
 import { RESULT_PREVIEW_LINES } from "../hooks/useAgentStream";
+import type { ToolEvent } from "../types";
 
-export default function renderToolEvent(ev, evIdx, stepIdx, expandResult) {
+export default function renderToolEvent(
+  ev: ToolEvent,
+  evIdx: number,
+  stepId: number,
+  expandResult: (stepId: number, evIdx: number) => void,
+): React.ReactNode {
   // ── Shell: terminal output ────────────────────
   if (ev.type === "terminal_stream") {
     return (
@@ -15,7 +21,9 @@ export default function renderToolEvent(ev, evIdx, stepIdx, expandResult) {
     const name = ev.name || "…";
     return (
       <div key={evIdx} className="event tool-stream">
-        <span className="label">{"\u23F3"} {name}</span>
+        <span className="label">
+          {"\u23F3"} {name}
+        </span>
         <span className="tool-stream-progress">
           …writing {ev.argsLen} tokens
         </span>
@@ -25,12 +33,11 @@ export default function renderToolEvent(ev, evIdx, stepIdx, expandResult) {
 
   // ── tool_call ──────────────────────────────────
   if (ev.type === "tool_call") {
-    // Shell: render command as styled bash block with timeout badge
     if (ev.tool === "Shell") {
-      const cmd = ev.params?.command || "";
-      const timeout = ev.params?.timeout_ms
-        ? `${Math.round(ev.params.timeout_ms / 1000)}s`
-        : null;
+      const cmd = (ev.params as { command?: string } | undefined)?.command || "";
+      const timeoutMs = (ev.params as { timeout_ms?: number } | undefined)
+        ?.timeout_ms;
+      const timeout = timeoutMs ? `${Math.round(timeoutMs / 1000)}s` : null;
       return (
         <div key={evIdx} className="event shell-call">
           <span className="label">{"\uD83D\uDD27"} Shell</span>
@@ -40,7 +47,6 @@ export default function renderToolEvent(ev, evIdx, stepIdx, expandResult) {
       );
     }
 
-    // Fallback: render params as formatted JSON
     return (
       <div key={evIdx} className="event tool-call">
         <span className="label">
@@ -66,7 +72,7 @@ export default function renderToolEvent(ev, evIdx, stepIdx, expandResult) {
         {truncated && (
           <button
             className="expand-btn"
-            onClick={() => expandResult(stepIdx, evIdx)}
+            onClick={() => expandResult(stepId, evIdx)}
           >
             Show all ({lines.length} lines)
           </button>
