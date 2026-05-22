@@ -1,27 +1,34 @@
 # Byte E2E Agent
 
-FastAPI 后端 + React (Vite) 前端。内含 ReAct 智能体模块，通过独立 CLI 启动。
+ReAct 智能体 + FastAPI 后端 + React (Vite) 前端。
 
 ## 项目结构
 
 ```
 byte_e2e_agent/
-├── start.sh                  # 一键启动前后端
+├── start.sh                   # 一键启动前后端
+├── docs/                      # 变更文档
 ├── backend/
-│   ├── main.py               # FastAPI 入口（Hello World 端点）
-│   ├── cli.py                # ReAct 智能体交互式 CLI
-│   ├── pyproject.toml        # 依赖声明（uv 用）
-│   ├── requirements.txt      # 依赖声明（pip 用，由 uv export 生成）
-│   ├── .env.example          # 环境变量模板
-│   └── agent/                # ReAct 智能体模块
-│       ├── llm.py            # LLM 客户端（OpenAI 兼容）
-│       ├── react.py          # ReAct 循环 + Prompt 模板
-│       ├── plan_manager.py   # 计划状态机
-│       ├── terminal.py       # 持久 Shell 会话
-│       └── tools/            # 工具集（Shell/Read/Write/Edit/Search/SubTask）
+│   ├── main.py                # FastAPI 入口 + SSE 流式 Agent 端点
+│   ├── cli.py                 # ReAct 智能体交互式 CLI
+│   ├── pyproject.toml         # 依赖声明（uv 用）
+│   ├── requirements.txt       # 依赖声明（pip 用）
+│   ├── .env.example           # 环境变量模板
+│   └── agent/
+│       ├── utils/             # 工具模块（JSON 修复、终端 ANSI）
+│       ├── skills/            # Skill 可插拔知识模块
+│       ├── tools/             # 工具系统（Shell/Read/Write/Edit/Search/…）
+│       │   └── toolset.py     # 动态工具集（替代硬编码 Union）
+│       ├── llm.py             # LLM 客户端（OpenAI 兼容）
+│       ├── react.py           # ReAct 循环 + 角色化消息协议
+│       ├── plan_manager.py    # 计划状态机
+│       └── terminal.py        # 持久 Shell 会话（跨平台 PIPE）
 ├── frontend/
-│   ├── src/App.jsx           # 页面组件
-│   └── vite.config.js        # 含 /api 开发代理
+│   ├── src/
+│   │   ├── App.jsx            # 入口
+│   │   ├── components/        # StepCard / ToolRenderers / AgentDemo
+│   │   └── hooks/             # useAgentStream（SSE 消费 + 状态管理）
+│   └── vite.config.js         # 含 /api 开发代理
 └── .gitignore
 ```
 
@@ -48,7 +55,7 @@ cp backend/.env.example backend/.env
 ./start.sh
 ```
 
-前后端同时启动，Ctrl+C 一键停止。可在任意目录执行此脚本。
+前后端同时启动，Ctrl+C 一键停止。可在任意目录执行。
 
 ### 3. 分别启动
 
@@ -77,44 +84,45 @@ npm run dev
 
 ## ReAct 智能体 CLI
 
-独立于前后端框架的交互式智能体：
-
 ```bash
 cd backend
 uv run python cli.py            # uv 用户
-python cli.py                   # venv / pip 用户（需先激活环境）
+python cli.py                   # venv / pip 用户
 ```
-
-进入交互界面后直接输入问题即可。支持命令：
 
 | 命令 | 说明 |
 |------|------|
 | `/clear` | 清空对话上下文 |
 | `/exit` | 退出 |
-| `Ctrl+C` | 退出 |
 
-## API 端点（FastAPI）
+## API 端点
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET` | `/` | Hello World |
-| `GET` | `/api/hello` | Hello World（含 status） |
-| `POST` | `/api/agent/stream` | SSE 流式 Agent |
+| `GET` | `/api/hello` | Hello World |
+| `POST` | `/api/agent/stream` | SSE 流式 Agent（事件：thinking / action / tool_call / terminal_chunk / finish） |
 
-## 开发代理说明
+## 核心架构
 
-Vite 开发服务器将 `/api/*` 代理到 `localhost:8000`，前端可直接写 `fetch("/api/hello")`。
+- **ToolSet** — 运行时动态生成 Pydantic 鉴别联合，工具可热插拔
+- **Skill 系统** — `agent/skills/<name>/Skill.md`，重启自动发现
+- **PersistentTerminal** — 跨平台持久 Shell（`cd` 状态保留），`terminal_chunk` 流式推送
+- **角色化消息协议** — `system → user → assistant → user(tool) → …` 标准对话链
+- **json-repair** — LLM 输出格式小毛病自动修复，不浪费 token
+
+## Skill 扩展
+
+```bash
+mkdir -p agent/skills/my_skill
+vim agent/skills/my_skill/Skill.md
+# 重启服务即生效
+```
 
 ## 常用命令
 
 ```bash
-# 一键启动
-./start.sh
-
-# 后端 — 生产运行
-cd backend && uvicorn main:app --host 0.0.0.0 --port 8000
-
-# 前端 — 生产构建
-cd frontend && npm run build
-npm run preview
+./start.sh                                 # 一键启动
+cd backend && uvicorn main:app --port 8000 # 后端生产
+cd frontend && npm run build               # 前端构建
 ```
