@@ -67,7 +67,6 @@ class ReActAgent:
         self._toolset = toolset or _default_toolset()
         self._sandbox = sandbox or SandBox()
         self._system_msg: dict | None = None
-        self._question_msg: dict | None = None
         self._messages: list[dict] = []  # OpenAI-format message chain for LLM context
         self._turns: list[Turn] = []  # structured Turn snapshots for frontend history
 
@@ -87,7 +86,6 @@ class ReActAgent:
 
     async def clear(self) -> None:
         self._system_msg = None
-        self._question_msg = None
         self._messages = []
         self._turns = []
         await self._sandbox.shutdown()
@@ -162,10 +160,9 @@ class ReActAgent:
                 ),
             }
 
-        # archive previous question
-        if self._question_msg is not None:
-            self._messages.append(self._question_msg)
-        self._question_msg = {"role": "user", "content": question}
+        # Record user question in message chain and Turn history
+        question_msg = {"role": "user", "content": question}
+        self._messages.append(question_msg)
         self._turns.append(Turn(role="user", question=question))
 
         while current_step < max_steps:
@@ -175,7 +172,6 @@ class ReActAgent:
             # 1. build messages
             step_messages: list[dict] = [
                 self._system_msg,
-                self._question_msg,
                 *self._messages,
             ]
             plan_str = plan_manager.get_plan_string()
@@ -201,10 +197,7 @@ class ReActAgent:
             # 4. handle finish
             if output.finish_reason == "stop":
                 answer = output.content.strip() or "Done."
-                # Archive user question + assistant answer into LLM context
-                self._messages.append(self._question_msg)
                 self._messages.append({"role": "assistant", "content": answer})
-                self._question_msg = None
                 assist_turn.finish_answer = answer
                 yield {"type": "finish", "answer": answer}
                 return
@@ -233,11 +226,6 @@ class ReActAgent:
                     tc, assist_turn, plan_manager
                 ):
                     yield event
-
-        # archive pending question if loop exhausted (max_steps)
-        if self._question_msg is not None:
-            self._messages.append(self._question_msg)
-            self._question_msg = None
 
         yield {
             "type": "finish",

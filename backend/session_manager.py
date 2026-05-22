@@ -59,7 +59,6 @@ class SessionManager:
         for sid, agent in self._sessions.items():
             data[sid] = {
                 "system_msg": agent._system_msg,
-                "question_msg": agent._question_msg,
                 "messages": agent._messages,
                 "turns": [asdict(t) for t in agent._turns],
             }
@@ -80,7 +79,6 @@ class SessionManager:
             sandbox = SandBox(self._workspace)
             agent = ReActAgent(llm_client=self.llm, sandbox=sandbox)
             agent._system_msg = sdata.get("system_msg")
-            agent._question_msg = sdata.get("question_msg")
             agent._messages = sdata.get("messages", [])
             agent._turns = [
                 Turn(
