@@ -1,5 +1,6 @@
 import json
 import os
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -13,7 +14,16 @@ load_dotenv()
 
 _AGENT_WORKSPACE = os.environ.get("AGENT_WORKSPACE", os.getcwd())
 
-app = FastAPI(title="Byte E2E Agent Backend")
+sessions = SessionManager(_AGENT_WORKSPACE)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield  # startup — nothing to do yet
+    sessions.save()  # shutdown
+
+
+app = FastAPI(title="Byte E2E Agent Backend", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,8 +32,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-sessions = SessionManager(_AGENT_WORKSPACE)
 
 
 @app.get("/")
@@ -123,14 +131,6 @@ async def agent_stream(req: AgentStreamRequest):
             "X-Accel-Buffering": "no",
         },
     )
-
-
-# ── Shutdown ─────────────────────────────────────────
-
-
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    sessions.save()
 
 
 if __name__ == "__main__":
