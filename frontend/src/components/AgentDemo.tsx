@@ -8,7 +8,8 @@ import "./AgentDemo.css";
 interface AgentDemoProps {
   sessionId: string | null;
   pendingNew: boolean;
-  onSessionCreated: (sid: string) => void;
+  workspace: string;
+  onSessionCreated: (sid: string, workspace?: string) => void;
   cache: SessionCache;
 }
 
@@ -30,6 +31,7 @@ type Item = ItemUser | ItemStep;
 export default function AgentDemo({
   sessionId,
   pendingNew,
+  workspace,
   onSessionCreated,
   cache,
 }: AgentDemoProps) {
@@ -43,7 +45,13 @@ export default function AgentDemo({
     handleRun,
     toggleStep,
     expandResult,
-  } = useAgentStream({ sessionId, pendingNew, onSessionCreated, cache });
+  } = useAgentStream({
+    sessionId,
+    pendingNew,
+    workspace,
+    onSessionCreated,
+    cache,
+  });
 
   const composingRef = useRef(false);
   const [rows, setRows] = useState(1);

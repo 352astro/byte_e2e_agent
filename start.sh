@@ -12,8 +12,8 @@ set -euo pipefail
 # ── 定位项目根目录 ──────────────────────────────────
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-# ── 保存用户原始工作目录（agent 将以此目录为 workspace） ─
-USER_CWD="${AGENT_WORKSPACE:-$(pwd)}"
+# ── 默认工作目录：当前 agent 项目根目录 ───────────────────
+DEFAULT_WORKSPACE="${AGENT_WORKSPACE:-$ROOT}"
 
 # ── 端口配置 ────────────────────────────────────────
 BACKEND_PORT="${PORT:-8000}"
@@ -32,7 +32,7 @@ trap cleanup EXIT INT TERM
 # ── 启动后端 ────────────────────────────────────────
 echo "=== Starting backend (port $BACKEND_PORT) ==="
 cd "$ROOT/backend"
-AGENT_WORKSPACE="$USER_CWD" uv run uvicorn main:app --host 0.0.0.0 --port "$BACKEND_PORT" --reload &
+AGENT_WORKSPACE="$DEFAULT_WORKSPACE" uv run uvicorn main:app --host 0.0.0.0 --port "$BACKEND_PORT" --reload &
 BACKEND_PID=$!
 
 # ── 启动前端 ────────────────────────────────────────

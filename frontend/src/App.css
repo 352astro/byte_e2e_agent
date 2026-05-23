@@ -23,12 +23,57 @@
 /* ── Sidebar ──────────────────────────────────── */
 
 .sidebar {
-    width: 200px;
+    width: 260px;
     flex-shrink: 0;
     border-right: 1px solid #e5e5e5;
     background: #fafafa;
     display: flex;
     flex-direction: column;
+}
+
+.sidebar-workspace {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 12px 12px 0;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #555;
+}
+
+.sidebar-workspace-path {
+    min-height: 32px;
+    border: 1px solid #d4d4d4;
+    border-radius: 6px;
+    padding: 7px 8px;
+    font-size: 0.76rem;
+    font-family: ui-monospace, monospace;
+    font-weight: 500;
+    line-height: 1.35;
+    color: #333;
+    background: #fff;
+    overflow-wrap: anywhere;
+}
+
+.sidebar-workspace-btn {
+    height: 32px;
+    border: 1px solid #d4d4d4;
+    border-radius: 6px;
+    background: #fff;
+    color: #333;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.sidebar-workspace-btn:hover:not(:disabled) {
+    border-color: #7c3aed;
+    color: #7c3aed;
+}
+
+.sidebar-workspace-btn:disabled {
+    color: #999;
+    cursor: not-allowed;
 }
 
 .sidebar-new-btn {
@@ -44,6 +89,14 @@
 }
 .sidebar-new-btn:hover {
     background: #6d28d9;
+}
+
+.sidebar-error {
+    margin: 0 12px 10px;
+    color: #b91c1c;
+    font-size: 0.78rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
 }
 
 .sidebar-list {
@@ -83,8 +136,26 @@
     background: #7c3aed;
 }
 
+.sidebar-item-text {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sidebar-item-title,
 .sidebar-item-id {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.sidebar-item-title {
+    color: inherit;
+    font-family: system-ui, sans-serif;
+}
+
+.sidebar-item-id {
+    font-size: 0.72rem;
+    color: #777;
 }

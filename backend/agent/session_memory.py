@@ -22,32 +22,54 @@ class SessionMemory:
     def __init__(self, workspace: str | Path, session_id: str) -> None:
         if not _SESSION_ID_RE.fullmatch(session_id):
             raise ValueError(f"Invalid session_id: {session_id!r}")
-        self.workspace = Path(workspace)
+        self.workspace = Path(workspace).expanduser().resolve()
         self.session_id = session_id
         self.session_dir = self.workspace / ".tmp" / session_id
         self.meta_path = self.session_dir / f"{session_id}.json"
         self.events_path = self.session_dir / "messages.jsonl"
         self._lock = asyncio.Lock()
 
+    def exists(self) -> bool:
+        return self.meta_path.is_file()
+
     def ensure(self, session_name: str = "") -> None:
         """Create the session directory and metadata file if missing."""
         self.session_dir.mkdir(parents=True, exist_ok=True)
         if self.meta_path.exists():
+            meta = self._read_meta()
+            changed = False
+            if meta.get("session_id") != self.session_id:
+                meta["session_id"] = self.session_id
+                changed = True
+            if meta.get("workspace") != str(self.workspace):
+                meta["workspace"] = str(self.workspace)
+                changed = True
+            if changed:
+                meta["updated_at"] = _now_iso()
+                self._write_meta(meta)
             return
         now = _now_iso()
         self._write_meta(
             {
                 "session_id": self.session_id,
                 "session_name": session_name,
+                "workspace": str(self.workspace),
                 "created_at": now,
                 "updated_at": now,
             }
         )
 
-    def load(self) -> tuple[dict[str, Any], list[dict]]:
-        """Load metadata and OpenAI messages from disk."""
+    def load_meta(self) -> dict[str, Any]:
         self.ensure()
         meta = self._read_meta()
+        meta["session_id"] = self.session_id
+        meta["workspace"] = str(self.workspace)
+        return meta
+
+    def load(self) -> tuple[dict[str, Any], list[dict], list[Turn]]:
+        """Load metadata, OpenAI messages, and frontend turns from disk."""
+        self.ensure()
+        meta = self.load_meta()
         messages: list[dict] = []
 
         if not self.events_path.exists():
@@ -108,6 +130,7 @@ class SessionMemory:
             return {
                 "session_id": self.session_id,
                 "session_name": "",
+                "workspace": str(self.workspace),
                 "created_at": now,
                 "updated_at": now,
             }
@@ -134,3 +157,35 @@ class SessionMemory:
             meta["session_name"] = name
             meta["updated_at"] = _now_iso()
             self._write_meta(meta)
+
+    @classmethod
+    def list_sessions(cls, workspace: str | Path) -> list[dict[str, Any]]:
+        root = Path(workspace).expanduser().resolve()
+        tmp_dir = root / ".tmp"
+        if not tmp_dir.is_dir():
+            return []
+
+        sessions: list[dict[str, Any]] = []
+        for entry in tmp_dir.iterdir():
+            if not entry.is_dir() or not _SESSION_ID_RE.fullmatch(entry.name):
+                continue
+            sid = entry.name
+            meta_path = entry / f"{sid}.json"
+            if not meta_path.is_file():
+                continue
+            try:
+                with open(meta_path, encoding="utf-8") as fh:
+                    meta = json.load(fh)
+            except (json.JSONDecodeError, OSError):
+                continue
+            if not isinstance(meta, dict):
+                continue
+            meta["session_id"] = sid
+            meta["workspace"] = str(root)
+            sessions.append(meta)
+
+        return sorted(
+            sessions,
+            key=lambda item: item.get("updated_at", ""),
+            reverse=True,
+        )

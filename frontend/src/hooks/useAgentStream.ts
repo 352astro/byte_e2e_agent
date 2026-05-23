@@ -13,7 +13,8 @@ export const RESULT_PREVIEW_LINES = 12;
 interface UseAgentStreamOptions {
     sessionId: string | null;
     pendingNew: boolean;
-    onSessionCreated?: (sid: string) => void;
+    workspace: string;
+    onSessionCreated?: (sid: string, workspace?: string) => void;
     cache?: SessionCache;
 }
 
@@ -32,6 +33,7 @@ interface UseAgentStreamReturn {
 export default function useAgentStream({
     sessionId,
     pendingNew,
+    workspace,
     onSessionCreated,
     cache = {},
 }: UseAgentStreamOptions): UseAgentStreamReturn {
@@ -51,6 +53,16 @@ export default function useAgentStream({
     const abortRef = useRef<AbortController | null>(null);
     const activeSidRef = useRef<string | null>(sessionId);
     const streamSidRef = useRef<string | null>(null);
+    const workspaceRef = useRef(workspace);
+
+    const getCacheKey = useCallback(
+        (sid: string) => `${workspaceRef.current || ""}::${sid}`,
+        [],
+    );
+
+    useEffect(() => {
+        workspaceRef.current = workspace;
+    }, [workspace]);
 
     // ── session switch: save & restore ────────────────
 
@@ -63,7 +75,7 @@ export default function useAgentStream({
 
         // 2. Save current state to cache (only if run completed, not mid-stream)
         if (currentSid && currentSid !== sessionId) {
-            cache[currentSid] = {
+            cache[getCacheKey(currentSid)] = {
                 steps,
                 answer,
                 messages,
@@ -79,10 +91,10 @@ export default function useAgentStream({
         activeSidRef.current = sessionId;
 
         // 4. Restore / fetch new session
-        if (sessionId && cache[sessionId]) {
-            const saved = cache[sessionId];
+        if (sessionId && cache[getCacheKey(sessionId)]) {
+            const saved = cache[getCacheKey(sessionId)];
             if (saved._complete === false) {
-                delete cache[sessionId];
+                delete cache[getCacheKey(sessionId)];
                 // fall through to backend fetch below
             } else {
                 setSteps(saved.steps || []);
@@ -95,7 +107,10 @@ export default function useAgentStream({
         }
         if (sessionId && sessionId !== lazyCreatedRef.current) {
             // Cache miss — fetch from backend
-            fetch(`/api/session/${sessionId}/history`)
+            const query = workspace.trim()
+                ? `?workspace=${encodeURIComponent(workspace.trim())}`
+                : "";
+            fetch(`/api/session/${sessionId}/history${query}`)
                 .then((r) => r.json())
                 .then((data: { history?: HistoryTurn[] }) => {
                     const history = data.history || [];
@@ -137,7 +152,7 @@ export default function useAgentStream({
                     setSteps(stps);
                     setAnswer(ans);
                     globalStepRef.current = stepN;
-                    cache[sessionId] = {
+                    cache[getCacheKey(sessionId)] = {
                         steps: stps,
                         answer: ans,
                         messages: msgs,
@@ -157,13 +172,13 @@ export default function useAgentStream({
             globalStepRef.current = 0;
         }
         setCurrentSid(sessionId);
-    }, [sessionId, pendingNew]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [sessionId, pendingNew, workspace, getCacheKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Save state to cache on change
     useEffect(() => {
         return () => {
             if (currentSid) {
-                cache[currentSid] = {
+                cache[getCacheKey(currentSid)] = {
                     steps,
                     answer,
                     messages,
@@ -346,14 +361,20 @@ export default function useAgentStream({
         let sid = currentSid;
         if (!sid && pendingNew) {
             try {
-                const res = await fetch("/api/session", { method: "POST" });
+                const res = await fetch("/api/session", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ workspace: workspace.trim() || null }),
+                });
                 if (!res.ok) throw new Error(`Server returned ${res.status}`);
-                const data: { session_id: string } = await res.json();
+                const data: { session_id: string; workspace?: string } =
+                    await res.json();
                 sid = data.session_id;
+                if (data.workspace) workspaceRef.current = data.workspace;
                 setCurrentSid(sid);
                 activeSidRef.current = sid;
                 lazyCreatedRef.current = sid;
-                if (onSessionCreated) onSessionCreated(sid);
+                if (onSessionCreated) onSessionCreated(sid, data.workspace);
             } catch (err) {
                 setAnswer(
                     `Failed to create session: ${err instanceof Error ? err.message : err}`,
@@ -377,7 +398,11 @@ export default function useAgentStream({
             const res = await fetch(`/api/session/${sid}/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question: q, max_steps: 50 }),
+                body: JSON.stringify({
+                    workspace: workspaceRef.current.trim() || null,
+                    question: q,
+                    max_steps: 50,
+                }),
                 signal: controller.signal,
             });
 
@@ -430,6 +455,7 @@ export default function useAgentStream({
         currentSid,
         pendingNew,
         onSessionCreated,
+        workspace,
         messages,
     ]);
 

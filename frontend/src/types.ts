@@ -60,6 +60,14 @@ export interface Message {
 
 // ── Session cache ─────────────────────────────────────
 
+export interface SessionInfo {
+    session_id: string;
+    session_name?: string;
+    workspace: string;
+    created_at?: string;
+    updated_at?: string;
+}
+
 export interface CacheEntry {
     steps: Step[];
     answer: string | null;

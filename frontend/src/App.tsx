@@ -10,6 +10,7 @@ const sessionCache: SessionCache = {};
 export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [pendingNew, setPendingNew] = useState(false);
+  const [workspace, setWorkspace] = useState("");
   const cacheRef = useRef<SessionCache>(sessionCache);
 
   const handleSelect = useCallback((sid: string) => {
@@ -22,10 +23,24 @@ export default function App() {
     setPendingNew(true);
   }, []);
 
+  const handleWorkspaceChange = useCallback((nextWorkspace: string) => {
+    setWorkspace(nextWorkspace);
+    setSessionId(null);
+    setPendingNew(false);
+  }, []);
+
+  const handleSessionCreated = useCallback((sid: string, resolvedWorkspace?: string) => {
+    if (resolvedWorkspace) setWorkspace(resolvedWorkspace);
+    setSessionId(sid);
+  }, []);
+
   return (
     <div className="app-layout">
       <SessionSidebar
         activeId={sessionId}
+        workspace={workspace}
+        onWorkspaceChange={handleWorkspaceChange}
+        onWorkspaceResolved={setWorkspace}
         onSelect={handleSelect}
         onNew={handleNew}
       />
@@ -34,7 +49,8 @@ export default function App() {
           <AgentDemo
             sessionId={sessionId}
             pendingNew={pendingNew}
-            onSessionCreated={setSessionId}
+            workspace={workspace}
+            onSessionCreated={handleSessionCreated}
             cache={cacheRef.current}
           />
         ) : (
