@@ -88,8 +88,6 @@ async def chat(sid: str, req: ChatRequest):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as exc:
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
-        finally:
-            sessions.save()
 
     return StreamingResponse(
         event_generator(),

@@ -1,18 +1,18 @@
 """会话管理器 — UUID 到 Agent 实例的映射。
 
-支持启动时从 workspace/.tmp/sessions.json 恢复会话，
-以及结束时持久化（过渡方案，不修改 agent 内部逻辑）。
+每个会话持久化在 workspace/.tmp/{session_id}/：
+- {session_id}.json  保存 session 元信息
+- messages.jsonl     追加保存上下文消息和前端 history turn
 """
 
-import json
+import shutil
 import uuid
-from dataclasses import asdict
 from pathlib import Path
 
 from agent.llm import HelloAgentsLLM
 from agent.react import ReActAgent
 from agent.sandbox import SandBox
-from agent.turn import ToolStep, Turn
+from agent.session_memory import SessionMemory
 
 
 class SessionManager:
@@ -21,8 +21,7 @@ class SessionManager:
         self._sessions: dict[str, ReActAgent] = {}
         # shared LLM client across sessions (stateless)
         self._llm: HelloAgentsLLM | None = None
-        self._save_path = Path(workspace) / ".tmp" / "sessions.json"
-        self._load()
+        self._tmp_dir = Path(workspace) / ".tmp"
 
     @property
     def llm(self) -> HelloAgentsLLM:
@@ -32,76 +31,46 @@ class SessionManager:
 
     def create(self) -> str:
         sid = uuid.uuid4().hex[:12]
-        sandbox = SandBox(self._workspace)
-        agent = ReActAgent(llm_client=self.llm, sandbox=sandbox)
-        self._sessions[sid] = agent
+        memory = SessionMemory(self._workspace, sid)
+        memory.ensure()
+        self._sessions[sid] = self._new_agent(sid)
         return sid
 
     def list_ids(self) -> list[str]:
-        return list(self._sessions.keys())
+        ids = set(self._sessions.keys())
+        ids.update(self._list_persisted_ids())
+        return sorted(ids)
 
     def get(self, sid: str) -> ReActAgent:
         if sid not in self._sessions:
-            raise KeyError(f"Session not found: {sid}")
+            if sid not in self._list_persisted_ids():
+                raise KeyError(f"Session not found: {sid}")
+            self._sessions[sid] = self._new_agent(sid)
         return self._sessions[sid]
 
     def get_history(self, sid: str) -> list[dict]:
         return self.get(sid).get_history()
 
-    # ── persistence ──────────────────────────────────
+    def _new_agent(self, sid: str) -> ReActAgent:
+        sandbox = SandBox(self._workspace, session_id=sid)
+        return ReActAgent(llm_client=self.llm, sandbox=sandbox, session_id=sid)
 
-    def save(self) -> None:
-        """公开保存入口——持久化所有会话到 workspace/.tmp/sessions.json。"""
-        self._save()
-
-    def _save(self) -> None:
-        data: dict[str, dict] = {}
-        for sid, agent in self._sessions.items():
-            data[sid] = {
-                "system_msg": agent._system_msg,
-                "messages": agent._messages,
-                "turns": [asdict(t) for t in agent._turns],
-            }
-        self._save_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._save_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-    def _load(self) -> None:
-        if not self._save_path.exists():
-            return
-        try:
-            with open(self._save_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            return
-
-        for sid, sdata in data.items():
-            sandbox = SandBox(self._workspace)
-            agent = ReActAgent(llm_client=self.llm, sandbox=sandbox)
-            agent._system_msg = sdata.get("system_msg")
-            agent._messages = sdata.get("messages", [])
-            agent._turns = [
-                Turn(
-                    role=t["role"],
-                    question=t.get("question", ""),
-                    reasoning=t.get("reasoning", ""),
-                    content=t.get("content", ""),
-                    tool_calls=[
-                        ToolStep(
-                            name=tc["name"],
-                            arguments=tc["arguments"],
-                            result=tc.get("result"),
-                        )
-                        for tc in t.get("tool_calls", [])
-                    ],
-                    finish_answer=t.get("finish_answer"),
-                )
-                for t in sdata.get("turns", [])
-            ]
-            self._sessions[sid] = agent
+    def _list_persisted_ids(self) -> list[str]:
+        if not self._tmp_dir.is_dir():
+            return []
+        result: list[str] = []
+        for entry in self._tmp_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            sid = entry.name
+            if (entry / f"{sid}.json").is_file():
+                result.append(sid)
+        return sorted(result)
 
     async def delete(self, sid: str) -> None:
         agent = self._sessions.pop(sid, None)
         if agent is not None:
             await agent.clear()
-        self._save()
+        session_dir = self._tmp_dir / sid
+        if session_dir.is_dir():
+            shutil.rmtree(session_dir)

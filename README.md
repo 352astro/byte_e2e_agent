@@ -52,7 +52,7 @@ cp backend/.env.example backend/.env
 ### 2. 一键启动（推荐）
 
 ```bash
-./start.sh
+`./start.sh`
 ```
 
 前后端同时启动，Ctrl+C 一键停止。可在任意目录执行。
@@ -64,7 +64,7 @@ cp backend/.env.example backend/.env
 ```bash
 cd backend
 uv sync                                   # uv 用户
-uv run uvicorn main:app --reload --port 8000
+`uv run uvicorn main:app --reload --port 8000`
 
 # 或 pip 用户：
 python3.14 -m venv .venv && source .venv/bin/activate

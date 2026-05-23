@@ -22,8 +22,9 @@ from agent.tools._safety import check_command_safety, safe_resolve_path
 class SandBox:
     """每个 agent 实例独立的执行环境。"""
 
-    def __init__(self, workspace: str | Path = ".") -> None:
+    def __init__(self, workspace: str | Path = ".", session_id: str | None = None) -> None:
         self._workspace = os.path.abspath(str(workspace))
+        self._session_id = session_id
         self._terminal: PersistentTerminal | None = None
         os.makedirs(self._workspace, exist_ok=True)
 
@@ -32,6 +33,10 @@ class SandBox:
     @property
     def workspace(self) -> str:
         return self._workspace
+
+    @property
+    def session_id(self) -> str | None:
+        return self._session_id
 
     @property
     def terminal(self) -> PersistentTerminal:

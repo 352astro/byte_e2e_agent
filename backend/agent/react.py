@@ -6,6 +6,7 @@ from typing import Any, AsyncIterator
 from agent.llm import HelloAgentsLLM
 from agent.plan_manager import PlanManager
 from agent.sandbox import SandBox
+from agent.session_memory import SessionMemory
 from agent.tools.shell import get_platform_hint
 from agent.tools.skill import get_skills_summary
 from agent.tools.subtask import SubTask
@@ -62,13 +63,22 @@ class ReActAgent:
         llm_client: HelloAgentsLLM,
         toolset: ToolSet | None = None,
         sandbox: SandBox | None = None,
+        session_id: str | None = None,
+        persist_memory: bool = True,
     ) -> None:
         self.llm_client = llm_client
         self._toolset = toolset or _default_toolset()
         self._sandbox = sandbox or SandBox()
+        self.session_id = session_id or self._sandbox.session_id
+        self._memory = (
+            SessionMemory(self._sandbox.workspace, self.session_id)
+            if persist_memory and self.session_id
+            else None
+        )
         self._system_msg: dict | None = None
         self._messages: list[dict] = []  # OpenAI-format message chain for LLM context
         self._turns: list[Turn] = []  # structured Turn snapshots for frontend history
+        self._load_memory()
 
     @property
     def history(self) -> list[dict]:
@@ -89,6 +99,27 @@ class ReActAgent:
         self._messages = []
         self._turns = []
         await self._sandbox.shutdown()
+
+    def _load_memory(self) -> None:
+        """Load persisted context when this agent is bound to a session."""
+        if self._memory is None:
+            return
+        _, messages, turns = self._memory.load()
+        self._messages = messages
+        self._turns = turns
+
+    async def _record_message(self, message: dict) -> None:
+        self._messages.append(message)
+        if self._memory is not None:
+            await self._memory.append_message(message)
+
+    async def _record_turn(self, turn: Turn) -> None:
+        if self._memory is not None:
+            await self._memory.append_turn(turn)
+
+    async def _touch_memory(self) -> None:
+        if self._memory is not None:
+            await self._memory.touch()
 
     # ── CLI loop ─────────────────────────────────────────
 
@@ -162,8 +193,12 @@ class ReActAgent:
 
         # Record user question in message chain and Turn history
         question_msg = {"role": "user", "content": question}
-        self._messages.append(question_msg)
-        self._turns.append(Turn(role="user", question=question))
+        if self._memory is not None:
+            await self._memory.ensure_session_name(question)
+        await self._record_message(question_msg)
+        question_turn = Turn(role="user", question=question)
+        self._turns.append(question_turn)
+        await self._record_turn(question_turn)
 
         while current_step < max_steps:
             current_step += 1
@@ -197,8 +232,10 @@ class ReActAgent:
             # 4. handle finish
             if output.finish_reason == "stop":
                 answer = output.content.strip() or "Done."
-                self._messages.append({"role": "assistant", "content": answer})
+                await self._record_message({"role": "assistant", "content": answer})
                 assist_turn.finish_answer = answer
+                await self._record_turn(assist_turn)
+                await self._touch_memory()
                 yield {"type": "finish", "answer": answer}
                 return
 
@@ -208,6 +245,8 @@ class ReActAgent:
                     "type": "error",
                     "message": "LLM returned no tool_calls and no content.",
                 }
+                await self._record_turn(assist_turn)
+                await self._touch_memory()
                 break
 
             # Build assistant message for LLM context
@@ -218,7 +257,7 @@ class ReActAgent:
             }
             if output.reasoning:
                 assistant_msg["reasoning_content"] = output.reasoning
-            self._messages.append(assistant_msg)
+            await self._record_message(assistant_msg)
 
             # 6. execute tools
             for tc in output.tool_calls:
@@ -226,7 +265,10 @@ class ReActAgent:
                     tc, assist_turn, plan_manager
                 ):
                     yield event
+            await self._record_turn(assist_turn)
+            await self._touch_memory()
 
+        await self._touch_memory()
         yield {
             "type": "finish",
             "answer": "Maximum steps reached; could not produce a final answer.",
@@ -303,7 +345,7 @@ class ReActAgent:
             action = self._toolset.parse(func_name, func_args)
         except Exception as exc:
             result = f"Error parsing {func_name}: {exc}"
-            self._messages.append(
+            await self._record_message(
                 {"role": "tool", "tool_call_id": tool_call_id, "content": result}
             )
             yield {"type": "tool_result", "result": result}
@@ -324,7 +366,7 @@ class ReActAgent:
                 if exit_code != 0
                 else raw.rstrip() or "(no output)"
             )
-            self._messages.append(
+            await self._record_message(
                 {"role": "tool", "tool_call_id": tool_call_id, "content": result_str}
             )
             assist_turn.tool_calls.append(
@@ -337,7 +379,7 @@ class ReActAgent:
 
         if name == "PlanRewrite":
             plan_manager.rewrite(action.items)
-            self._messages.append(
+            await self._record_message(
                 {
                     "role": "tool",
                     "tool_call_id": tool_call_id,
@@ -355,7 +397,7 @@ class ReActAgent:
 
         if name == "PlanAdvance":
             plan_manager.advance(action.state)
-            self._messages.append(
+            await self._record_message(
                 {
                     "role": "tool",
                     "tool_call_id": tool_call_id,
@@ -386,11 +428,12 @@ class ReActAgent:
                 self.llm_client,
                 toolset=self._toolset.without(SubTask),
                 sandbox=self._sandbox,
+                persist_memory=False,
             )
             sub_result_text = await sub_agent.run(
                 question=action.prompt, max_steps=action.max_steps
             )
-            self._messages.append(
+            await self._record_message(
                 {
                     "role": "tool",
                     "tool_call_id": tool_call_id,
@@ -413,7 +456,7 @@ class ReActAgent:
         except Exception as exc:
             result_str = f"Error: {exc}"
 
-        self._messages.append(
+        await self._record_message(
             {"role": "tool", "tool_call_id": tool_call_id, "content": result_str}
         )
         yield {"type": "tool_result", "result": result_str}
