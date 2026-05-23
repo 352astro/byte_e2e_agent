@@ -5,36 +5,15 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
-from agent.turn import ToolStep, Turn
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _turn_from_dict(data: dict) -> Turn:
-    return Turn(
-        role=data["role"],
-        question=data.get("question", ""),
-        reasoning=data.get("reasoning", ""),
-        content=data.get("content", ""),
-        tool_calls=[
-            ToolStep(
-                name=tc["name"],
-                arguments=tc.get("arguments", {}),
-                result=tc.get("result"),
-            )
-            for tc in data.get("tool_calls", [])
-        ],
-        finish_answer=data.get("finish_answer"),
-    )
 
 
 class SessionMemory:
@@ -65,15 +44,14 @@ class SessionMemory:
             }
         )
 
-    def load(self) -> tuple[dict[str, Any], list[dict], list[Turn]]:
-        """Load metadata, OpenAI messages, and frontend turns from disk."""
+    def load(self) -> tuple[dict[str, Any], list[dict]]:
+        """Load metadata and OpenAI messages from disk."""
         self.ensure()
         meta = self._read_meta()
         messages: list[dict] = []
-        turns: list[Turn] = []
 
         if not self.events_path.exists():
-            return meta, messages, turns
+            return meta, messages
 
         with open(self.events_path, encoding="utf-8") as fh:
             for line in fh:
@@ -89,19 +67,12 @@ class SessionMemory:
                 data = record.get("data")
                 if kind == "message" and isinstance(data, dict):
                     messages.append(data)
-                elif kind == "turn" and isinstance(data, dict):
-                    try:
-                        turns.append(_turn_from_dict(data))
-                    except (KeyError, TypeError):
-                        continue
+                # "turn" records are legacy; silently skip
 
-        return meta, messages, turns
+        return meta, messages
 
     async def append_message(self, message: dict) -> None:
         await self._append_record({"kind": "message", "data": message})
-
-    async def append_turn(self, turn: Turn) -> None:
-        await self._append_record({"kind": "turn", "data": asdict(turn)})
 
     async def touch(self, session_name: str | None = None) -> None:
         """Update metadata asynchronously."""

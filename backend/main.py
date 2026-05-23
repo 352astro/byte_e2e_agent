@@ -20,7 +20,6 @@ sessions = SessionManager(_AGENT_WORKSPACE)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield  # startup — nothing to do yet
-    sessions.save()  # shutdown
 
 
 app = FastAPI(title="Byte E2E Agent Backend", lifespan=lifespan)

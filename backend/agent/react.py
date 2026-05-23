@@ -1,6 +1,6 @@
 # ReAct 智能体 — 核心循环（原生 tool_calls）
 import asyncio
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 from agent.llm import HelloAgentsLLM
@@ -11,7 +11,6 @@ from agent.tools.shell import get_platform_hint
 from agent.tools.skill import get_skills_summary
 from agent.tools.subtask import SubTask
 from agent.tools.toolset import ToolSet
-from agent.turn import ToolStep, Turn
 from agent.utils._term import dim, info, step, success, tool, warn
 
 # ── System prompt（不再注入 JSON schema）──────────────────
@@ -76,8 +75,7 @@ class ReActAgent:
             else None
         )
         self._system_msg: dict | None = None
-        self._messages: list[dict] = []  # OpenAI-format message chain for LLM context
-        self._turns: list[Turn] = []  # structured Turn snapshots for frontend history
+        self._messages: list[dict] = []  # OpenAI-format message chain (sole truth)
         self._load_memory()
 
     @property
@@ -92,30 +90,91 @@ class ReActAgent:
             self._messages = value
 
     def get_history(self) -> list[dict]:
-        return [asdict(t) for t in self._turns]
+        """Reconstruct Turn-compatible history from _messages.
+
+        The frontend expects a list of Turn-like dicts with:
+          role, question, reasoning, content, tool_calls, finish_answer.
+        We rebuild these from the OpenAI-format message chain so we
+        don't need a separate _turns store.
+        """
+        result: list[dict] = []
+
+        for msg in self._messages:
+            if msg["role"] == "user":
+                result.append(
+                    {
+                        "role": "user",
+                        "question": msg.get("content", ""),
+                        "reasoning": "",
+                        "content": "",
+                        "tool_calls": [],
+                        "finish_answer": None,
+                    }
+                )
+
+            elif msg["role"] == "assistant":
+                tool_calls: list[dict] = []
+                for tc in msg.get("tool_calls", []):
+                    tool_calls.append(
+                        {
+                            "name": tc["function"]["name"],
+                            "arguments": _safe_json_loads(
+                                tc["function"].get("arguments", "{}")
+                            ),
+                            "result": None,  # filled by following tool messages
+                            "_tc_id": tc.get("id", ""),  # internal: for result matching
+                        }
+                    )
+
+                turn: dict = {
+                    "role": "assistant",
+                    "question": "",
+                    "reasoning": msg.get("reasoning_content", ""),
+                    "content": msg.get("content") or "",
+                    "tool_calls": tool_calls,
+                    "finish_answer": None,
+                }
+
+                if not tool_calls and msg.get("content"):
+                    turn["finish_answer"] = msg["content"]
+
+                result.append(turn)
+
+            elif msg["role"] == "tool":
+                tc_id = msg.get("tool_call_id", "")
+                # Walk backwards to find the matching tool_call
+                for turn in reversed(result):
+                    if turn["role"] != "assistant":
+                        continue
+                    for tc in turn["tool_calls"]:
+                        if tc.get("_tc_id") == tc_id:
+                            tc["result"] = msg.get("content", "")
+                            break
+                    break
+
+        # Strip internal _tc_id before returning
+        for turn in result:
+            for tc in turn.get("tool_calls", []):
+                tc.pop("_tc_id", None)
+
+        return result
 
     async def clear(self) -> None:
         self._system_msg = None
         self._messages = []
-        self._turns = []
         await self._sandbox.shutdown()
 
     def _load_memory(self) -> None:
         """Load persisted context when this agent is bound to a session."""
         if self._memory is None:
             return
-        _, messages, turns = self._memory.load()
+        _, messages = self._memory.load()
         self._messages = messages
-        self._turns = turns
 
     async def _record_message(self, message: dict) -> None:
         self._messages.append(message)
         if self._memory is not None:
             await self._memory.append_message(message)
-
-    async def _record_turn(self, turn: Turn) -> None:
-        if self._memory is not None:
-            await self._memory.append_turn(turn)
 
     async def _touch_memory(self) -> None:
         if self._memory is not None:
@@ -191,14 +250,11 @@ class ReActAgent:
                 ),
             }
 
-        # Record user question in message chain and Turn history
+        # Record user question in message chain
         question_msg = {"role": "user", "content": question}
         if self._memory is not None:
             await self._memory.ensure_session_name(question)
         await self._record_message(question_msg)
-        question_turn = Turn(role="user", question=question)
-        self._turns.append(question_turn)
-        await self._record_turn(question_turn)
 
         while current_step < max_steps:
             current_step += 1
@@ -221,31 +277,20 @@ class ReActAgent:
             async for event in self._stream_llm(step_messages, tools, output):
                 yield event
 
-            # 3. build assistant Turn
-            assist_turn = Turn(
-                role="assistant",
-                reasoning=output.reasoning,
-                content=output.content,
-            )
-            self._turns.append(assist_turn)
-
-            # 4. handle finish
+            # 3. handle finish
             if output.finish_reason == "stop":
                 answer = output.content.strip() or "Done."
                 await self._record_message({"role": "assistant", "content": answer})
-                assist_turn.finish_answer = answer
-                await self._record_turn(assist_turn)
                 await self._touch_memory()
                 yield {"type": "finish", "answer": answer}
                 return
 
-            # 5. handle tool_calls
+            # 4. handle tool_calls
             if not output.tool_calls:
                 yield {
                     "type": "error",
                     "message": "LLM returned no tool_calls and no content.",
                 }
-                await self._record_turn(assist_turn)
                 await self._touch_memory()
                 break
 
@@ -259,13 +304,10 @@ class ReActAgent:
                 assistant_msg["reasoning_content"] = output.reasoning
             await self._record_message(assistant_msg)
 
-            # 6. execute tools
+            # 5. execute tools
             for tc in output.tool_calls:
-                async for event in self._execute_one_tool(
-                    tc, assist_turn, plan_manager
-                ):
+                async for event in self._execute_one_tool(tc, plan_manager):
                     yield event
-            await self._record_turn(assist_turn)
             await self._touch_memory()
 
         await self._touch_memory()
@@ -324,7 +366,6 @@ class ReActAgent:
     async def _execute_one_tool(
         self,
         tc: dict,
-        assist_turn: Turn,
         plan_manager: PlanManager,
     ) -> AsyncIterator[dict[str, Any]]:
         """Parse and execute a single tool call. Yields frontend events."""
@@ -369,9 +410,6 @@ class ReActAgent:
             await self._record_message(
                 {"role": "tool", "tool_call_id": tool_call_id, "content": result_str}
             )
-            assist_turn.tool_calls.append(
-                ToolStep(name=func_name, arguments=tool_params, result=result_str)
-            )
             return
 
         # ── Plan / SubTask / other SandBox tools ────────
@@ -390,9 +428,6 @@ class ReActAgent:
                 "type": "plan_rewrite",
                 "items": [it.model_dump() for it in action.items],
             }
-            assist_turn.tool_calls.append(
-                ToolStep(name=func_name, arguments=tool_params, result="plan rewritten")
-            )
             return
 
         if name == "PlanAdvance":
@@ -409,13 +444,6 @@ class ReActAgent:
                 "state": action.state,
                 "summary": f"item advanced to {action.state}",
             }
-            assist_turn.tool_calls.append(
-                ToolStep(
-                    name=func_name,
-                    arguments=tool_params,
-                    result=f"item advanced to {action.state}",
-                )
-            )
             return
 
         if name == "SubTask":
@@ -441,13 +469,6 @@ class ReActAgent:
                 }
             )
             yield {"type": "subtask_end", "result": sub_result_text}
-            assist_turn.tool_calls.append(
-                ToolStep(
-                    name=func_name,
-                    arguments=tool_params,
-                    result=sub_result_text,
-                )
-            )
             return
 
         # Other SandBox tools (Read, Write, Edit, Search, LoadSkill)
@@ -460,9 +481,6 @@ class ReActAgent:
             {"role": "tool", "tool_call_id": tool_call_id, "content": result_str}
         )
         yield {"type": "tool_result", "result": result_str}
-        assist_turn.tool_calls.append(
-            ToolStep(name=func_name, arguments=tool_params, result=result_str)
-        )
 
 
 # ── helpers ────────────────────────────────────────────────
