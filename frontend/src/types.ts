@@ -1,64 +1,39 @@
-// ── SSE events (incoming from backend) ────────────────
+// ── Transcript (v2 streaming format) ──────────────────
 
-export interface PlanItem {
-    description: string;
-    state: string;
+export interface Transcript {
+    id: string; // transcript_id — unique across session
+    kind: string; // user_question | assistant | tool_result | permission_request | ...
+    message: Record<string, unknown>;
 }
 
-export type SSEEvent =
-    | { type: "step_start"; step: number }
-    | { type: "reasoning_token"; token: string }
-    | { type: "thought_token"; token: string }
-    | { type: "thought_end" }
+export interface RecoverResponse {
+    transcripts: Transcript[];
+    buffered: Record<string, string>;
+    running: boolean;
+}
+
+// ── SSE stream events (from GET /api/stream/{uuid}) ────
+
+export type StreamEvent =
+    | { event: "chunk"; transcript_id: string; text: string }
     | {
-          type: "tool_call_stream";
-          index: number;
-          name: string | null;
-          args_len: number;
-      }
-    | { type: "tool_call"; tool: string; params?: Record<string, unknown> }
-    | { type: "tool_result"; result: string }
-    | { type: "plan_rewrite"; items?: PlanItem[] }
-    | { type: "plan_advance"; state?: string; summary?: string }
-    | { type: "subtask_start"; prompt?: string; max_steps?: number }
-    | { type: "subtask_end"; result?: string }
-    | { type: "terminal_chunk"; chunk: string }
-    | { type: "finish"; answer: string }
-    | { type: "error"; message: string };
+          event: "flush";
+          transcript_id: string;
+          kind: string;
+          message: Record<string, unknown>;
+      };
 
-// ── Tool display events (stored in Step.events) ────────
+// ── Display items (what the UI renders) ────────────────
 
-export type ToolEvent =
-    | { type: "terminal_stream"; output: string }
-    | { type: "tool_stream"; name: string; argsLen: number }
-    | { type: "tool_call"; tool: string; params?: Record<string, unknown> }
-    | { type: "tool_result"; result: string; expanded?: boolean }
-    | { type: "plan_rewrite"; items?: PlanItem[] }
-    | { type: "plan_advance"; state?: string; summary?: string }
-    | { type: "subtask_start"; prompt?: string }
-    | { type: "subtask_end"; result?: string }
-    | { type: "error"; message: string };
-
-// ── Step ──────────────────────────────────────────────
-
-export interface Step {
-    step: number;
-    msgIndex: number;
-    reasoning: string;
-    action: string;
-    events: ToolEvent[];
-    open: boolean;
-    actionFinal?: boolean;
+export interface DisplayTranscript {
+    id: string;
+    kind: string;
+    message: Record<string, unknown>;
+    pendingChunks: string; // accumulated chunk text before flush
+    isFlushed: boolean;
 }
 
-// ── Message bubble ────────────────────────────────────
-
-export interface Message {
-    role: "user" | "assistant";
-    content: string;
-}
-
-// ── Session cache ─────────────────────────────────────
+// ── Session info ──────────────────────────────────────
 
 export interface SessionInfo {
     session_id: string;
@@ -68,11 +43,11 @@ export interface SessionInfo {
     updated_at?: string;
 }
 
+// ── Session cache ─────────────────────────────────────
+
 export interface CacheEntry {
-    steps: Step[];
+    transcripts: DisplayTranscript[];
     answer: string | null;
-    messages: Message[];
-    _stepCounter?: number;
     _complete?: boolean;
 }
 

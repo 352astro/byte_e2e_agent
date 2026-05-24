@@ -1,57 +1,24 @@
 import { useState, useRef } from "react";
 import useAgentStream from "../hooks/useAgentStream";
 import Markdown from "./Markdown";
-import StepCard from "./StepCard";
-import type { Step, SessionCache } from "../types";
+import type { DisplayTranscript, SessionCache } from "../types";
 import "./AgentDemo.css";
 
 interface AgentDemoProps {
   sessionId: string | null;
   pendingNew: boolean;
-  workspace: string;
-  onSessionCreated: (sid: string, workspace?: string) => void;
+  onSessionCreated: (sid: string) => void;
   cache: SessionCache;
 }
-
-interface ItemUser {
-  type: "user_msg";
-  key: string;
-  content: string;
-}
-
-interface ItemStep {
-  type: "step";
-  key: string;
-  step: Step;
-  isLatest: boolean;
-}
-
-type Item = ItemUser | ItemStep;
 
 export default function AgentDemo({
   sessionId,
   pendingNew,
-  workspace,
   onSessionCreated,
   cache,
 }: AgentDemoProps) {
-  const {
-    question,
-    setQuestion,
-    running,
-    steps,
-    answer,
-    messages,
-    handleRun,
-    toggleStep,
-    expandResult,
-  } = useAgentStream({
-    sessionId,
-    pendingNew,
-    workspace,
-    onSessionCreated,
-    cache,
-  });
+  const { question, setQuestion, running, transcripts, answer, handleRun } =
+    useAgentStream({ sessionId, pendingNew, onSessionCreated, cache });
 
   const composingRef = useRef(false);
   const [rows, setRows] = useState(1);
@@ -72,68 +39,56 @@ export default function AgentDemo({
     setRows(Math.min(Math.max(lines, 1), MAX_ROWS));
   };
 
-  // Interleave: user message → its response steps → next user message → ...
-  const items: Item[] = [];
-  const stepGroups: Record<number, Step[]> = {};
-  for (const s of steps) {
-    const mi = s.msgIndex ?? 0;
-    if (!stepGroups[mi]) stepGroups[mi] = [];
-    stepGroups[mi].push(s);
-  }
-  for (let mi = 0; mi < messages.length; mi++) {
-    items.push({
-      type: "user_msg",
-      key: `msg-${mi}`,
-      content: messages[mi].content,
-    });
-    const group = stepGroups[mi] || [];
-    for (let si = 0; si < group.length; si++) {
-      const s = group[si];
-      items.push({
-        type: "step",
-        key: `step-${s.step}`,
-        step: s,
-        isLatest: s === steps[steps.length - 1],
-      });
-    }
-  }
-  // Steps without a matching message (e.g., still streaming for latest)
-  const unmatched = steps.filter((s) => !messages[s.msgIndex ?? 0]);
-  for (const s of unmatched) {
-    items.push({
-      type: "step",
-      key: `step-${s.step}`,
-      step: s,
-      isLatest: s === steps[steps.length - 1],
-    });
-  }
-
   return (
     <div className="agent-demo">
       <div className="agent-scroll">
         <div className="agent-scroll-inner">
-          {items.map((item) => {
-            if (item.type === "user_msg") {
+          {transcripts.map((t) => {
+            const isUser = t.kind === "user_question";
+            const content = String(t.message.content || t.pendingChunks || "");
+            const isStreaming = !t.isFlushed && t.pendingChunks;
+
+            if (isUser) {
               return (
-                <div key={item.key} className="user-bubble">
+                <div key={t.id} className="user-bubble">
                   <span className="user-bubble-label">You</span>
-                  <p>{item.content}</p>
+                  <p>{content}</p>
                 </div>
               );
             }
-            const step = item.step;
+
+            // Assistant / tool / error transcripts
+            const label =
+              t.kind === "tool_result"
+                ? "\uD83D\uDD27 Tool"
+                : t.kind === "assistant"
+                  ? "\uD83D\uDCAC Assistant"
+                  : t.kind === "error"
+                    ? "\u26A0\uFE0F Error"
+                    : t.kind;
+
             return (
-              <StepCard
-                key={item.key}
-                step={step}
-                isLatest={item.isLatest}
-                onToggle={toggleStep}
-                onExpandResult={expandResult}
-              />
+              <div
+                key={t.id}
+                className={`transcript-card ${isStreaming ? "streaming" : ""}`}
+              >
+                <span className="transcript-label">{label}</span>
+                <div className="transcript-body">
+                  {t.kind === "tool_result" ? (
+                    <pre>
+                      {content.length > 500
+                        ? content.slice(0, 500) + "..."
+                        : content}
+                    </pre>
+                  ) : (
+                    <Markdown text={content} />
+                  )}
+                </div>
+              </div>
             );
           })}
 
-          {answer != null && answer !== "" && (
+          {answer && (
             <div className="agent-answer">
               <h3>{"\u2705"} Answer</h3>
               <Markdown text={answer} />

@@ -5,7 +5,6 @@ interface SessionSidebarProps {
   activeId: string | null;
   workspace: string;
   onWorkspaceChange: (workspace: string) => void;
-  onWorkspaceResolved: (workspace: string) => void;
   onSelect: (sid: string) => void;
   onNew: () => void;
 }
@@ -14,7 +13,6 @@ export default function SessionSidebar({
   activeId,
   workspace,
   onWorkspaceChange,
-  onWorkspaceResolved,
   onSelect,
   onNew,
 }: SessionSidebarProps) {
@@ -24,20 +22,16 @@ export default function SessionSidebar({
 
   const fetchSessions = async () => {
     try {
-      const query = workspace.trim()
-        ? `?workspace=${encodeURIComponent(workspace.trim())}`
-        : "";
-      const res = await fetch(`/api/sessions${query}`);
+      const res = await fetch("/api/sessions");
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
       const data: {
         workspace?: string;
         sessions: Array<SessionInfo | string>;
       } = await res.json();
-      if (data.workspace) onWorkspaceResolved(data.workspace);
       setSessions(
         (data.sessions || []).map((item) =>
           typeof item === "string"
-            ? { session_id: item, workspace: data.workspace || workspace }
+            ? { session_id: item, workspace: data.workspace || "" }
             : item,
         ),
       );
@@ -50,27 +44,34 @@ export default function SessionSidebar({
 
   useEffect(() => {
     fetchSessions();
-  }, [activeId, workspace]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch current workspace on mount
+  useEffect(() => {
+    fetch("/api/workspace")
+      .then((r) => r.json())
+      .then((data: { workspace: string }) => {
+        if (data.workspace && !workspace) {
+          onWorkspaceChange(data.workspace);
+        }
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const chooseWorkspace = async () => {
     setSelecting(true);
     try {
-      // Open native folder picker via File System Access API
       let selectedPath: string | null = null;
-
       try {
         const handle = await window.showDirectoryPicker({
           mode: "read",
           startIn: "documents",
         });
-        // Build a path hint: parent of current workspace + picked folder name
         const parent = workspace.split("/").slice(0, -1).join("/") || "/";
         selectedPath = `${parent}/${handle.name}`;
       } catch {
         // User cancelled — fall back to manual input
       }
-
-      // Let the user confirm / edit the path
       const path = window.prompt(
         "Workspace directory:",
         selectedPath || workspace || "",
@@ -79,7 +80,6 @@ export default function SessionSidebar({
         setError(null);
         return;
       }
-
       const res = await fetch("/api/workspace/set", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

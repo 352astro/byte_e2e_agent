@@ -12,8 +12,8 @@ set -euo pipefail
 # ── 定位项目根目录 ──────────────────────────────────
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-# ── 默认工作目录：当前 agent 项目根目录 ───────────────────
-DEFAULT_WORKSPACE="${AGENT_WORKSPACE:-$ROOT}"
+# ── 默认工作目录：用户执行 start.sh 时所在的目录 ──────────
+DEFAULT_WORKSPACE="${AGENT_WORKSPACE:-$(pwd)}"
 
 # ── 端口配置 ────────────────────────────────────────
 BACKEND_PORT="${PORT:-8000}"
