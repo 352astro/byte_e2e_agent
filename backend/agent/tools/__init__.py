@@ -12,6 +12,7 @@ from agent.tools.search import Search
 from agent.tools.shell import Shell
 from agent.tools.skill import LoadSkill
 from agent.tools.subtask import SubTask
+from agent.tools.task import Task, TaskList, TaskRewrite, TaskUpdate
 from agent.tools.toolset import ToolSet
 from agent.tools.write import Write
 
@@ -25,6 +26,9 @@ _ALL_TOOL_CLASSES: list[type[BaseTool]] = [
     Edit,
     LoadSkill,
     SubTask,
+    TaskList,
+    TaskRewrite,
+    TaskUpdate,
 ]
 
 
@@ -42,6 +46,10 @@ __all__ = [
     "Search",
     "Shell",
     "SubTask",
+    "Task",
+    "TaskList",
+    "TaskRewrite",
+    "TaskUpdate",
     "ToolSet",
     "Write",
     "get_all_tool_classes",
