@@ -8,7 +8,7 @@ class BaseTool(BaseModel):
 
     @classmethod
     def function_name(cls) -> str:
-        """OpenAI function 名称（默认由类名转换：Shell→Shell, PlanRewrite→PlanRewrite）。"""
+        """OpenAI function 名称（默认使用类名，如 Shell、Read、Write）。"""
         return cls.__name__
 
     async def execute(self, sandbox=None) -> str:

@@ -7,7 +7,6 @@ Tool / SubTool 等旧式声明已移除。
 
 from agent.tools.base import BaseTool
 from agent.tools.edit import Edit, EditOp
-from agent.tools.plan import PlanAdvance, PlanItem, PlanRewrite
 from agent.tools.read import Read
 from agent.tools.search import Search
 from agent.tools.shell import Shell
@@ -24,8 +23,6 @@ _ALL_TOOL_CLASSES: list[type[BaseTool]] = [
     Read,
     Write,
     Edit,
-    PlanRewrite,
-    PlanAdvance,
     LoadSkill,
     SubTask,
 ]
@@ -40,10 +37,7 @@ __all__ = [
     "BaseTool",
     "Edit",
     "EditOp",
-    "PlanAdvance",
-    "PlanItem",
     "LoadSkill",
-    "PlanRewrite",
     "Read",
     "Search",
     "Shell",
