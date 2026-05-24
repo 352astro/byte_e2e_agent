@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 from agent.llm import HelloAgentsLLM
-from agent.plan_manager import PlanManager
 from agent.sandbox import SandBox
 import agent.session_memory as session_memory
 from agent.tools.shell import get_platform_hint
@@ -21,8 +20,6 @@ Use the provided functions to interact with the system.
 
 ## Rules
 - Pick the function that best fits the current situation.
-- PlanRewrite — replace the entire plan (CAUTION: discards all progress)
-- PlanAdvance — move the current active plan item forward
 - SubTask    — delegate to a fresh sub-agent
 - Shell / Read / Write / Edit / Search / LoadSkill — executable tools
 - {platform_hint}
@@ -208,12 +205,6 @@ class ReActAgent:
                 print(event["chunk"], end="", flush=True)
             elif kind == "tool_result":
                 print(event["result"])
-            elif kind == "plan_rewrite":
-                items = event.get("items", [])
-                desc = items[0]["description"] if items else "?"
-                print(info(f"[Plan] Rewrite: {len(items)} item(s), first: {desc}"))
-            elif kind == "plan_advance":
-                print(info(f"[Plan] Advance: {event.get('summary', '?')}"))
             elif kind == "subtask_start":
                 print(info(f"[SubTask] launching: {event['prompt'][:80]}..."))
             elif kind == "subtask_end":
@@ -237,7 +228,6 @@ class ReActAgent:
     async def run_stream(
         self, question: str, max_steps: int = 10
     ) -> AsyncIterator[dict[str, Any]]:
-        plan_manager = PlanManager()
         current_step = 0
 
         # init system message once
@@ -263,11 +253,6 @@ class ReActAgent:
                 self._system_msg,
                 *self._messages,
             ]
-            plan_str = plan_manager.get_plan_string()
-            if plan_str != "(No plan yet — consider using PlanRewrite to create one.)":
-                step_messages.append(
-                    {"role": "user", "content": f"## Current Plan\n{plan_str}"}
-                )
 
             # 2. call LLM
             output = _LLMOutput()
@@ -302,7 +287,7 @@ class ReActAgent:
 
             # 5. execute tools
             for tc in output.tool_calls:
-                async for event in self._execute_one_tool(tc, plan_manager):
+                async for event in self._execute_one_tool(tc):
                     yield event
 
         yield {
@@ -360,7 +345,6 @@ class ReActAgent:
     async def _execute_one_tool(
         self,
         tc: dict,
-        plan_manager: PlanManager,
     ) -> AsyncIterator[dict[str, Any]]:
         """Parse and execute a single tool call. Yields frontend events."""
         func_name: str = tc["function"]["name"]
@@ -406,39 +390,8 @@ class ReActAgent:
             )
             return
 
-        # ── Plan / SubTask / other SandBox tools ────────
+        # ── SubTask / other SandBox tools ───────────────
         name = action.function_name()
-
-        if name == "PlanRewrite":
-            plan_manager.rewrite(action.items)
-            await self._record_message(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": "plan rewritten",
-                }
-            )
-            yield {
-                "type": "plan_rewrite",
-                "items": [it.model_dump() for it in action.items],
-            }
-            return
-
-        if name == "PlanAdvance":
-            plan_manager.advance(action.state)
-            await self._record_message(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": "plan advanced",
-                }
-            )
-            yield {
-                "type": "plan_advance",
-                "state": action.state,
-                "summary": f"item advanced to {action.state}",
-            }
-            return
 
         if name == "SubTask":
             yield {
