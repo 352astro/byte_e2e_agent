@@ -6,7 +6,7 @@ from typing import Any, AsyncIterator
 from agent.llm import HelloAgentsLLM
 from agent.plan_manager import PlanManager
 from agent.sandbox import SandBox
-from agent.session_memory import SessionMemory
+import agent.session_memory as session_memory
 from agent.tools.shell import get_platform_hint
 from agent.tools.skill import get_skills_summary
 from agent.tools.subtask import SubTask
@@ -69,10 +69,8 @@ class ReActAgent:
         self._toolset = toolset or _default_toolset()
         self._sandbox = sandbox or SandBox()
         self.session_id = session_id or self._sandbox.session_id
-        self._memory = (
-            SessionMemory(self._sandbox.workspace, self.session_id)
-            if persist_memory and self.session_id
-            else None
+        self._memory_workspace = (
+            self._sandbox.workspace if persist_memory and self.session_id else None
         )
         self._system_msg: dict | None = None
         self._messages: list[dict] = []  # OpenAI-format message chain (sole truth)
@@ -166,19 +164,21 @@ class ReActAgent:
 
     def _load_memory(self) -> None:
         """Load persisted context when this agent is bound to a session."""
-        if self._memory is None:
+        if self._memory_workspace is None:
             return
-        _, messages = self._memory.load()
-        self._messages = messages
+        self._messages = session_memory.load_memory(
+            self._memory_workspace,
+            self.session_id,
+        )
 
     async def _record_message(self, message: dict) -> None:
         self._messages.append(message)
-        if self._memory is not None:
-            await self._memory.append_message(message)
-
-    async def _touch_memory(self) -> None:
-        if self._memory is not None:
-            await self._memory.touch()
+        if self._memory_workspace is not None:
+            await session_memory.save_memory(
+                self._memory_workspace,
+                self.session_id,
+                message,
+            )
 
     # ── CLI loop ─────────────────────────────────────────
 
@@ -252,8 +252,6 @@ class ReActAgent:
 
         # Record user question in message chain
         question_msg = {"role": "user", "content": question}
-        if self._memory is not None:
-            await self._memory.ensure_session_name(question)
         await self._record_message(question_msg)
 
         while current_step < max_steps:
@@ -281,7 +279,6 @@ class ReActAgent:
             if output.finish_reason == "stop":
                 answer = output.content.strip() or "Done."
                 await self._record_message({"role": "assistant", "content": answer})
-                await self._touch_memory()
                 yield {"type": "finish", "answer": answer}
                 return
 
@@ -291,7 +288,6 @@ class ReActAgent:
                     "type": "error",
                     "message": "LLM returned no tool_calls and no content.",
                 }
-                await self._touch_memory()
                 break
 
             # Build assistant message for LLM context
@@ -308,9 +304,7 @@ class ReActAgent:
             for tc in output.tool_calls:
                 async for event in self._execute_one_tool(tc, plan_manager):
                     yield event
-            await self._touch_memory()
 
-        await self._touch_memory()
         yield {
             "type": "finish",
             "answer": "Maximum steps reached; could not produce a final answer.",

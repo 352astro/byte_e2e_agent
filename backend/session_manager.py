@@ -1,6 +1,6 @@
 """SessionManager — runtime cache for workspace-scoped sessions.
 
-Sessions are persisted by SessionMemory under:
+Sessions are persisted under:
   workspace/.tmp/{session_id}/
 
 SessionManager keeps only live ReActAgent instances in memory. After a process
@@ -9,6 +9,7 @@ restart it rebuilds agents lazily from (workspace, session_id).
 
 from __future__ import annotations
 
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -17,7 +18,8 @@ from typing import Any
 from agent.llm import HelloAgentsLLM
 from agent.react import ReActAgent
 from agent.sandbox import SandBox
-from agent.session_memory import SessionMemory
+
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class SessionManager:
@@ -39,57 +41,86 @@ class SessionManager:
 
     def create(self, workspace: str | None = None) -> dict[str, Any]:
         session_workspace = self._resolve_workspace(workspace)
-        sid = uuid.uuid4().hex[:12]
+        session_id = uuid.uuid4().hex[:12]
 
-        memory = SessionMemory(session_workspace, sid)
-        memory.ensure()
-
-        self._sessions[(session_workspace, sid)] = self._new_agent(session_workspace, sid)
-        return memory.load_meta()
+        messages_path = self._messages_path(session_workspace, session_id)
+        messages_path.parent.mkdir(parents=True, exist_ok=True)
+        messages_path.touch()
+        self._sessions[(session_workspace, session_id)] = self._new_agent(
+            session_workspace,
+            session_id,
+        )
+        return self._session_info(session_workspace, session_id)
 
     def list_info(self, workspace: str | None = None) -> list[dict[str, Any]]:
         session_workspace = self._resolve_workspace(workspace)
-        return SessionMemory.list_sessions(session_workspace)
+        tmp_dir = Path(session_workspace) / ".tmp"
+        if not tmp_dir.is_dir():
+            return []
 
-    def list_ids(self, workspace: str | None = None) -> list[str]:
-        return [item["session_id"] for item in self.list_info(workspace)]
+        sessions: list[tuple[float, dict[str, Any]]] = []
+        for entry in tmp_dir.iterdir():
+            if not entry.is_dir() or not self._valid_session_id(entry.name):
+                continue
+            messages_path = entry / "messages.jsonl"
+            if not messages_path.is_file():
+                continue
+            info = self._session_info(session_workspace, entry.name)
+            sessions.append((messages_path.stat().st_mtime, info))
 
-    def get(self, sid: str, workspace: str | None = None) -> ReActAgent:
+        sessions.sort(key=lambda item: item[0], reverse=True)
+        return [info for _, info in sessions]
+
+    def get(self, session_id: str, workspace: str | None = None) -> ReActAgent:
         session_workspace = self._resolve_workspace(workspace)
-        key = (session_workspace, sid)
+        key = (session_workspace, session_id)
         if key not in self._sessions:
-            memory = SessionMemory(session_workspace, sid)
-            if not memory.exists():
-                raise KeyError(f"Session not found: {sid}")
-            self._sessions[key] = self._new_agent(session_workspace, sid)
+            if not self._messages_path(session_workspace, session_id).is_file():
+                raise KeyError(f"Session not found: {session_id}")
+            self._sessions[key] = self._new_agent(session_workspace, session_id)
         return self._sessions[key]
 
-    def get_info(self, sid: str, workspace: str | None = None) -> dict[str, Any]:
+    def get_info(self, session_id: str, workspace: str | None = None) -> dict[str, Any]:
         session_workspace = self._resolve_workspace(workspace)
-        memory = SessionMemory(session_workspace, sid)
-        if not memory.exists():
-            raise KeyError(f"Session not found: {sid}")
-        return memory.load_meta()
+        if not self._messages_path(session_workspace, session_id).is_file():
+            raise KeyError(f"Session not found: {session_id}")
+        return self._session_info(session_workspace, session_id)
 
-    def get_history(self, sid: str, workspace: str | None = None) -> list[dict]:
-        return self.get(sid, workspace).get_history()
+    def get_history(self, session_id: str, workspace: str | None = None) -> list[dict]:
+        return self.get(session_id, workspace).get_history()
 
     def resolve_workspace(self, workspace: str | None = None) -> str:
         return self._resolve_workspace(workspace)
 
-    async def delete(self, sid: str, workspace: str | None = None) -> None:
+    async def delete(self, session_id: str, workspace: str | None = None) -> None:
         session_workspace = self._resolve_workspace(workspace)
-        agent = self._sessions.pop((session_workspace, sid), None)
+        agent = self._sessions.pop((session_workspace, session_id), None)
         if agent is not None:
             await agent.clear()
 
-        session_dir = Path(session_workspace) / ".tmp" / sid
+        session_dir = self._session_dir(session_workspace, session_id)
         if session_dir.is_dir():
             shutil.rmtree(session_dir)
 
-    def _new_agent(self, workspace: str, sid: str) -> ReActAgent:
-        sandbox = SandBox(workspace, session_id=sid)
-        return ReActAgent(llm_client=self.llm, sandbox=sandbox, session_id=sid)
+    def _new_agent(self, workspace: str, session_id: str) -> ReActAgent:
+        sandbox = SandBox(workspace, session_id=session_id)
+        return ReActAgent(llm_client=self.llm, sandbox=sandbox, session_id=session_id)
+
+    def _session_dir(self, workspace: str, session_id: str) -> Path:
+        if not self._valid_session_id(session_id):
+            raise ValueError(f"Invalid session_id: {session_id!r}")
+        return Path(workspace) / ".tmp" / session_id
+
+    def _messages_path(self, workspace: str, session_id: str) -> Path:
+        return self._session_dir(workspace, session_id) / "messages.jsonl"
+
+    @staticmethod
+    def _session_info(workspace: str, session_id: str) -> dict[str, Any]:
+        return {"session_id": session_id, "workspace": workspace}
+
+    @staticmethod
+    def _valid_session_id(session_id: str) -> bool:
+        return bool(_SESSION_ID_RE.fullmatch(session_id))
 
     def _resolve_workspace(self, workspace: str | None) -> str:
         if workspace is None or not workspace.strip():
