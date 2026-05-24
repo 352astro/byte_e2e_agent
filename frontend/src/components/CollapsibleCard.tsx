@@ -12,6 +12,8 @@ interface CollapsibleCardProps {
   children?: ReactNode;
   /** If true, shows overlay chevron even without a title (for standalone cards). */
   standalone?: boolean;
+  /** Optional data-fid for focus targeting. */
+  dataFid?: string;
 }
 
 export default function CollapsibleCard({
@@ -24,13 +26,14 @@ export default function CollapsibleCard({
   headerClassName = "",
   children,
   standalone = false,
+  dataFid,
 }: CollapsibleCardProps) {
   const hasContent = Boolean(children);
   const hasHeader = Boolean(title);
   const showChevron = hasContent && (hasHeader || standalone);
 
   return (
-    <div className={`tool-card${cardClassName ? ` ${cardClassName}` : ""}`}>
+    <div className={`tool-card${cardClassName ? ` ${cardClassName}` : ""}`} data-fid={dataFid}>
       {hasHeader && (
         <div
           className={`tool-card-header${headerClassName ? ` ${headerClassName}` : ""}`}

@@ -3,6 +3,7 @@ import Markdown from "./Markdown";
 import Icon from "./Icon";
 import CollapsibleCard from "./CollapsibleCard";
 import ToolResult from "./ToolResult";
+import { Focusable } from "../hooks/FocusContext";
 import { TranscriptKind, ChunkKind } from "../constants";
 import type { DisplayTranscript, SubStream } from "../types";
 
@@ -94,16 +95,19 @@ function ThinkingBlock({
   active,
   thinkingState,
   onToggle,
+  focusId,
 }: {
   ss: SubStream;
   active: boolean;
   thinkingState: Set<string>;
   onToggle: (id: string) => void;
+  focusId?: string;
 }) {
   const done = !active;
   const expanded = active || thinkingState.has(ss.id);
   return (
     <div
+      data-fid={focusId}
       className={`thinking-block${expanded ? " thinking-block--open" : ""}${done ? " thinking-block--done" : ""}`}
     >
       <div className="thinking-header" onClick={() => done && onToggle(ss.id)}>
@@ -205,7 +209,9 @@ function ShellCallCard({
   onToggle: (id: string) => void;
 }) {
   const timeoutMs = extractArg(args, "timeout_ms");
-  const timeout = timeoutMs ? String(Math.round(Number(timeoutMs) / 1000)) : null;
+  const timeout = timeoutMs
+    ? String(Math.round(Number(timeoutMs) / 1000))
+    : null;
   const command = extractArg(args, "command");
   return (
     <CollapsibleCard
@@ -222,7 +228,9 @@ function ShellCallCard({
       }
       headerRight={
         <>
-          {active && timeout && <span className="shell-call-timeout">{timeout}s</span>}
+          {active && timeout && (
+            <span className="shell-call-timeout">{timeout}s</span>
+          )}
           {active && <span className="shell-call-spinner" />}
         </>
       }
@@ -310,15 +318,17 @@ type ChunkRenderer = (props: {
   active: boolean;
   thinkingState: Set<string>;
   onToggleThinking: (id: string) => void;
+  focusId?: string;
 }) => React.ReactNode;
 
 const chunkRenderers: Partial<Record<string, ChunkRenderer>> = {
-  [ChunkKind.Thinking]: ({ ss, active, thinkingState, onToggleThinking }) => (
+  [ChunkKind.Thinking]: ({ ss, active, thinkingState, onToggleThinking, focusId }) => (
     <ThinkingBlock
       ss={ss}
       active={active}
       thinkingState={thinkingState}
       onToggle={onToggleThinking}
+      focusId={focusId}
     />
   ),
   [ChunkKind.Response]: ({ ss }) => <ResponseBlock ss={ss} />,
@@ -334,7 +344,10 @@ interface TranscriptCardProps {
   hideToolCards?: boolean;
 }
 
-export default function TranscriptCard({ transcript: t, hideToolCards = false }: TranscriptCardProps) {
+export default function TranscriptCard({
+  transcript: t,
+  hideToolCards = false,
+}: TranscriptCardProps) {
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(
     new Set(),
   );
@@ -437,9 +450,9 @@ export default function TranscriptCard({ transcript: t, hideToolCards = false }:
 
   return (
     <div className="transcript-card assistant-card">
-      <div className="assistant-splitter" />
       {plainItems.map(({ ss, active: isActive }, i) => {
         const renderer = chunkRenderers[ss.kind];
+        const fid = `${t.id}/${ss.kind}/${i}`;
         return renderer ? (
           <span key={`${ss.id}-${i}`}>
             {renderer({
@@ -447,65 +460,67 @@ export default function TranscriptCard({ transcript: t, hideToolCards = false }:
               active: isActive,
               thinkingState: expandedThinking,
               onToggleThinking: toggleThinking,
+              focusId: fid,
             })}
           </span>
         ) : (
-          <div key={`${ss.id}-${i}`} className="transcript-body">
+          <div key={`${ss.id}-${i}`} className="transcript-body" data-fid={fid}>
             <Markdown text={ss.text} />
           </div>
         );
       })}
 
-      {!hideToolCards && Array.from(toolCards.entries()).map(([id, g]) => {
-        const collapsed = collapsedCards.has(id);
-        if (g.name === "Shell") {
+      {!hideToolCards &&
+        Array.from(toolCards.entries()).map(([id, g]) => {
+          const collapsed = collapsedCards.has(id);
+          if (g.name === "Shell") {
+            return (
+              <ShellCallCard
+                key={id}
+                cardId={id}
+                args={g.args}
+                active={g.active}
+                collapsed={collapsed}
+                onToggle={toggleCard}
+              />
+            );
+          }
+          if (g.name === "Write") {
+            return (
+              <WriteCallCard
+                key={id}
+                cardId={id}
+                args={g.args}
+                active={g.active}
+                collapsed={collapsed}
+                onToggle={toggleCard}
+              />
+            );
+          }
+          if (g.name === "Read") {
+            return (
+              <ReadResultCard
+                key={id}
+                cardId={id}
+                args={g.args}
+                active={g.active}
+                collapsed={collapsed}
+                onToggle={toggleCard}
+              />
+            );
+          }
           return (
-            <ShellCallCard
+            <GenericToolCard
               key={id}
               cardId={id}
+              name={g.name}
               args={g.args}
               active={g.active}
               collapsed={collapsed}
               onToggle={toggleCard}
             />
           );
-        }
-        if (g.name === "Write") {
-          return (
-            <WriteCallCard
-              key={id}
-              cardId={id}
-              args={g.args}
-              active={g.active}
-              collapsed={collapsed}
-              onToggle={toggleCard}
-            />
-          );
-        }
-        if (g.name === "Read") {
-          return (
-            <ReadResultCard
-              key={id}
-              cardId={id}
-              args={g.args}
-              active={g.active}
-              collapsed={collapsed}
-              onToggle={toggleCard}
-            />
-          );
-        }
-        return (
-          <GenericToolCard
-            key={id}
-            cardId={id}
-            name={g.name}
-            args={g.args}
-            active={g.active}
-            collapsed={collapsed}
-            onToggle={toggleCard}
-          />
-        );
-      })}
+        })}
     </div>
   );
 }

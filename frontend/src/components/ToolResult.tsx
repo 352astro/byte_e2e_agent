@@ -3,6 +3,7 @@ import Icon from "./Icon";
 import CollapsibleCard from "./CollapsibleCard";
 import HighlightCode from "./HighlightCode";
 import FileContent from "./FileContent";
+import Markdown from "./Markdown";
 
 // ── Helpers ──────────────────────────────────────────────
 

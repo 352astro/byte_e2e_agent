@@ -21,6 +21,7 @@ export default function SessionSidebar({
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selecting, setSelecting] = useState(false);
+  const workspaceLoadedRef = useRef(false);
   const [menuSid, setMenuSid] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const sidebarRef = useRef<HTMLDivElement | null>(null);
@@ -56,7 +57,8 @@ export default function SessionSidebar({
     fetch("/api/workspace")
       .then((r) => r.json())
       .then((data: { workspace: string }) => {
-        if (data.workspace && !workspace) {
+        if (data.workspace && !workspaceLoadedRef.current) {
+          workspaceLoadedRef.current = true;
           onWorkspaceChange(data.workspace);
         }
       })

@@ -353,11 +353,11 @@
     border-radius: 0;
 }
 
-
 .tool-card-header {
     display: flex;
     align-items: center;
     gap: 6px;
+    padding: 3px 0;
     cursor: pointer;
     user-select: none;
 }
@@ -582,14 +582,18 @@
     border-radius: 4px;
     background: #1e1e1e;
     color: #d4d4d4;
-    font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+    font-family:
+        ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+        monospace;
     white-space: pre-wrap;
     word-break: break-word;
     font-size: 0.82rem;
     line-height: 1.5;
     overflow-x: auto;
     font-size: 0.82rem;
-    font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+    font-family:
+        ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+        monospace;
     white-space: pre-wrap;
     word-break: break-word;
     color: #d4d4d4;
@@ -647,7 +651,9 @@
     margin: 0;
     padding: 12px 14px;
     font-size: 0.82rem;
-    font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+    font-family:
+        ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+        monospace;
     white-space: pre-wrap;
     word-break: break-word;
     color: #333;
@@ -747,7 +753,9 @@
 }
 
 @keyframes shell-spin {
-    to { transform: rotate(360deg); }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .shell-call-command {
@@ -756,14 +764,18 @@
     border-radius: 4px;
     background: #1e1e1e;
     color: #d4d4d4;
-    font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+    font-family:
+        ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+        monospace;
     white-space: pre-wrap;
     word-break: break-word;
     font-size: 0.82rem;
     line-height: 1.5;
     overflow-x: auto;
     font-size: 0.82rem;
-    font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+    font-family:
+        ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+        monospace;
     white-space: pre-wrap;
     word-break: break-word;
     color: #d4d4d4;
@@ -790,7 +802,6 @@
 .tool-standalone:hover .card-chevron {
     opacity: 1;
 }
-
 
 /* ── Write call card (light indigo) ─────────── */
 
@@ -922,7 +933,7 @@
 .assistant-splitter {
     height: 1px;
     background: #e8e8e8;
-    margin-bottom: 12px;
+    margin: 8px 0;
 }
 
 /* Overlay chevron for standalone header-less cards */
@@ -935,3 +946,88 @@
     right: 8px;
     z-index: 1;
 }
+
+/* ── Rainbow glow on latest card ────────────── */
+
+[data-fid].card-latest {
+    animation: rainbow-glow 3s linear infinite;
+    border-radius: 4px;
+}
+
+@keyframes rainbow-glow {
+    0% {
+        box-shadow:
+            12px 0 24px hsla(0, 70%, 55%, 0.5),
+            -12px 0 24px hsla(0, 70%, 55%, 0.5),
+            0 0 4px hsla(0, 70%, 55%, 0.5),
+            0 0 2px hsla(0, 70%, 55%, 0.25);
+    }
+    14% {
+        box-shadow:
+            12px 0 24px hsla(50, 70%, 55%, 0.5),
+            -12px 0 24px hsla(50, 70%, 55%, 0.5),
+            0 0 4px hsla(50, 70%, 55%, 0.5),
+            0 0 2px hsla(50, 70%, 55%, 0.25);
+    }
+    28% {
+        box-shadow:
+            12px 0 24px hsla(100, 70%, 55%, 0.5),
+            -12px 0 24px hsla(100, 70%, 55%, 0.5),
+            0 0 4px hsla(100, 70%, 55%, 0.5),
+            0 0 2px hsla(100, 70%, 55%, 0.25);
+    }
+    42% {
+        box-shadow:
+            12px 0 24px hsla(150, 70%, 55%, 0.5),
+            -12px 0 24px hsla(150, 70%, 55%, 0.5),
+            0 0 4px hsla(150, 70%, 55%, 0.5),
+            0 0 2px hsla(150, 70%, 55%, 0.25);
+    }
+    57% {
+        box-shadow:
+            12px 0 24px hsla(200, 70%, 55%, 0.5),
+            -12px 0 24px hsla(200, 70%, 55%, 0.5),
+            0 0 4px hsla(200, 70%, 55%, 0.5),
+            0 0 2px hsla(200, 70%, 55%, 0.25);
+    }
+    71% {
+        box-shadow:
+            12px 0 24px hsla(250, 70%, 55%, 0.5),
+            -12px 0 24px hsla(250, 70%, 55%, 0.5),
+            0 0 4px hsla(250, 70%, 55%, 0.5),
+            0 0 2px hsla(250, 70%, 55%, 0.25);
+    }
+    85% {
+        box-shadow:
+            12px 0 24px hsla(300, 70%, 55%, 0.5),
+            -12px 0 24px hsla(300, 70%, 55%, 0.5),
+            0 0 4px hsla(300, 70%, 55%, 0.5),
+            0 0 2px hsla(300, 70%, 55%, 0.25);
+    }
+    100% {
+        box-shadow:
+            12px 0 24px hsla(360, 70%, 55%, 0.5),
+            -12px 0 24px hsla(360, 70%, 55%, 0.5),
+            0 0 4px hsla(360, 70%, 55%, 0.5),
+            0 0 2px hsla(360, 70%, 55%, 0.25);
+    }
+}
+
+/* Hover glow on non-focused cards */
+/* Hover: white glow on non-focused sub-components */
+[data-fid]:not(.card-latest):hover {
+    box-shadow:
+        10px 0 20px hsla(0, 0%, 60%, 0.25),
+        -10px 0 20px hsla(0, 0%, 60%, 0.25),
+        0 0 4px hsla(0, 0%, 60%, 0.25),
+        0 0 1px hsla(0, 0%, 60%, 0.1);
+    border-radius: 4px;
+}
+
+/* User bubble always has a subtle white glow */
+.user-bubble {
+    box-shadow:
+        0 0 4px hsla(0, 0%, 60%, 0.2),
+        0 0 1px hsla(0, 0%, 60%, 0.1);
+}
+

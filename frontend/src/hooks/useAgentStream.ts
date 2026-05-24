@@ -54,6 +54,11 @@ export default function useAgentStream({
         }
 
         if (!sessionId) {
+            // If a stream is being set up (lazy session creation in flight),
+            // do NOT clear currentSid — the next render will have the real sessionId.
+            if (streamingSidRef.current) {
+                return;
+            }
             if (abortRef.current) {
                 abortRef.current.abort();
                 abortRef.current = null;

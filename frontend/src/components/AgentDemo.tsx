@@ -65,10 +65,7 @@ export default function AgentDemo({
   }, [sessionId, scrollToBottom]);
 
   // ── Tool pairing ─────────────────────────────
-  const toolPairs = useMemo(
-    () => pairToolCalls(transcripts, 0),
-    [transcripts],
-  );
+  const toolPairs = useMemo(() => pairToolCalls(transcripts, 0), [transcripts]);
 
   // Group pairs by callTranscriptId for interleaved rendering
   const pairsByCallId = useMemo(() => {
@@ -95,6 +92,24 @@ export default function AgentDemo({
     ? `${toolPairs[toolPairs.length - 1].callTranscriptId}/${toolPairs[toolPairs.length - 1].callIndex}`
     : null;
 
+  // ── Click-to-focus (rainbow glow) ───────────
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+
+  // Toggle card-latest class via data-fid attribute
+  useEffect(() => {
+    document
+      .querySelectorAll(".card-latest")
+      .forEach((el) => el.classList.remove("card-latest"));
+    if (focusedId) {
+      document
+        .querySelectorAll(`[data-fid="${focusedId}"]`)
+        .forEach((el) => el.classList.add("card-latest"));
+    }
+  }, [focusedId]);
+  const focusElement = useCallback((id: string) => {
+    setFocusedId(id);
+  }, []);
+
   // ── Input handlers ───────────────────────────
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -115,31 +130,55 @@ export default function AgentDemo({
   return (
     <div className="agent-demo">
       <div className="agent-scroll" ref={scrollRef} onScroll={handleScroll}>
-        <div className="agent-scroll-inner">
+        <div
+          className="agent-scroll-inner"
+          onClick={(e) => {
+            const el = (e.target as HTMLElement).closest("[data-fid]");
+            if (el) {
+              const fid = el.getAttribute("data-fid");
+              if (fid) setFocusedId(fid);
+            }
+          }}
+        >
           {transcripts.map((t) => {
             // Result consumed by a pair — skip
             if (pairedResultIds.has(t.id)) return null;
-            // Call transcript with tool pairs — render both
+            // Call transcript with tool pairs — render both with click-to-focus
             const pairs = pairsByCallId.get(t.id);
             if (pairs) {
               return (
-                <span key={t.id}>
-                  <TranscriptCard transcript={t} hideToolCards />
-                  {pairs.map((pair) => (
-                    <ToolPairCard
-                      key={`${pair.callTranscriptId}/${pair.callIndex}`}
-                      pair={pair}
-                      defaultCollapsed={
-                        latestPairKey !==
-                        `${pair.callTranscriptId}/${pair.callIndex}`
-                      }
-                    />
-                  ))}
-                </span>
+                <>
+                  {t.kind === "assistant" && (
+                    <div className="assistant-splitter" />
+                  )}
+                  <span key={t.id}>
+                    <TranscriptCard transcript={t} hideToolCards />
+                    {pairs.map((pair) => (
+                      <ToolPairCard
+                        key={`${pair.callTranscriptId}/${pair.callIndex}`}
+                        pair={pair}
+                        defaultCollapsed={
+                          latestPairKey !==
+                          `${pair.callTranscriptId}/${pair.callIndex}`
+                        }
+                      />
+                    ))}
+                  </span>
+                </>
               );
             }
-            // Regular transcript
-            return <TranscriptCard key={t.id} transcript={t} />;
+            // Regular transcript — user bubbles need to be direct flex children
+            if (t.kind === "user_question") {
+              return <TranscriptCard key={t.id} transcript={t} />;
+            }
+            return (
+              <span key={t.id}>
+                {t.kind === "assistant" && (
+                  <div className="assistant-splitter" />
+                )}
+                <TranscriptCard transcript={t} />
+              </span>
+            );
           })}
 
           <div className="agent-bottom-spacer" />

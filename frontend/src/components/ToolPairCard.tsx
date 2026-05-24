@@ -36,11 +36,13 @@ function ShellPair({ pair, defaultCollapsed }: { pair: ToolPair; defaultCollapse
   const command = extractArg(pair.arguments, "command");
   const hasResult = Boolean(pair.result);
 
+  const pairId = `${pair.callTranscriptId}/${pair.callIndex}`;
   return (
     <>
       {/* Call card */}
       <CollapsibleCard
         id={`${pair.callTranscriptId}/shell`}
+        dataFid={pairId}
         collapsed={collapsed}
         onToggle={() => setCollapsed((p) => !p)}
         cardClassName="tool-card--shell"
@@ -71,6 +73,7 @@ function ShellPair({ pair, defaultCollapsed }: { pair: ToolPair; defaultCollapse
       {pair.result && (
         <CollapsibleCard
           id={`${pair.result.id}/result`}
+          dataFid={pairId}
           collapsed={collapsed}
           onToggle={() => setCollapsed((p) => !p)}
           cardClassName="tool-card--shell"
@@ -112,9 +115,11 @@ function ReadWritePair({
         : "";
   const hasContent = Boolean(content);
 
+  const pairId = `${pair.callTranscriptId}/${pair.callIndex}`;
   return (
     <CollapsibleCard
       id={`${pair.callTranscriptId}/${variant.toLowerCase()}`}
+      dataFid={pairId}
       collapsed={collapsed}
       onToggle={() => setCollapsed((p) => !p)}
       cardClassName={
@@ -148,10 +153,12 @@ function DefaultPair({ pair, defaultCollapsed }: { pair: ToolPair; defaultCollap
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   useEffect(() => { if (defaultCollapsed) setCollapsed(true); }, [defaultCollapsed]);
 
+  const pairId = `${pair.callTranscriptId}/${pair.callIndex}`;
   return (
     <>
       <CollapsibleCard
         id={`${pair.callTranscriptId}/default`}
+        dataFid={pairId}
         collapsed={collapsed}
         onToggle={() => setCollapsed((p) => !p)}
         title={
@@ -171,6 +178,7 @@ function DefaultPair({ pair, defaultCollapsed }: { pair: ToolPair; defaultCollap
       {pair.result && (
         <CollapsibleCard
           id={`${pair.result.id}/result`}
+          dataFid={pairId}
           collapsed={collapsed}
           onToggle={() => setCollapsed((p) => !p)}
         >
