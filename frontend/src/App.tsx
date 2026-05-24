@@ -23,15 +23,16 @@ export default function App() {
     setPendingNew(true);
   }, []);
 
+  // Called when a new session is lazy-created (first message sent in "New Session" mode)
+  const handleSessionCreated = useCallback((sid: string) => {
+    setSessionId(sid);
+    setPendingNew(false);
+  }, []);
+
   const handleWorkspaceChange = useCallback((nextWorkspace: string) => {
     setWorkspace(nextWorkspace);
     setSessionId(null);
     setPendingNew(false);
-  }, []);
-
-  const handleSessionCreated = useCallback((sid: string, resolvedWorkspace?: string) => {
-    if (resolvedWorkspace) setWorkspace(resolvedWorkspace);
-    setSessionId(sid);
   }, []);
 
   return (
@@ -40,7 +41,6 @@ export default function App() {
         activeId={sessionId}
         workspace={workspace}
         onWorkspaceChange={handleWorkspaceChange}
-        onWorkspaceResolved={setWorkspace}
         onSelect={handleSelect}
         onNew={handleNew}
       />
@@ -49,7 +49,6 @@ export default function App() {
           <AgentDemo
             sessionId={sessionId}
             pendingNew={pendingNew}
-            workspace={workspace}
             onSessionCreated={handleSessionCreated}
             cache={cacheRef.current}
           />
