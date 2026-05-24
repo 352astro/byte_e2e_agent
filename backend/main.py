@@ -1,7 +1,5 @@
 import json
 import os
-import platform
-import subprocess
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -45,60 +43,19 @@ def hello() -> dict[str, str]:
 # ── Workspace management ────────────────────────────────
 
 
-def _select_folder(initial_dir: str) -> str | None:
-    if platform.system() == "Darwin":
-        apple_initial_dir = initial_dir.replace("\\", "\\\\").replace('"', '\\"')
-        script = (
-            'POSIX path of (choose folder with prompt "Select agent workspace" '
-            f'default location POSIX file "{apple_initial_dir}")'
-        )
-        result = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            return None
-        return result.stdout.strip()
+class SetWorkspaceRequest(BaseModel):
+    path: str = Field(..., description="Absolute or relative path to new workspace")
 
-    import tkinter as tk
-    from tkinter import filedialog
 
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
+@app.post("/api/workspace/set")
+def set_workspace(req: SetWorkspaceRequest) -> dict:
+    """Validate and apply a workspace path sent from the frontend."""
     try:
-        selected = filedialog.askdirectory(
-            title="Select agent workspace",
-            initialdir=initial_dir,
-            mustexist=True,
-        )
-    finally:
-        root.destroy()
-    return selected or None
-
-
-class SelectWorkspaceRequest(BaseModel):
-    current: str | None = Field(default=None, description="Current workspace directory")
-
-
-@app.post("/api/workspace/select")
-def select_workspace(req: SelectWorkspaceRequest | None = None) -> dict:
-    try:
-        initial_dir = sessions.resolve_workspace(req.current if req else None)
-    except ValueError:
-        initial_dir = sessions.default_workspace
-
-    selected = _select_folder(initial_dir)
-    if not selected:
-        return {"workspace": initial_dir, "cancelled": True}
-
-    try:
-        workspace = sessions.resolve_workspace(selected)
+        resolved = sessions.resolve_workspace(req.path)
+        sessions.set_default_workspace(resolved)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return {"workspace": workspace, "cancelled": False}
+    return {"workspace": resolved}
 
 
 # ── Session management ──────────────────────────────────

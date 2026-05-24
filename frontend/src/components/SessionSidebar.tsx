@@ -29,8 +29,10 @@ export default function SessionSidebar({
         : "";
       const res = await fetch(`/api/sessions${query}`);
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      const data: { workspace?: string; sessions: Array<SessionInfo | string> } =
-        await res.json();
+      const data: {
+        workspace?: string;
+        sessions: Array<SessionInfo | string>;
+      } = await res.json();
       if (data.workspace) onWorkspaceResolved(data.workspace);
       setSessions(
         (data.sessions || []).map((item) =>
@@ -53,14 +55,45 @@ export default function SessionSidebar({
   const chooseWorkspace = async () => {
     setSelecting(true);
     try {
-      const res = await fetch("/api/workspace/select", {
+      // Open native folder picker via File System Access API
+      let selectedPath: string | null = null;
+
+      try {
+        const handle = await window.showDirectoryPicker({
+          mode: "read",
+          startIn: "documents",
+        });
+        // Build a path hint: parent of current workspace + picked folder name
+        const parent = workspace.split("/").slice(0, -1).join("/") || "/";
+        selectedPath = `${parent}/${handle.name}`;
+      } catch {
+        // User cancelled — fall back to manual input
+      }
+
+      // Let the user confirm / edit the path
+      const path = window.prompt(
+        "Workspace directory:",
+        selectedPath || workspace || "",
+      );
+      if (!path || !path.trim()) {
+        setError(null);
+        return;
+      }
+
+      const res = await fetch("/api/workspace/set", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ current: workspace || null }),
+        body: JSON.stringify({ path: path.trim() }),
       });
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      const data: { workspace?: string; cancelled?: boolean } = await res.json();
-      if (data.workspace && !data.cancelled) onWorkspaceChange(data.workspace);
+      if (!res.ok) {
+        const detail = await res
+          .json()
+          .then((d) => d.detail)
+          .catch(() => "Unknown error");
+        throw new Error(detail);
+      }
+      const data: { workspace: string } = await res.json();
+      onWorkspaceChange(data.workspace);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -93,19 +126,19 @@ export default function SessionSidebar({
         {sessions.map((session) => {
           const label = session.session_name || session.session_id;
           return (
-          <div
-            key={session.session_id}
-            className={`sidebar-item ${
-              session.session_id === activeId ? "active" : ""
-            }`}
-            onClick={() => onSelect(session.session_id)}
-          >
-            <span className="sidebar-item-dot" />
-            <span className="sidebar-item-text">
-              <span className="sidebar-item-title">{label}</span>
-              <span className="sidebar-item-id">{session.session_id}</span>
-            </span>
-          </div>
+            <div
+              key={session.session_id}
+              className={`sidebar-item ${
+                session.session_id === activeId ? "active" : ""
+              }`}
+              onClick={() => onSelect(session.session_id)}
+            >
+              <span className="sidebar-item-dot" />
+              <span className="sidebar-item-text">
+                <span className="sidebar-item-title">{label}</span>
+                <span className="sidebar-item-id">{session.session_id}</span>
+              </span>
+            </div>
           );
         })}
       </div>

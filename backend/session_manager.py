@@ -39,6 +39,10 @@ class SessionManager:
     def default_workspace(self) -> str:
         return self._default_workspace
 
+    def set_default_workspace(self, workspace: str) -> None:
+        """Set the default workspace directory (applied to new sessions)."""
+        self._default_workspace = self._normalize_workspace(workspace)
+
     def create(self, workspace: str | None = None) -> dict[str, Any]:
         session_workspace = self._resolve_workspace(workspace)
         session_id = uuid.uuid4().hex[:12]
