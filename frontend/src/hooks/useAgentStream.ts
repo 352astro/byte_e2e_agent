@@ -46,12 +46,6 @@ export default function useAgentStream({
     // ── session switch: save & restore ────────────────
 
     useEffect(() => {
-        // Abort previous stream
-        if (abortRef.current) {
-            abortRef.current.abort();
-            abortRef.current = null;
-        }
-
         // Save current state ONLY when switching to a different session
         if (currentSid && currentSid !== sessionId) {
             cache[currentSid] = {
@@ -63,6 +57,11 @@ export default function useAgentStream({
 
         // ── No session selected / New Session (blank slate) ──
         if (!sessionId) {
+            // Abort any in-flight stream from previous session
+            if (abortRef.current) {
+                abortRef.current.abort();
+                abortRef.current = null;
+            }
             setTranscripts([]);
             setAnswer(null);
             lastIdRef.current = null;
@@ -74,6 +73,12 @@ export default function useAgentStream({
         if (sessionId === streamingSidRef.current) {
             setCurrentSid(sessionId);
             return;
+        }
+
+        // Abort previous stream (only when genuinely switching sessions)
+        if (abortRef.current) {
+            abortRef.current.abort();
+            abortRef.current = null;
         }
 
         // ── Cache hit (completed session) ──────────────
@@ -254,6 +259,9 @@ export default function useAgentStream({
 
         // User question is sent by backend SSE — no manual insert needed
 
+        // Block recover fetch while SSE is populating (for all messages, not just lazy-created)
+        streamingSidRef.current = sid;
+
         // POST /chat returns SSE directly (subscribe-before-start)
         const controller = new AbortController();
         abortRef.current = controller;
@@ -304,6 +312,7 @@ export default function useAgentStream({
         } finally {
             if (abortRef.current === controller) abortRef.current = null;
             streamingSidRef.current = null; // allow recover fetch again
+            lazyCreatedRef.current = null; // allow recover fetch for this session later
             setRunning(false);
         }
     }, [
