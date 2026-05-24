@@ -9,20 +9,28 @@ byte_e2e_agent/
 ├── start.sh                   # 一键启动前后端
 ├── docs/                      # 变更文档
 ├── backend/
-│   ├── main.py                # FastAPI 入口 + 工作区 / Session / SSE API
-│   ├── project.py             # 工作区、Session 与调度器编排
+│   ├── main.py                # FastAPI app factory 与 uvicorn 入口
 │   ├── README.md              # 后端说明入口
 │   ├── .python-version        # Python 版本声明
 │   ├── .env.example           # 环境变量模板
 │   ├── pyproject.toml         # 依赖声明（uv 用）
 │   ├── requirements.txt       # 依赖声明（pip 用）
 │   ├── uv.lock                # uv 锁定文件
+│   ├── app/                   # FastAPI 应用层（API / 配置 / schema / service）
+│   │   ├── api/
+│   │   │   ├── router.py      # 路由聚合
+│   │   │   ├── sse.py         # SSE 响应辅助函数
+│   │   │   └── routes/        # health / workspace / sessions / chat
+│   │   ├── core/              # 配置与 CORS
+│   │   ├── schemas/           # 请求模型
+│   │   ├── services/
+│   │   │   └── project.py     # 工作区、Session 与调度器编排
+│   │   └── dependencies.py    # FastAPI 依赖注入
 │   └── agent/
 │       ├── llm.py             # LLM 客户端（OpenAI 兼容）
 │       ├── scheduler.py       # 单例执行调度器与 ReAct 工具调用循环
 │       ├── session.py         # Session 数据容器与 JSONL 持久化
-│       ├── transcript.py      # 会话事件存储单元
-│       ├── stream_channel.py  # SSE chunk / flush 广播通道
+│       ├── transcript.py      # Transcript 存储单元 + SSE chunk / flush 完成器
 │       ├── sandbox.py         # 工作区沙箱、路径安全与工具执行分流
 │       ├── terminal.py        # 持久 Shell 会话（跨平台 PIPE）
 │       ├── tools/             # 工具系统（Shell/Read/Write/Edit/Search/…）
@@ -68,7 +76,7 @@ cp backend/.env.example backend/.env
 ### 2. 一键启动（推荐）
 
 ```bash
-`./start.sh`
+./start.sh
 ```
 
 前后端同时启动，Ctrl+C 一键停止。可在任意目录执行。
@@ -80,7 +88,7 @@ cp backend/.env.example backend/.env
 ```bash
 cd backend
 uv sync                                   # uv 用户
-`uv run uvicorn main:app --reload --port 8000`
+uv run uvicorn main:app --reload --port 8000
 
 # 或 pip 用户：
 python3.14 -m venv .venv && source .venv/bin/activate
@@ -98,40 +106,39 @@ npm run dev
 
 打开 `http://localhost:5173`。`http://localhost:8000/docs` 查看 Swagger。
 
-## ReAct 智能体 CLI
-
-```bash
-cd backend
-uv run python cli.py            # uv 用户
-python cli.py                   # venv / pip 用户
-```
-
-| 命令 | 说明 |
-|------|------|
-| `/clear` | 清空对话上下文 |
-| `/exit` | 退出 |
-
 ## API 端点
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET` | `/` | Hello World |
 | `GET` | `/api/hello` | Hello World |
-| `POST` | `/api/agent/stream` | SSE 流式 Agent（事件：thinking / action / tool_call / terminal_chunk / finish） |
+| `GET` | `/api/workspace` | 当前工作区 |
+| `POST` | `/api/workspace/set` | 切换工作区 |
+| `POST` | `/api/session` | 创建 Session |
+| `GET` | `/api/sessions` | 列出 Session |
+| `DELETE` | `/api/session/{sid}` | 删除 Session |
+| `GET` | `/api/session/{sid}/history` | 获取历史记录 |
+| `POST` | `/api/session/{sid}/chat` | 启动 Agent 并返回 SSE |
+| `GET` | `/api/session/{sid}/stream` | 断线重连 / 追赶 SSE |
+| `GET` | `/api/session/{sid}/recover` | 恢复 Session 状态 |
+| `POST` | `/api/session/{sid}/respond` | 响应权限确认等等待项 |
 
 ## 核心架构
 
-- **ToolSet** — 运行时动态生成 Pydantic 鉴别联合，工具可热插拔
+- **FastAPI 应用层** — `app/` 承载路由、schema、配置、依赖注入和 Project service
+- **Agent 运行时** — `agent/` 承载 Scheduler、Session、Sandbox、ToolSet、Transcript
+- **ToolSet** — 运行时生成 OpenAI tools schema，支持嵌套 schema 内联和工具热插拔
 - **Skill 系统** — Markdown 特化能力模块：`agent/skills/<name>/Skill.md`
-- **PersistentTerminal** — 跨平台持久 Shell（`cd` 状态保留），`terminal_chunk` 流式推送
-- **角色化消息协议** — `system → user → assistant → user(tool) → …` 标准对话链
-- **json-repair** — LLM 输出格式小毛病自动修复，不浪费 token
+- **StreamTranscriptCompletion** — 统一管理 SSE `chunk` / `flush` 与 `sub_streams`
+- **PersistentTerminal** — 跨平台持久 Shell（`cd` 状态保留），Shell 输出通过 SSE 流式推送
+- **角色化消息协议** — `system → user → assistant(tool_calls) → tool → …` 标准对话链
+- **Session 持久化** — Transcript 顺序落盘，并在加载旧历史时修复孤立 tool 结果
 
 ## Skill 扩展
 
 ```bash
-mkdir -p agent/skills/my_skill
-vim agent/skills/my_skill/Skill.md
+mkdir -p backend/agent/skills/my_skill
+vim backend/agent/skills/my_skill/Skill.md
 # 下一次模型 step 会重新扫描并注入
 ```
 
@@ -142,6 +149,6 @@ Agent 通过 `LoadSkill` 读取完整内容。Skill context 会在每个模型 s
 
 ```bash
 ./start.sh                                 # 一键启动
-cd backend && uvicorn main:app --port 8000 # 后端生产
+cd backend && uv run uvicorn main:app --port 8000 # 后端生产
 cd frontend && npm run build               # 前端构建
 ```

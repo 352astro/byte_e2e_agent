@@ -1,4 +1,4 @@
-"""Project — global singleton scoped to one workspace directory.
+"""Project service — global singleton scoped to one workspace directory.
 
 One Project = one workspace = one Scheduler.
 All Sessions belong to exactly one Project.
@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import shutil
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +17,21 @@ from agent.llm import HelloAgentsLLM
 from agent.sandbox import SandBox
 from agent.scheduler import Scheduler
 from agent.session import Session, clear, get_history, load_session
+from agent.transcript import StreamTranscriptCompletion
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+@dataclass
+class ActiveStream:
+    channel: StreamTranscriptCompletion
+    queue: Any
+
+
+@dataclass
+class SessionStream:
+    session: Session
+    channel: StreamTranscriptCompletion | None
 
 
 class Project:
@@ -103,6 +117,36 @@ class Project:
         session_dir = self._session_dir(session_id)
         if session_dir.is_dir():
             shutil.rmtree(session_dir)
+
+    # ── chat / streaming ─────────────────────────────────
+
+    def start_chat(self, session_id: str, question: str) -> ActiveStream:
+        session = self.get_session(session_id)
+        channel = StreamTranscriptCompletion()
+        queue = channel.subscribe()
+        try:
+            self.scheduler.start(session, question, channel=channel)
+        except RuntimeError:
+            channel.unsubscribe(queue)
+            raise
+        return ActiveStream(channel=channel, queue=queue)
+
+    def get_stream(self, session_id: str) -> SessionStream:
+        return SessionStream(
+            session=self.get_session(session_id),
+            channel=self.scheduler.channel,
+        )
+
+    def get_recovery_state(self, session_id: str) -> dict:
+        session = self.get_session(session_id)
+        scheduler = self.scheduler
+        channel = scheduler.channel
+        is_running = scheduler.is_running_session(session_id)
+        return {
+            "transcripts": session.get_transcripts(),
+            "buffered": channel.get_buffered() if (is_running and channel) else {},
+            "running": is_running,
+        }
 
     # ── scheduler (singleton) ────────────────────────────
 

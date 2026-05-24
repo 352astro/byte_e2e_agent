@@ -14,22 +14,48 @@ ToolSet — 动态工具集，为 OpenAI 原生 function calling 服务。
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 from agent.tools.base import BaseTool
 
 # ── Pydantic schema → OpenAI parameters ────────────────────
 
-_SKIP_TOP = frozenset({"title", "description", "$defs", "$schema"})
+_SKIP_META = frozenset({"title", "$defs", "$schema"})
 
 
-def _strip_pydantic_noise(schema: dict) -> dict:
+def _strip_pydantic_noise(schema: dict, *, in_properties: bool = False) -> dict:
     """递归去掉 Pydantic JSON Schema 中 OpenAI 不需要的顶层字段。"""
     if isinstance(schema, dict):
-        return {
-            k: _strip_pydantic_noise(v) for k, v in schema.items() if k not in _SKIP_TOP
-        }
+        result = {}
+        for k, v in schema.items():
+            if not in_properties and k in _SKIP_META:
+                continue
+            result[k] = _strip_pydantic_noise(v, in_properties=(k == "properties"))
+        return result
     if isinstance(schema, list):
         return [_strip_pydantic_noise(i) for i in schema]
     return schema
+
+
+def _inline_refs(schema: dict) -> dict:
+    """Inline local $defs refs so OpenAI receives concrete nested object schemas."""
+    defs = schema.get("$defs", {})
+
+    def resolve(node):
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                name = ref.removeprefix("#/$defs/")
+                target = deepcopy(defs.get(name, {}))
+                extras = {k: v for k, v in node.items() if k != "$ref"}
+                target.update(extras)
+                return resolve(target)
+            return {k: resolve(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [resolve(item) for item in node]
+        return node
+
+    return resolve(schema)
 
 
 def _ensure_strict(schema: dict) -> dict:
@@ -51,7 +77,7 @@ def _ensure_strict(schema: dict) -> dict:
 
 def _build_function_def(cls: type[BaseTool]) -> dict:
     """从 Pydantic 工具类生成单个 OpenAI function definition。"""
-    raw = cls.model_json_schema()
+    raw = _inline_refs(cls.model_json_schema())
     # 去掉 kind 字段（函数名已承担分发职责）
     if "properties" in raw and "kind" in raw["properties"]:
         del raw["properties"]["kind"]

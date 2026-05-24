@@ -94,6 +94,13 @@ class Scheduler:
             }
         return None
 
+    def is_running_session(self, session_id: str) -> bool:
+        return (
+            self._state != "idle"
+            and self._current_session is not None
+            and self._current_session.session_id == session_id
+        )
+
     def start(
         self,
         session: Session,

@@ -60,7 +60,7 @@ class Session:
     ) -> Transcript:
         """添加一条已完成 transcript。
 
-        同时触发磁盘持久化（fire-and-forget）。
+        同时触发磁盘持久化。
         返回创建的 Transcript 对象。
         """
         tid = transcript_id or _uuid.uuid4().hex
@@ -70,19 +70,9 @@ class Session:
         if llm_message is not None:
             self._messages.append(llm_message)
 
-        # 磁盘持久化（尽力而为）
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(
-                save_transcript(
-                    self._sandbox.workspace, self.session_id, kind, tid, message
-                )
-            )
-        except RuntimeError:
-            # 没有运行中的 event loop，同步写入
-            _save_transcript_sync(
-                self._sandbox.workspace, self.session_id, kind, tid, message
-            )
+        # 必须同步写入以保持 assistant tool_calls -> tool_result 的落盘顺序。
+        # fire-and-forget 任务可能乱序完成，重启后会形成孤立 tool message。
+        _save_transcript_sync(self._sandbox.workspace, self.session_id, kind, tid, message)
         return t
 
     def get_transcripts(self) -> list[dict]:
@@ -94,12 +84,10 @@ class Session:
 
     def replace_transcripts(self, transcripts: list[Transcript]) -> None:
         """替换 transcript 列表，并同步重建 LLM 消息缓存。"""
-        self._transcripts = list(transcripts)
-        self._messages = []
-        for t in self._transcripts:
-            llm_message = self._transcript_to_message(t)
-            if llm_message is not None:
-                self._messages.append(llm_message)
+        self._transcripts = _normalize_transcript_order(transcripts)
+        self._messages = _build_llm_messages(
+            self._transcripts, self._transcript_to_message
+        )
 
     def get_messages(self) -> list[dict]:
         """返回缓存的 OpenAI 格式消息列表（供 LLM 调用）。"""
@@ -188,6 +176,81 @@ def load_session(
 
     session.replace_transcripts(transcripts)
     return session
+
+
+def _normalize_transcript_order(transcripts: list[Transcript]) -> list[Transcript]:
+    """Repair persisted transcripts where tool_result arrived before tool_calls."""
+    result: list[Transcript] = []
+    pending_tools: dict[str, list[Transcript]] = {}
+
+    for transcript in transcripts:
+        if transcript.kind == "tool_result":
+            tool_call_id = transcript.message.get("tool_call_id", "")
+            if _has_open_tool_call(result, tool_call_id):
+                result.append(transcript)
+            else:
+                pending_tools.setdefault(tool_call_id, []).append(transcript)
+            continue
+
+        result.append(transcript)
+
+        if transcript.kind != "assistant":
+            continue
+        for tc in transcript.message.get("tool_calls", []) or []:
+            tool_call_id = tc.get("id", "")
+            for pending in pending_tools.pop(tool_call_id, []):
+                result.append(pending)
+
+    for pending in pending_tools.values():
+        result.extend(pending)
+    return result
+
+
+def _has_open_tool_call(transcripts: list[Transcript], tool_call_id: str) -> bool:
+    if not tool_call_id:
+        return False
+    answered: set[str] = set()
+    for transcript in reversed(transcripts):
+        if transcript.kind == "tool_result":
+            answered.add(transcript.message.get("tool_call_id", ""))
+            continue
+        if transcript.kind != "assistant":
+            continue
+        call_ids = {
+            tc.get("id", "")
+            for tc in transcript.message.get("tool_calls", []) or []
+        }
+        return tool_call_id in call_ids and tool_call_id not in answered
+    return False
+
+
+def _build_llm_messages(transcripts: list[Transcript], convert) -> list[dict]:
+    """Build OpenAI messages while skipping orphan tool results."""
+    messages: list[dict] = []
+    open_tool_call_ids: set[str] = set()
+
+    for transcript in transcripts:
+        llm_message = convert(transcript)
+        if llm_message is None:
+            continue
+
+        if llm_message.get("role") == "tool":
+            tool_call_id = llm_message.get("tool_call_id", "")
+            if tool_call_id not in open_tool_call_ids:
+                continue
+            messages.append(llm_message)
+            open_tool_call_ids.discard(tool_call_id)
+            continue
+
+        messages.append(llm_message)
+        if llm_message.get("role") == "assistant" and llm_message.get("tool_calls"):
+            open_tool_call_ids = {
+                tc.get("id", "") for tc in llm_message.get("tool_calls", [])
+            }
+        else:
+            open_tool_call_ids = set()
+
+    return messages
 
 
 def get_history(session: Session) -> list[dict]:
