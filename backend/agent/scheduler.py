@@ -302,6 +302,8 @@ class Scheduler:
             result_id = _uuid.uuid4().hex
             result_msg = {
                 "tool_call_id": tool_call_id,
+                "tool_name": func_name,
+                "arguments": func_args,
                 "result": result,
             }
             t = await channel.flush(result_id, "tool_result", result_msg)
@@ -329,6 +331,8 @@ class Scheduler:
             )
             result_msg = {
                 "tool_call_id": tool_call_id,
+                "tool_name": func_name,
+                "arguments": func_args,
                 "result": result_str,
             }
             t = await channel.flush(result_id, "tool_result", result_msg)
@@ -344,6 +348,8 @@ class Scheduler:
             result_id = _uuid.uuid4().hex
             result_msg = {
                 "tool_call_id": tool_call_id,
+                "tool_name": func_name,
+                "arguments": func_args,
                 "result": result_str,
             }
             t = await channel.flush(result_id, "tool_result", result_msg)
@@ -360,6 +366,8 @@ class Scheduler:
         result_id = _uuid.uuid4().hex
         result_msg = {
             "tool_call_id": tool_call_id,
+                "tool_name": func_name,
+                "arguments": func_args,
             "result": result_str,
         }
         t = await channel.flush(result_id, "tool_result", result_msg)

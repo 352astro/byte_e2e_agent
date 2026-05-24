@@ -205,7 +205,7 @@ export default function useAgentStream({
 
                     const t: DisplayTranscript = {
                         id: ev.transcript_id,
-                        kind: existing?.kind ?? "assistant",
+                        kind: existing?.kind ?? (ev.kind === "tool_result" ? "tool_result" : "assistant"),
                         message: existing?.message ?? {},
                         subStreams,
                         activeSubStream: active,

@@ -35,9 +35,10 @@ interface IconProps {
   name: IconName;
   size?: number;
   className?: string;
+  onClick?: (e: React.MouseEvent) => void;
 }
 
-export default function Icon({ name, size = 16, className }: IconProps) {
+export default function Icon({ name, size = 16, className, onClick }: IconProps) {
   const p = paths[name];
   return (
     <svg
@@ -50,6 +51,7 @@ export default function Icon({ name, size = 16, className }: IconProps) {
       strokeWidth={1.5}
       strokeLinecap="round"
       strokeLinejoin="round"
+      onClick={onClick}
     >
       <path d={p.d as string} />
     </svg>

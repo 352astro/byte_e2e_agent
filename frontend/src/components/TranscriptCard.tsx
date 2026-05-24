@@ -1,6 +1,8 @@
 import { useState, useCallback } from "react";
 import Markdown from "./Markdown";
 import Icon from "./Icon";
+import CollapsibleCard from "./CollapsibleCard";
+import ToolResult from "./ToolResult";
 import { TranscriptKind, ChunkKind } from "../constants";
 import type { DisplayTranscript, SubStream } from "../types";
 
@@ -29,7 +31,6 @@ function groupToolCards(
   return groups;
 }
 
-/** 从 message dict 重建 sub_streams（刷新恢复用）。 */
 function rebuildFromMessage(
   tid: string,
   msg: Record<string, unknown>,
@@ -67,6 +68,23 @@ function rebuildFromMessage(
     }
   }
   return result;
+}
+
+function extractArg(args: string, key: string): string | null {
+  try {
+    const obj = JSON.parse(args);
+    return obj[key] != null ? String(obj[key]) : null;
+  } catch {
+    const re = new RegExp(
+      `"${key}"\\s*:\\s*("(?:[^"\\\\]|\\\\.)*"|\\d+(?:\\.\\d+)?)`,
+      "s",
+    );
+    const m = args.match(re);
+    if (!m) return null;
+    let v = m[1];
+    if (v.startsWith('"')) v = v.slice(1, -1).replace(/\\"/g, '"');
+    return v;
+  }
 }
 
 // ── Sub-renderers ────────────────────────────────────────
@@ -136,29 +154,152 @@ function ToolResultBlock({ ss, active }: { ss: SubStream; active: boolean }) {
   );
 }
 
-function ToolCard({
+function GenericToolCard({
+  cardId,
   name,
   args,
   active,
+  collapsed,
+  onToggle,
 }: {
+  cardId: string;
   name: string;
   args: string;
   active: boolean;
+  collapsed: boolean;
+  onToggle: (id: string) => void;
 }) {
   return (
-    <div className={`tool-card${active ? " tool-card--streaming" : ""}`}>
-      <div className="tool-card-header">
-        <Icon name="tool" size={13} className="tool-icon" />
-        <span className="tool-label">{name || "\u2026"}</span>
+    <CollapsibleCard
+      id={cardId}
+      collapsed={collapsed}
+      onToggle={onToggle}
+      cardClassName={active ? "tool-card--streaming" : ""}
+      title={
+        <>
+          <Icon name="tool" size={13} className="tool-icon" />
+          <span className="tool-label">{name || "\u2026"}</span>
+        </>
+      }
+    >
+      <div className="tool-code-block">
+        <pre>
+          <code>{args || "\u2026"}</code>
+        </pre>
       </div>
-      <div className="tool-card-body">
-        <div className="tool-code-block">
-          <pre>
-            <code>{args || "\u2026"}</code>
-          </pre>
-        </div>
+    </CollapsibleCard>
+  );
+}
+
+function ShellCallCard({
+  cardId,
+  args,
+  active,
+  collapsed,
+  onToggle,
+}: {
+  cardId: string;
+  args: string;
+  active: boolean;
+  collapsed: boolean;
+  onToggle: (id: string) => void;
+}) {
+  const timeoutMs = extractArg(args, "timeout_ms");
+  const timeout = timeoutMs ? String(Math.round(Number(timeoutMs) / 1000)) : null;
+  const command = extractArg(args, "command");
+  return (
+    <CollapsibleCard
+      id={cardId}
+      collapsed={collapsed}
+      onToggle={onToggle}
+      cardClassName={`tool-card--shell${active ? " tool-card--streaming" : ""}`}
+      headerClassName="shell-call-bar"
+      title={
+        <>
+          <Icon name="tool" size={13} className="shell-call-icon" />
+          <span className="shell-call-label">Run Command</span>
+        </>
+      }
+      headerRight={
+        <>
+          {active && timeout && <span className="shell-call-timeout">{timeout}s</span>}
+          {active && <span className="shell-call-spinner" />}
+        </>
+      }
+    >
+      <pre className="shell-call-command">
+        <code>{command || args || "\u2026"}</code>
+      </pre>
+    </CollapsibleCard>
+  );
+}
+
+function WriteCallCard({
+  cardId,
+  args,
+  active,
+  collapsed,
+  onToggle,
+}: {
+  cardId: string;
+  args: string;
+  active: boolean;
+  collapsed: boolean;
+  onToggle: (id: string) => void;
+}) {
+  const filePath = extractArg(args, "path");
+  const content = extractArg(args, "content");
+  return (
+    <CollapsibleCard
+      id={cardId}
+      collapsed={collapsed}
+      onToggle={onToggle}
+      cardClassName={`tool-card--write${active ? " tool-card--streaming" : ""}`}
+      headerClassName="write-call-bar"
+      title={
+        <>
+          <Icon name="write" size={13} className="write-call-icon" />
+          <span className="write-call-label">Write</span>
+          {filePath && <span className="write-call-path">{filePath}</span>}
+        </>
+      }
+    >
+      <div className="write-call-body">
+        <Markdown text={content || args || "\u2026"} />
       </div>
-    </div>
+    </CollapsibleCard>
+  );
+}
+
+function ReadResultCard({
+  cardId,
+  args,
+  active,
+  collapsed,
+  onToggle,
+}: {
+  cardId: string;
+  args: string;
+  active: boolean;
+  collapsed: boolean;
+  onToggle: (id: string) => void;
+}) {
+  const filePath = extractArg(args, "path");
+  return (
+    <CollapsibleCard
+      id={cardId}
+      collapsed={collapsed}
+      onToggle={onToggle}
+      cardClassName={`tool-card--read${active ? " tool-card--streaming" : ""}`}
+      headerClassName="read-call-bar"
+      title={
+        <>
+          <Icon name="write" size={13} className="read-call-icon" />
+          <span className="read-call-label">Read</span>
+          {filePath && <span className="read-call-path">{filePath}</span>}
+        </>
+      }
+    />
   );
 }
 
@@ -190,15 +331,25 @@ const chunkRenderers: Partial<Record<string, ChunkRenderer>> = {
 
 interface TranscriptCardProps {
   transcript: DisplayTranscript;
+  hideToolCards?: boolean;
 }
 
-export default function TranscriptCard({ transcript: t }: TranscriptCardProps) {
+export default function TranscriptCard({ transcript: t, hideToolCards = false }: TranscriptCardProps) {
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(
     new Set(),
   );
+  const [collapsedCards, setCollapsedCards] = useState<Set<string>>(new Set());
 
   const toggleThinking = useCallback((id: string) => {
     setExpandedThinking((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleCard = useCallback((id: string) => {
+    setCollapsedCards((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
@@ -220,21 +371,24 @@ export default function TranscriptCard({ transcript: t }: TranscriptCardProps) {
 
   // ── Tool result ──────────────────────────────
   if (t.kind === TranscriptKind.ToolResult) {
-    const content = String(
-      (t.message as Record<string, unknown>).content ||
-        (t.message as Record<string, unknown>).result ||
-        "",
-    );
-    return (
-      <div className="transcript-card">
-        <span className="transcript-label">{"\uD83D\uDD27"} Tool</span>
-        <div className="transcript-body">
-          <pre>
-            {content.length > 500 ? content.slice(0, 500) + "..." : content}
-          </pre>
-        </div>
-      </div>
-    );
+    if (!t.isFlushed && (t.subStreams.length > 0 || t.activeSubStream)) {
+      // fall through to sub-stream rendering below
+    } else {
+      const msg = t.message as Record<string, unknown>;
+      const toolName = String(msg.tool_name || msg.name || "Tool");
+      const result = String(msg.result || msg.content || "");
+      let toolArgs: Record<string, unknown> | undefined;
+      try {
+        if (typeof msg.arguments === "string") {
+          toolArgs = JSON.parse(msg.arguments);
+        }
+      } catch {
+        /* ignore */
+      }
+      return (
+        <ToolResult toolName={toolName} result={result} toolArgs={toolArgs} />
+      );
+    }
   }
 
   // ── Error ────────────────────────────────────
@@ -252,9 +406,8 @@ export default function TranscriptCard({ transcript: t }: TranscriptCardProps) {
     );
   }
 
-  // ── Assistant — render sub-streams ───────────
+  // ── Assistant / ToolResult (streaming) — render sub-streams
 
-  // 刷新恢复：subStreams 为空时从 message 重建
   let subStreams = t.subStreams;
   let active = t.activeSubStream;
   if (t.isFlushed && subStreams.length === 0 && !active) {
@@ -284,6 +437,7 @@ export default function TranscriptCard({ transcript: t }: TranscriptCardProps) {
 
   return (
     <div className="transcript-card assistant-card">
+      <div className="assistant-splitter" />
       {plainItems.map(({ ss, active: isActive }, i) => {
         const renderer = chunkRenderers[ss.kind];
         return renderer ? (
@@ -302,9 +456,56 @@ export default function TranscriptCard({ transcript: t }: TranscriptCardProps) {
         );
       })}
 
-      {Array.from(toolCards.entries()).map(([id, g]) => (
-        <ToolCard key={id} name={g.name} args={g.args} active={g.active} />
-      ))}
+      {!hideToolCards && Array.from(toolCards.entries()).map(([id, g]) => {
+        const collapsed = collapsedCards.has(id);
+        if (g.name === "Shell") {
+          return (
+            <ShellCallCard
+              key={id}
+              cardId={id}
+              args={g.args}
+              active={g.active}
+              collapsed={collapsed}
+              onToggle={toggleCard}
+            />
+          );
+        }
+        if (g.name === "Write") {
+          return (
+            <WriteCallCard
+              key={id}
+              cardId={id}
+              args={g.args}
+              active={g.active}
+              collapsed={collapsed}
+              onToggle={toggleCard}
+            />
+          );
+        }
+        if (g.name === "Read") {
+          return (
+            <ReadResultCard
+              key={id}
+              cardId={id}
+              args={g.args}
+              active={g.active}
+              collapsed={collapsed}
+              onToggle={toggleCard}
+            />
+          );
+        }
+        return (
+          <GenericToolCard
+            key={id}
+            cardId={id}
+            name={g.name}
+            args={g.args}
+            active={g.active}
+            collapsed={collapsed}
+            onToggle={toggleCard}
+          />
+        );
+      })}
     </div>
   );
 }

@@ -43,7 +43,7 @@
     font-size: 0.95rem;
     font-family: system-ui, sans-serif;
     border: 1px solid #d0d0d0;
-    border-radius: 8px;
+    border-radius: 0;
     outline: none;
     resize: none;
     line-height: 1.5;
@@ -68,7 +68,7 @@
     color: #fff;
     background: #1a1a1a;
     border: none;
-    border-radius: 8px;
+    border-radius: 0;
     cursor: pointer;
     white-space: nowrap;
     height: 44px;
@@ -200,11 +200,11 @@
     background: #f4f4f4;
     color: #2a2a2a;
     padding: 12px 16px;
-    border-radius: 8px;
+    border-radius: 0;
     overflow-x: auto;
     font-size: 0.83rem;
     line-height: 1.55;
-    margin: 8px 0;
+    margin: 4px 0;
     border: 1px solid #e8e8e8;
 }
 .md-content pre code {
@@ -245,7 +245,7 @@
 }
 .md-content table {
     border-collapse: collapse;
-    margin: 8px 0;
+    margin: 4px 0;
     font-size: 0.85rem;
     width: 100%;
 }
@@ -349,22 +349,17 @@
 /* ── Tool cards (streaming & complete) ──────── */
 
 .tool-card {
-    padding: 8px 10px;
-    background: #fafafa;
-    border: 1px solid #e8e8e8;
-    border-radius: 8px;
-    transition: border-color 0.15s;
+    margin: 4px 0;
+    border-radius: 0;
 }
-.tool-card--streaming {
-    border-color: #e0e0e0;
-    background: #fcfcfc;
-}
+
 
 .tool-card-header {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-bottom: 6px;
+    cursor: pointer;
+    user-select: none;
 }
 
 .tool-icon {
@@ -447,7 +442,7 @@
 
 .step-card {
     border: 1px solid #e5e5e5;
-    border-radius: 8px;
+    border-radius: 0;
     overflow: hidden;
     flex-shrink: 0;
 }
@@ -531,4 +526,395 @@
 }
 .expand-btn:hover {
     background: #f3f3f3;
+}
+
+/* ── Standalone tool results (square corners) ── */
+
+.tool-standalone {
+    margin: 4px 0;
+    border: 1px solid #e0e0e0;
+    border-radius: 0;
+    overflow: hidden;
+}
+
+/* ── Shell ─────────────────────────────────── */
+
+.tool-shell {
+    background: #1e1e1e;
+    border-color: #333;
+}
+
+.tool-shell-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: #2a2a2a;
+    border-bottom: 1px solid #333;
+}
+
+.tool-shell-icon {
+    color: #999;
+    flex-shrink: 0;
+}
+
+.tool-shell-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #aaa;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tool-shell-timeout {
+    margin-left: auto;
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #999;
+    background: #333;
+    padding: 2px 8px;
+    border-radius: 0;
+}
+
+.tool-shell-output {
+    margin: 0;
+    padding: 12px 14px;
+    font-size: 0.82rem;
+    font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #d4d4d4;
+    background: #1e1e1e;
+    line-height: 1.5;
+    overflow-x: auto;
+}
+.tool-shell-output code {
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+}
+
+/* ── File content (Write / Read) ────────────── */
+
+.tool-file {
+    background: #fafafa;
+}
+
+.tool-file-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: #f3f3f3;
+    border-bottom: 1px solid #e8e8e8;
+}
+
+.tool-file-icon {
+    color: #999;
+    flex-shrink: 0;
+}
+
+.tool-file-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tool-file-path {
+    margin-left: auto;
+    font-size: 0.7rem;
+    font-family: ui-monospace, monospace;
+    color: #888;
+    max-width: 50%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tool-file-code {
+    margin: 0;
+    padding: 12px 14px;
+    font-size: 0.82rem;
+    font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #333;
+    background: #fafafa;
+    line-height: 1.5;
+    overflow-x: auto;
+}
+.tool-file-code code {
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+}
+
+.tool-file-md {
+    padding: 8px 12px;
+}
+
+/* ── Default tool ───────────────────────────── */
+
+.tool-default {
+    background: #fafafa;
+}
+
+.tool-default-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: #f3f3f3;
+    border-bottom: 1px solid #e8e8e8;
+}
+
+.tool-default-icon {
+    color: #999;
+    flex-shrink: 0;
+}
+
+.tool-default-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tool-default-body {
+    padding: 8px 12px;
+}
+
+/* ── Shell call card (dark, inside assistant) ── */
+
+.tool-card--shell {
+    padding: 0;
+    background: #1e1e1e;
+    border: 1px solid #333;
+}
+
+.shell-call-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px 6px 14px;
+}
+
+.shell-call-icon {
+    color: #888;
+    flex-shrink: 0;
+}
+
+.shell-call-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #aaa;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.shell-call-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.shell-call-timeout {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #888;
+}
+
+.shell-call-spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid #555;
+    border-top-color: #aaa;
+    border-radius: 50%;
+    animation: shell-spin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes shell-spin {
+    to { transform: rotate(360deg); }
+}
+
+.shell-call-command {
+    margin: 0;
+    padding: 0 14px 10px 14px;
+    font-size: 0.82rem;
+    font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #d4d4d4;
+    line-height: 1.5;
+    overflow-x: auto;
+}
+.shell-call-command code {
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+}
+
+/* ── Card chevron (hover reveal on all cards) ── */
+
+.card-chevron {
+    color: #bbb;
+    opacity: 0;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+.tool-card:hover .card-chevron,
+.tool-standalone:hover .card-chevron {
+    opacity: 1;
+}
+
+/* Overlay chevron for header-less cards (top-right inside content) */
+.card-body--relative {
+    position: relative;
+}
+.card-chevron--overlay {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 1;
+}
+
+/* ── Write call card (light indigo) ─────────── */
+
+.tool-card--write {
+    padding: 0;
+    background: #f3f4ff;
+    border: 1px solid #d8dcf0;
+}
+
+.write-call-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px 6px 14px;
+}
+
+.write-call-icon {
+    color: #888;
+    flex-shrink: 0;
+}
+
+.write-call-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.write-call-path {
+    font-size: 0.7rem;
+    font-family: ui-monospace, monospace;
+    color: #888;
+    max-width: 50%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.write-call-body {
+    padding: 0 14px 10px 14px;
+    font-size: 0.88rem;
+    line-height: 1.6;
+    color: #333;
+}
+
+/* ── Read result card (light gray) ──────────── */
+
+.tool-card--read {
+    padding: 0;
+    background: #f2f2f2;
+    border: 1px solid #ddd;
+}
+
+.read-call-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 14px;
+}
+
+.read-call-icon {
+    color: #999;
+    flex-shrink: 0;
+}
+
+.read-call-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #777;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.read-call-path {
+    font-size: 0.7rem;
+    font-family: ui-monospace, monospace;
+    color: #999;
+    max-width: 50%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.read-call-body {
+    padding: 0 14px 10px 14px;
+    font-size: 0.88rem;
+    line-height: 1.6;
+    color: #333;
+}
+
+/* ── File result card (Write/Read standalone) ── */
+
+.tool-card--file {
+    padding: 0;
+    background: #fafafa;
+    border-color: #e0e0e0;
+}
+
+.tool-file-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px 6px 14px;
+}
+
+.tool-file-icon {
+    color: #999;
+    flex-shrink: 0;
+}
+
+.tool-file-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tool-file-path {
+    font-size: 0.7rem;
+    font-family: ui-monospace, monospace;
+    color: #888;
+}
+
+/* ── Assistant splitter ────────────────────── */
+
+.assistant-splitter {
+    height: 1px;
+    background: #e8e8e8;
+    margin-bottom: 12px;
 }

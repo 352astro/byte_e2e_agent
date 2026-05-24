@@ -50,6 +50,18 @@ export interface DisplayTranscript {
     isFlushed: boolean;
 }
 
+
+// ── Tool call ↔ result pairing ───────────────────────────
+
+export interface ToolPair {
+    callTranscriptId: string;
+    callIndex: number;
+    toolCallId: string;
+    toolName: string;
+    arguments: string;
+    result?: DisplayTranscript;
+}
+
 // ── Session info ──────────────────────────────────────
 
 export interface SessionInfo {
