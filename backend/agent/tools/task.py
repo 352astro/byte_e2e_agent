@@ -14,6 +14,16 @@ from agent.tools.base import BaseTool
 TaskStatus = Literal["pending", "progress", "done"]
 
 
+def task_context_message(sandbox) -> dict:
+    """返回本轮任务列表的系统消息。"""
+    try:
+        tasks = _load_tasks_for_context(sandbox)
+        content = _format_task_context(tasks)
+    except Exception as exc:
+        content = f"## Current Tasks\nTask context unavailable: {exc}"
+    return {"role": "system", "content": content}
+
+
 class Task(BaseModel):
     id: str = Field(..., description="Unique task id.")
     name: str = Field(..., description="Short stable task name.")
@@ -108,6 +118,13 @@ def _tasks_path(sandbox) -> Path:
     return Path(sandbox.resolve_path(f".tmp/{session_id}/tasks.json"))
 
 
+def _load_tasks_for_context(sandbox) -> list[dict]:
+    path = _tasks_path(sandbox)
+    if not path.exists():
+        return []
+    return _load_tasks_sync(path)
+
+
 async def _load_tasks(sandbox) -> list[dict]:
     path = _tasks_path(sandbox)
     if not path.exists():
@@ -197,6 +214,33 @@ def _find_task_index(tasks: list[dict], task_id: str) -> int | None:
         if task.get("id") == task_id:
             return index
     return None
+
+
+def _format_task_context(tasks: list[dict]) -> str:
+    lines = ["## Current Tasks"]
+
+    if not tasks:
+        lines.append("No tasks now.")
+        return "\n".join(lines)
+
+    for task in _with_blocked(tasks):
+        status = "blocked" if task["blocked"] else task.get("status", "pending")
+        title = task.get("name") or task.get("description", "")
+        lines.append(f"- [{status}] {task.get('id')}: {title}")
+
+        depends_on = task.get("depends_on") or []
+        if depends_on:
+            lines.append(f"  depends_on: {depends_on}")
+
+        description = task.get("description", "")
+        if description and description != title:
+            lines.append(f"  description: {description}")
+
+        summary = task.get("summary", "")
+        if summary:
+            lines.append(f"  summary: {summary}")
+
+    return "\n".join(lines)
 
 
 def _unfinished_dependencies(tasks: list[dict], task: dict) -> list[str]:

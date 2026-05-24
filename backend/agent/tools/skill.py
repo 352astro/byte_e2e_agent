@@ -1,129 +1,122 @@
-"""
-Skill 系统 — 可插拔的知识模块。
+"""Skill 加载器。
 
-每个 Skill 以 Markdown 文件形式存放在 ``agent/skills/<name>/Skill.md``。
-本模块负责扫描技能目录、生成摘要供 system prompt 注入，
-并提供 LoadSkill 工具供 LLM 按需获取完整内容。
+每个 Skill 是一个放在 ``agent/skills/<name>/Skill.md`` 的特化能力模块。
+Skill 上下文消息注入摘要；需要执行该能力时，模型再通过 LoadSkill 读取完整内容。
 """
 
 from __future__ import annotations
 
-import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import Field
 
 from agent.tools.base import BaseTool
 
-# ── Skill 目录 ────────────────────────────────────────────
-
-_SKILLS_ROOT = Path(__file__).resolve().parent.parent / "skills"
-
-
-# ── 数据结构 ──────────────────────────────────────────────
+SKILLS_ROOT = Path(__file__).resolve().parent.parent / "skills"
+SKILL_FILE = "Skill.md"
 
 
+@dataclass(frozen=True)
 class SkillInfo:
-    """技能摘要信息（注入 system prompt）。"""
+    """已发现的 Skill，以及注入给模型的摘要。"""
 
-    def __init__(self, name: str, description: str, path: Path) -> None:
-        self.name = name
-        self.description = description
-        self._path = path
+    name: str
+    description: str
+    path: Path
 
-    def full_content(self) -> str:
-        """读取 Skill.md 完整内容。"""
-        return self._path.read_text(encoding="utf-8")
-
-
-# ── 扫描 ──────────────────────────────────────────────────
+    def read(self) -> str:
+        return self.path.read_text(encoding="utf-8")
 
 
 def scan_skills() -> list[SkillInfo]:
-    """扫描 skills 目录，返回所有可用技能的摘要列表。"""
-    result: list[SkillInfo] = []
-    if not _SKILLS_ROOT.is_dir():
-        return result
+    """扫描所有 ``skills/<name>/Skill.md`` 并返回摘要信息。"""
+    if not SKILLS_ROOT.is_dir():
+        return []
 
-    for entry in sorted(_SKILLS_ROOT.iterdir()):
+    skills: list[SkillInfo] = []
+    for entry in sorted(SKILLS_ROOT.iterdir()):
         if not entry.is_dir():
             continue
-        md_file = entry / "Skill.md"
-        if not md_file.is_file():
+        path = entry / SKILL_FILE
+        if not path.is_file():
             continue
-
-        name = entry.name
-        description = _extract_description(md_file)
-        result.append(SkillInfo(name, description, md_file))
-
-    return result
+        skills.append(
+            SkillInfo(
+                name=entry.name,
+                description=_extract_description(path),
+                path=path,
+            )
+        )
+    return skills
 
 
 def get_skill(name: str) -> SkillInfo | None:
-    """按名称获取技能；找不到返回 None。"""
-    md_file = _SKILLS_ROOT / name / "Skill.md"
-    if not md_file.is_file():
-        return None
-    return SkillInfo(name, _extract_description(md_file), md_file)
+    """按目录名获取 Skill。"""
+    return next((skill for skill in scan_skills() if skill.name == name), None)
 
 
 def get_skills_summary() -> str:
-    """生成可注入 system prompt 的技能摘要文本。"""
+    """生成注入 Skill 上下文消息的摘要列表。"""
     skills = scan_skills()
     if not skills:
         return "(No skills available.)"
-    lines = ["Available skills (use LoadSkill to get full details):"]
+    lines = []
     for s in skills:
-        lines.append(f"  - **{s.name}**: {s.description}")
+        lines.append(f"- {s.name}: {s.description}")
     return "\n".join(lines)
 
 
-# ── 内部 ──────────────────────────────────────────────────
+def skill_context_message() -> dict:
+    """返回本轮可用 Skill 列表的系统消息。"""
+    content = "\n".join(
+        [
+            "## Available Skills",
+            "Skills are specialized capability modules.",
+            "This list is reloaded before each model step.",
+            "When a skill matches the task, call LoadSkill with its name, "
+            "read the full Skill content, then continue with normal tools.",
+            get_skills_summary(),
+        ]
+    )
+    return {"role": "system", "content": content}
 
 
 def _extract_description(md_file: Path) -> str:
-    """从 Markdown 文件提取描述（跳过标题行后的第一个非空段落）。"""
+    """提取一级标题后的第一个普通段落作为摘要。"""
     try:
         text = md_file.read_text(encoding="utf-8")
     except Exception:
         return "(cannot read)"
 
-    lines = text.splitlines()
-    past_heading = False
-    desc_lines: list[str] = []
-
-    for line in lines:
-        stripped = line.strip()
-        if not past_heading:
-            if stripped.startswith("# ") and not stripped.startswith("## "):
-                past_heading = True
+    in_body = False
+    paragraph: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not in_body:
+            if line.startswith("# "):
+                in_body = True
             continue
-        if stripped == "" and desc_lines:
-            break  # first paragraph ended
-        if stripped:
-            desc_lines.append(stripped)
 
-    return " ".join(desc_lines) if desc_lines else "(no description)"
+        if not line:
+            if paragraph:
+                break
+            continue
+        if line.startswith("#"):
+            if paragraph:
+                break
+            continue
+        paragraph.append(line)
 
-
-# ── LoadSkill 工具 ────────────────────────────────────────
+    return " ".join(paragraph) if paragraph else "(no description)"
 
 
 class LoadSkill(BaseTool):
-    """
-    加载指定 Skill 的完整 Markdown 内容。
+    """加载指定 Skill 的完整内容。"""
 
-    当 LLM 需要某个技能的详细指引时调用此工具。
-    技能的简要信息已在 system prompt 中列出。
-    """
-
-    name: str = Field(
-        ...,
-        description="Name of the skill to load (directory name under skills/).",
-    )
+    name: str = Field(..., description="Skill 目录名。")
 
     async def execute(self, sandbox=None) -> str:
-        """读取并返回 Skill.md 的完整内容。"""
         skill = get_skill(self.name)
         if skill is None:
             available = [s.name for s in scan_skills()]
@@ -131,4 +124,4 @@ class LoadSkill(BaseTool):
                 f"Skill '{self.name}' not found. "
                 f"Available skills: {', '.join(available) if available else 'none'}"
             )
-        return skill.full_content()
+        return skill.read()

@@ -12,11 +12,10 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-import agent.session_memory as session_memory
 from agent.llm import HelloAgentsLLM
 from agent.sandbox import SandBox
 from agent.scheduler import Scheduler
-from agent.session import Session, clear, get_history
+from agent.session import Session, clear, get_history, load_session
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -115,9 +114,7 @@ class Project:
 
     def _build_session(self, session_id: str) -> Session:
         sandbox = SandBox(self._workspace, session_id=session_id)
-        return session_memory.load_session(
-            self._workspace, session_id, self.llm, sandbox=sandbox
-        )
+        return load_session(self._workspace, session_id, self.llm, sandbox=sandbox)
 
     def _session_dir(self, session_id: str) -> Path:
         if not self._valid_id(session_id):

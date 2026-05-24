@@ -11,13 +11,13 @@ import asyncio
 import json
 import uuid as _uuid
 from dataclasses import dataclass, field
-from typing import Any
 
 from agent.session import Session
 from agent.stream_channel import StreamChannel
 from agent.tools.shell import get_platform_hint
-from agent.tools.skill import get_skills_summary
+from agent.tools.skill import skill_context_message
 from agent.tools.subtask import SubTask
+from agent.tools.task import task_context_message
 from agent.tools.toolset import ToolSet
 
 # ── System prompt（只定义一次）─────────────────────────────
@@ -30,8 +30,7 @@ Use the provided functions to interact with the system.
 - Pick the function that best fits the current situation.
 - SubTask    — delegate to a fresh sub-agent
 - Shell / Read / Write / Edit / Search / LoadSkill — executable tools
-- {platform_hint}
-- {skills_summary}
+- Follow runtime context messages for platform details, available skills, and current tasks.
 """
 
 
@@ -135,21 +134,16 @@ class Scheduler:
             session.add_transcript("user_question", user_msg, user_id)
             await channel.flush(user_id, "user_question", user_msg)
 
-            # ── 2. 初始化 system prompt（只一次）──────────
-            if session._system_msg is None:
-                session._system_msg = {
-                    "role": "system",
-                    "content": SYSTEM_PROMPT.format(
-                        platform_hint=get_platform_hint(),
-                        skills_summary=get_skills_summary(),
-                    ),
-                }
-
             max_steps = 50
 
             for _ in range(max_steps):
                 # ── 构建消息 ──────────────────────────
-                messages: list[dict] = [session._system_msg]
+                messages: list[dict] = [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": f"## Platform\n{get_platform_hint()}"},
+                    skill_context_message(),
+                    task_context_message(session._sandbox),
+                ]
                 messages.extend(session.get_messages())
 
                 # ── 模型调用（流式）────────────────────

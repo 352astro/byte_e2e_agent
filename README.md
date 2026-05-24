@@ -16,7 +16,7 @@ byte_e2e_agent/
 │   ├── .env.example           # 环境变量模板
 │   └── agent/
 │       ├── utils/             # 工具模块（JSON 修复、终端 ANSI）
-│       ├── skills/            # Skill 可插拔知识模块
+│       ├── skills/            # Skill 特化能力模块
 │       ├── tools/             # 工具系统（Shell/Read/Write/Edit/Search/…）
 │       │   └── toolset.py     # 动态工具集（替代硬编码 Union）
 │       ├── llm.py             # LLM 客户端（OpenAI 兼容）
@@ -106,7 +106,7 @@ python cli.py                   # venv / pip 用户
 ## 核心架构
 
 - **ToolSet** — 运行时动态生成 Pydantic 鉴别联合，工具可热插拔
-- **Skill 系统** — `agent/skills/<name>/Skill.md`，重启自动发现
+- **Skill 系统** — Markdown 特化能力模块：`agent/skills/<name>/Skill.md`
 - **PersistentTerminal** — 跨平台持久 Shell（`cd` 状态保留），`terminal_chunk` 流式推送
 - **角色化消息协议** — `system → user → assistant → user(tool) → …` 标准对话链
 - **json-repair** — LLM 输出格式小毛病自动修复，不浪费 token
@@ -116,8 +116,11 @@ python cli.py                   # venv / pip 用户
 ```bash
 mkdir -p agent/skills/my_skill
 vim agent/skills/my_skill/Skill.md
-# 重启服务即生效
+# 下一次模型 step 会重新扫描并注入
 ```
+
+`Skill.md` 的第一段会作为摘要注入独立的 Skill context 系统消息；需要完整能力定义时，
+Agent 通过 `LoadSkill` 读取完整内容。Skill context 会在每个模型 step 前刷新，因此支持热重载。
 
 ## 常用命令
 
