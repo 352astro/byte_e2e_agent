@@ -1,0 +1,22 @@
+/* Monochrome syntax highlighting theme */
+
+.hljs { color: #2a2a2a; }
+.hljs-keyword { color: #555; font-weight: 600; }
+.hljs-string  { color: #666; }
+.hljs-number  { color: #777; }
+.hljs-comment { color: #aaa; font-style: italic; }
+.hljs-title   { color: #444; font-weight: 600; }
+.hljs-params  { color: #2a2a2a; }
+.hljs-built_in { color: #666; }
+.hljs-type    { color: #555; }
+.hljs-literal  { color: #777; }
+.hljs-attr    { color: #555; }
+.hljs-selector-class { color: #555; }
+.hljs-selector-tag   { color: #666; }
+.hljs-meta    { color: #888; }
+.hljs-regexp  { color: #666; }
+.hljs-symbol  { color: #666; }
+.hljs-name    { color: #555; }
+.hljs-operator { color: #555; }
+.hljs-punctuation { color: #888; }
+.hljs-variable { color: #2a2a2a; }

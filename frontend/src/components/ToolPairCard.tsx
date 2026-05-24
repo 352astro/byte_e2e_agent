@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import Markdown from "./Markdown";
 import Icon from "./Icon";
 import CollapsibleCard from "./CollapsibleCard";
+import HighlightCode from "./HighlightCode";
+import FileContent from "./FileContent";
 import type { ToolPair } from "../types";
 
 // ── Helpers ──────────────────────────────────────────────
@@ -27,7 +28,6 @@ function extractArg(args: string, key: string): string | null {
 
 function ShellPair({ pair, defaultCollapsed }: { pair: ToolPair; defaultCollapsed: boolean }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
-  const [resultCollapsed, setResultCollapsed] = useState(false);
   useEffect(() => { if (defaultCollapsed) setCollapsed(true); }, [defaultCollapsed]);
   const timeoutMs = extractArg(pair.arguments, "timeout_ms");
   const timeout = timeoutMs
@@ -60,26 +60,28 @@ function ShellPair({ pair, defaultCollapsed }: { pair: ToolPair; defaultCollapse
           ) : undefined
         }
       >
-        <pre className="shell-call-command">
-          <code>{command || pair.arguments || "\u2026"}</code>
-        </pre>
+        <HighlightCode
+          code={command || pair.arguments || "\u2026"}
+          language="bash"
+          className="shell-call-command"
+        />
       </CollapsibleCard>
 
       {/* Result card */}
       {pair.result && (
         <CollapsibleCard
           id={`${pair.result.id}/result`}
-          collapsed={resultCollapsed}
-          onToggle={() => setResultCollapsed((p) => !p)}
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((p) => !p)}
           cardClassName="tool-card--shell"
         >
-          <pre className="tool-shell-output">
-            <code>
-              {String(
-                (pair.result.message as Record<string, unknown>).result || "",
-              )}
-            </code>
-          </pre>
+          <HighlightCode
+            code={String(
+              (pair.result.message as Record<string, unknown>).result || "",
+            )}
+            language="bash"
+            className="tool-shell-output"
+          />
         </CollapsibleCard>
       )}
     </>
@@ -99,10 +101,10 @@ function ReadWritePair({
 }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   useEffect(() => { if (defaultCollapsed) setCollapsed(true); }, [defaultCollapsed]);
-  const filePath = extractArg(pair.arguments, "path");
+  const filePath = extractArg(pair.arguments, "path") || "";
   const content =
     variant === "Write"
-      ? extractArg(pair.arguments, "content")
+      ? extractArg(pair.arguments, "content") || ""
       : pair.result
         ? String(
             (pair.result.message as Record<string, unknown>).result || "",
@@ -130,9 +132,11 @@ function ReadWritePair({
       }
     >
       {hasContent && (
-        <div className={variant === "Write" ? "write-call-body" : "read-call-body"}>
-          <Markdown text={content || "\u2026"} />
-        </div>
+        <FileContent
+          content={content}
+          filePath={filePath}
+          className={variant === "Write" ? "write-call-body" : "read-call-body"}
+        />
       )}
     </CollapsibleCard>
   );
@@ -141,16 +145,15 @@ function ReadWritePair({
 // ── Default pair: call card + result card ────────────────
 
 function DefaultPair({ pair, defaultCollapsed }: { pair: ToolPair; defaultCollapsed: boolean }) {
-  const [callCollapsed, setCallCollapsed] = useState(defaultCollapsed);
-  const [resultCollapsed, setResultCollapsed] = useState(defaultCollapsed);
-  useEffect(() => { if (defaultCollapsed) { setCallCollapsed(true); setResultCollapsed(true); } }, [defaultCollapsed]);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  useEffect(() => { if (defaultCollapsed) setCollapsed(true); }, [defaultCollapsed]);
 
   return (
     <>
       <CollapsibleCard
         id={`${pair.callTranscriptId}/default`}
-        collapsed={callCollapsed}
-        onToggle={() => setCallCollapsed((p) => !p)}
+        collapsed={collapsed}
+        onToggle={() => setCollapsed((p) => !p)}
         title={
           <>
             <Icon name="tool" size={13} className="tool-icon" />
@@ -168,14 +171,8 @@ function DefaultPair({ pair, defaultCollapsed }: { pair: ToolPair; defaultCollap
       {pair.result && (
         <CollapsibleCard
           id={`${pair.result.id}/result`}
-          collapsed={resultCollapsed}
-          onToggle={() => setResultCollapsed((p) => !p)}
-          title={
-            <>
-              <Icon name="tool" size={13} className="tool-icon" />
-              <span className="tool-label">Result</span>
-            </>
-          }
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((p) => !p)}
         >
           <div className="tool-code-block">
             <pre>

@@ -5,14 +5,13 @@ interface CollapsibleCardProps {
   id: string;
   collapsed: boolean;
   onToggle: (id: string) => void;
-  /** Full header content. When empty, renders chevron inside content area. */
   title?: ReactNode;
-  /** Right-side elements in header (before chevron). */
   headerRight?: ReactNode;
   cardClassName?: string;
   headerClassName?: string;
-  /** Collapsible body. When empty, chevron hidden, collapse disabled. */
   children?: ReactNode;
+  /** If true, shows overlay chevron even without a title (for standalone cards). */
+  standalone?: boolean;
 }
 
 export default function CollapsibleCard({
@@ -24,9 +23,11 @@ export default function CollapsibleCard({
   cardClassName = "",
   headerClassName = "",
   children,
+  standalone = false,
 }: CollapsibleCardProps) {
   const hasContent = Boolean(children);
   const hasHeader = Boolean(title);
+  const showChevron = hasContent && (hasHeader || standalone);
 
   return (
     <div className={`tool-card${cardClassName ? ` ${cardClassName}` : ""}`}>
@@ -38,12 +39,11 @@ export default function CollapsibleCard({
           {title}
           <span className="shell-call-right">
             {headerRight}
-            {hasContent && (
+            {showChevron && (
               <Icon
                 name={collapsed ? "chevron-down" : "chevron-up"}
                 size={14}
                 className="card-chevron"
-                onClick={() => onToggle(id)}
               />
             )}
           </span>
@@ -52,7 +52,7 @@ export default function CollapsibleCard({
 
       {hasContent && !collapsed && (
         <div className="tool-card-body card-body--relative">
-          {!hasHeader && (
+          {!hasHeader && showChevron && (
             <Icon
               name={collapsed ? "chevron-down" : "chevron-up"}
               size={14}

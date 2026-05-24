@@ -577,8 +577,17 @@
 }
 
 .tool-shell-output {
-    margin: 0;
-    padding: 12px 14px;
+    margin: 4px 0 0 0;
+    padding: 10px 12px;
+    border-radius: 4px;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    overflow-x: auto;
     font-size: 0.82rem;
     font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
     white-space: pre-wrap;
@@ -692,27 +701,24 @@
 /* ── Shell call card (dark, inside assistant) ── */
 
 .tool-card--shell {
-    padding: 0;
-    background: #1e1e1e;
-    border: 1px solid #333;
+    /* header blends in; only content area is dark */
 }
 
 .shell-call-bar {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 8px 14px 6px 14px;
 }
 
 .shell-call-icon {
-    color: #888;
+    color: #999;
     flex-shrink: 0;
 }
 
 .shell-call-label {
     font-size: 0.72rem;
     font-weight: 600;
-    color: #aaa;
+    color: #888;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
@@ -727,7 +733,7 @@
 .shell-call-timeout {
     font-size: 0.65rem;
     font-weight: 600;
-    color: #888;
+    color: #999;
 }
 
 .shell-call-spinner {
@@ -745,8 +751,17 @@
 }
 
 .shell-call-command {
-    margin: 0;
-    padding: 0 14px 10px 14px;
+    margin: 4px 0 0 0;
+    padding: 10px 12px;
+    border-radius: 4px;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    overflow-x: auto;
     font-size: 0.82rem;
     font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
     white-space: pre-wrap;
@@ -776,23 +791,11 @@
     opacity: 1;
 }
 
-/* Overlay chevron for header-less cards (top-right inside content) */
-.card-body--relative {
-    position: relative;
-}
-.card-chevron--overlay {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    z-index: 1;
-}
 
 /* ── Write call card (light indigo) ─────────── */
 
 .tool-card--write {
-    padding: 0;
-    background: #f3f4ff;
-    border: 1px solid #d8dcf0;
+    /* header blends in; content area has tint */
 }
 
 .write-call-bar {
@@ -826,7 +829,10 @@
 }
 
 .write-call-body {
-    padding: 0 14px 10px 14px;
+    background: #f3f4ff;
+    margin: 4px 0 0 0;
+    padding: 10px 12px;
+    border-radius: 4px;
     font-size: 0.88rem;
     line-height: 1.6;
     color: #333;
@@ -835,16 +841,13 @@
 /* ── Read result card (light gray) ──────────── */
 
 .tool-card--read {
-    padding: 0;
-    background: #f2f2f2;
-    border: 1px solid #ddd;
+    /* header blends in; content area has tint */
 }
 
 .read-call-bar {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 9px 14px;
 }
 
 .read-call-icon {
@@ -871,7 +874,10 @@
 }
 
 .read-call-body {
-    padding: 0 14px 10px 14px;
+    background: #f2f2f2;
+    margin: 4px 0 0 0;
+    padding: 10px 12px;
+    border-radius: 4px;
     font-size: 0.88rem;
     line-height: 1.6;
     color: #333;
@@ -917,4 +923,15 @@
     height: 1px;
     background: #e8e8e8;
     margin-bottom: 12px;
+}
+
+/* Overlay chevron for standalone header-less cards */
+.card-body--relative {
+    position: relative;
+}
+.card-chevron--overlay {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 1;
 }

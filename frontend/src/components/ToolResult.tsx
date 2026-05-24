@@ -1,7 +1,8 @@
 import { useState, useCallback } from "react";
-import Markdown from "./Markdown";
 import Icon from "./Icon";
 import CollapsibleCard from "./CollapsibleCard";
+import HighlightCode from "./HighlightCode";
+import FileContent from "./FileContent";
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -53,10 +54,13 @@ function ShellResult({ result, toolArgs }: ToolResultProps) {
       collapsed={collapsed}
       onToggle={() => setCollapsed((p) => !p)}
       cardClassName="tool-card--shell"
+      standalone
     >
-      <pre className="tool-shell-output">
-        <code>{result}</code>
-      </pre>
+      <HighlightCode
+        code={result}
+        language="bash"
+        className="tool-shell-output"
+      />
     </CollapsibleCard>
   );
 }
@@ -66,8 +70,6 @@ function ShellResult({ result, toolArgs }: ToolResultProps) {
 function FileContentResult({ toolName, result, toolArgs }: ToolResultProps) {
   const [collapsed, setCollapsed] = useState(false);
   const filePath = toolArgs?.path ? String(toolArgs.path) : "";
-  const lang = guessLanguage(filePath);
-  // Read: content is the result itself. Write: content comes from args.
   const displayContent = result || "";
   return (
     <CollapsibleCard
@@ -83,15 +85,11 @@ function FileContentResult({ toolName, result, toolArgs }: ToolResultProps) {
         </>
       }
     >
-      {lang ? (
-        <pre className="tool-file-code">
-          <code className={`language-${lang}`}>{displayContent}</code>
-        </pre>
-      ) : (
-        <div className="tool-file-md">
-          <Markdown text={displayContent} />
-        </div>
-      )}
+      <FileContent
+        content={displayContent}
+        filePath={filePath}
+        className="tool-file-md"
+      />
     </CollapsibleCard>
   );
 }
