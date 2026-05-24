@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 
 from agent.terminal import PersistentTerminal, TerminalResult
-from agent.tools._safety import check_command_safety, safe_resolve_path
+from agent.utils.safety import check_command_safety, safe_resolve_path
 
 
 class SandBox:

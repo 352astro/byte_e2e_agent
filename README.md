@@ -9,26 +9,42 @@ byte_e2e_agent/
 ├── start.sh                   # 一键启动前后端
 ├── docs/                      # 变更文档
 ├── backend/
-│   ├── main.py                # FastAPI 入口 + SSE 流式 Agent 端点
-│   ├── cli.py                 # ReAct 智能体交互式 CLI
+│   ├── main.py                # FastAPI 入口 + 工作区 / Session / SSE API
+│   ├── project.py             # 工作区、Session 与调度器编排
+│   ├── README.md              # 后端说明入口
+│   ├── .python-version        # Python 版本声明
+│   ├── .env.example           # 环境变量模板
 │   ├── pyproject.toml         # 依赖声明（uv 用）
 │   ├── requirements.txt       # 依赖声明（pip 用）
-│   ├── .env.example           # 环境变量模板
+│   ├── uv.lock                # uv 锁定文件
 │   └── agent/
-│       ├── utils/             # 工具模块（JSON 修复、终端 ANSI）
-│       ├── skills/            # Skill 特化能力模块
-│       ├── tools/             # 工具系统（Shell/Read/Write/Edit/Search/…）
-│       │   └── toolset.py     # 动态工具集（替代硬编码 Union）
 │       ├── llm.py             # LLM 客户端（OpenAI 兼容）
-│       ├── react.py           # ReAct 循环 + 角色化消息协议
-│       ├── plan_manager.py    # 计划状态机
-│       └── terminal.py        # 持久 Shell 会话（跨平台 PIPE）
+│       ├── scheduler.py       # 单例执行调度器与 ReAct 工具调用循环
+│       ├── session.py         # Session 数据容器与 JSONL 持久化
+│       ├── transcript.py      # 会话事件存储单元
+│       ├── stream_channel.py  # SSE chunk / flush 广播通道
+│       ├── sandbox.py         # 工作区沙箱、路径安全与工具执行分流
+│       ├── terminal.py        # 持久 Shell 会话（跨平台 PIPE）
+│       ├── tools/             # 工具系统（Shell/Read/Write/Edit/Search/…）
+│       │   ├── toolset.py     # OpenAI tools schema 动态生成
+│       │   ├── task.py        # 任务列表上下文与任务更新工具
+│       │   ├── subtask.py     # 子任务工具
+│       │   └── skill.py       # Skill 扫描与加载工具
+│       ├── skills/            # Skill 特化能力模块
+│       │   └── git_commit_skill/
+│       │       └── Skill.md
+│       └── utils/
+│           ├── safety.py      # 路径与命令安全检查
+│           └── _term.py       # 终端文本样式工具
 ├── frontend/
+│   ├── public/
 │   ├── src/
-│   │   ├── App.jsx            # 入口
-│   │   ├── components/        # StepCard / ToolRenderers / AgentDemo
+│   │   ├── main.tsx           # React 入口
+│   │   ├── App.tsx            # 应用入口组件
+│   │   ├── components/        # AgentDemo / Markdown / SessionSidebar
 │   │   └── hooks/             # useAgentStream（SSE 消费 + 状态管理）
-│   └── vite.config.js         # 含 /api 开发代理
+│   ├── package.json
+│   └── vite.config.ts         # 含 /api 开发代理
 └── .gitignore
 ```
 
