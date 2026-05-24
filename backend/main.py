@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from agent.stream_channel import StreamChannel, StreamEvent
+from agent.transcript import StreamTranscriptCompletion, StreamEvent
 from project import Project
 
 load_dotenv()
@@ -153,7 +153,7 @@ async def chat(sid: str, req: ChatRequest):
     scheduler = project.scheduler
 
     # 1. create channel
-    channel = StreamChannel()
+    channel = StreamTranscriptCompletion()
 
     # 2. subscribe BEFORE start (task won't run until we await)
     q = channel.subscribe()

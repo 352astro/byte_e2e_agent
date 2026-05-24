@@ -1,7 +1,7 @@
 """Scheduler — 单例执行调度器。
 
 一个 Project 只有一个 Scheduler，一次只运行一个 Session。
-每次 start() 创建新的 StreamChannel（per-session 临时通道）。
+每次 start() 创建新的 StreamTranscriptCompletion（per-session 临时通道）。
 Transcript 持久化存储在 Session 中。
 """
 
@@ -13,12 +13,12 @@ import uuid as _uuid
 from dataclasses import dataclass, field
 
 from agent.session import Session
-from agent.stream_channel import StreamChannel
 from agent.tools.shell import get_platform_hint
 from agent.tools.skill import skill_context_message
 from agent.tools.subtask import SubTask
 from agent.tools.task import task_context_message
 from agent.tools.toolset import ToolSet
+from agent.transcript import StreamTranscriptCompletion
 
 # ── System prompt（只定义一次）─────────────────────────────
 
@@ -60,7 +60,7 @@ class Scheduler:
     """Per-Project 执行调度器（单例）。
 
     一次只允许一个 Session 在运行。
-    StreamChannel 是 per-execution 的临时通道。
+    StreamTranscriptCompletion 是 per-execution 的临时通道。
     """
 
     def __init__(self) -> None:
@@ -68,12 +68,12 @@ class Scheduler:
         self._loop_task: asyncio.Task | None = None
         self._pending: dict[str, dict] = {}
         self._current_session: Session | None = None
-        self._current_channel: StreamChannel | None = None
+        self._current_channel: StreamTranscriptCompletion | None = None
 
     # ── public ────────────────────────────────────────────
 
     @property
-    def channel(self) -> StreamChannel | None:
+    def channel(self) -> StreamTranscriptCompletion | None:
         """当前运行中 session 的临时通道。"""
         return self._current_channel
 
@@ -95,13 +95,18 @@ class Scheduler:
         return None
 
     def start(
-        self, session: Session, question: str, channel: StreamChannel | None = None
+        self,
+        session: Session,
+        question: str,
+        channel: StreamTranscriptCompletion | None = None,
     ) -> str:
         """启动 session 执行。可传入外部创建的 channel（subscribe-before-start 模式）。"""
         if self._state != "idle":
             raise RuntimeError(f"Scheduler already running (state={self._state})")
         self._current_session = session
-        self._current_channel = channel if channel is not None else StreamChannel()
+        self._current_channel = (
+            channel if channel is not None else StreamTranscriptCompletion()
+        )
         self._state = "running"
         self._loop_task = asyncio.create_task(
             self._query_loop(question),
@@ -131,8 +136,9 @@ class Scheduler:
             # ── 1. 保存 user question transcript ─────────
             user_id = _uuid.uuid4().hex
             user_msg = {"role": "user", "content": question}
-            session.add_transcript("user_question", user_msg, user_id)
-            await channel.flush(user_id, "user_question", user_msg)
+            t = await channel.flush(user_id, "user_question", user_msg)
+
+            session.add_transcript(t.kind, t.message, t.id)
 
             max_steps = 50
 
@@ -165,8 +171,9 @@ class Scheduler:
                     assistant_msg["tool_calls"] = output.tool_calls
                 if output.reasoning:
                     assistant_msg["reasoning_content"] = output.reasoning
-                session.add_transcript("assistant", assistant_msg, assistant_id)
-                await channel.flush(assistant_id, "assistant", assistant_msg)
+                t = await channel.flush(assistant_id, "assistant", assistant_msg)
+
+                session.add_transcript(t.kind, t.message, t.id)
 
                 # ── finish_reason == "stop" → 结束 ────
                 if output.finish_reason == "stop":
@@ -176,8 +183,9 @@ class Scheduler:
                 if not output.tool_calls:
                     err_id = _uuid.uuid4().hex
                     err_msg = {"message": "LLM returned no tool_calls and no content."}
-                    session.add_transcript("error", err_msg, err_id)
-                    await channel.flush(err_id, "error", err_msg)
+                    t = await channel.flush(err_id, "error", err_msg)
+
+                    session.add_transcript(t.kind, t.message, t.id)
                     return
 
                 # ── 执行每个 tool_call ─────────────────
@@ -191,8 +199,9 @@ class Scheduler:
             try:
                 err_id = _uuid.uuid4().hex
                 err_msg = {"message": str(exc)}
-                session.add_transcript("error", err_msg, err_id)
-                await channel.flush(err_id, "error", err_msg)
+                t = await channel.flush(err_id, "error", err_msg)
+
+                session.add_transcript(t.kind, t.message, t.id)
             except Exception:
                 pass
         finally:
@@ -209,7 +218,7 @@ class Scheduler:
     async def _model_call(
         self,
         session: Session,
-        channel: StreamChannel,
+        channel: StreamTranscriptCompletion,
         messages: list[dict],
         tools: list[dict],
         transcript_id: str,
@@ -224,10 +233,10 @@ class Scheduler:
         async for ev in session.llm_client.think_stream(messages=messages, tools=tools):
             if ev["kind"] == "reasoning":
                 output.reasoning += ev["token"]
-                await channel.chunk(transcript_id, ev["token"])
+                await channel.chunk(transcript_id, "thinking", ev["token"])
             elif ev["kind"] == "content":
                 output.content += ev["token"]
-                await channel.chunk(transcript_id, ev["token"])
+                await channel.chunk(transcript_id, "response", ev["token"])
             elif ev["kind"] == "tool_call_chunk":
                 tc = ev["tool_call"]
                 idx: int = tc.get("index", 0)
@@ -242,10 +251,24 @@ class Scheduler:
                 if tc.get("id"):
                     output.tool_calls[idx]["id"] = tc["id"]
                 fn = tc.get("function", {})
+                tool_id = f"{transcript_id}/tc/{idx}"
                 if fn.get("name"):
                     output.tool_calls[idx]["function"]["name"] += fn["name"]
+                    # 每次收到 name 增量都推送完整累积名称
+                    await channel.chunk(
+                        transcript_id,
+                        "tool_name",
+                        output.tool_calls[idx]["function"]["name"],
+                        chunk_id=tool_id,
+                    )
                 if fn.get("arguments"):
                     output.tool_calls[idx]["function"]["arguments"] += fn["arguments"]
+                    await channel.chunk(
+                        transcript_id,
+                        "tool_arguments",
+                        fn["arguments"],
+                        chunk_id=tool_id,
+                    )
             elif ev["kind"] == "finish_reason":
                 output.finish_reason = ev["finish_reason"]
 
@@ -259,7 +282,7 @@ class Scheduler:
         self,
         tc: dict,
         session: Session,
-        channel: StreamChannel,
+        channel: StreamTranscriptCompletion,
     ) -> None:
         func_name: str = tc["function"]["name"]
         func_args: str = tc["function"]["arguments"]
@@ -274,19 +297,22 @@ class Scheduler:
                 "tool_call_id": tool_call_id,
                 "result": result,
             }
-            session.add_transcript("tool_result", result_msg, result_id)
-            await channel.flush(result_id, "tool_result", result_msg)
+            t = await channel.flush(result_id, "tool_result", result_msg)
+
+            session.add_transcript(t.kind, t.message, t.id)
             return
 
         # ── Shell（流式输出）───────────────────────────
         if func_name == "Shell":
             output_parts: list[str] = []
-            stream_id = _uuid.uuid4().hex
+            result_id = _uuid.uuid4().hex
             async for chunk_text in session._sandbox.stream_shell(
                 action.command, action.timeout_ms
             ):
                 output_parts.append(chunk_text)
-                await channel.chunk(stream_id, chunk_text)
+                await channel.chunk(
+                    result_id, "tool_result", chunk_text, chunk_id=result_id
+                )
             exit_code = session._sandbox.terminal._last_exit_code
             raw = "".join(output_parts)
             result_str = (
@@ -294,13 +320,13 @@ class Scheduler:
                 if exit_code != 0
                 else raw.rstrip() or "(no output)"
             )
-            result_id = _uuid.uuid4().hex
             result_msg = {
                 "tool_call_id": tool_call_id,
                 "result": result_str,
             }
-            session.add_transcript("tool_result", result_msg, result_id)
-            await channel.flush(result_id, "tool_result", result_msg)
+            t = await channel.flush(result_id, "tool_result", result_msg)
+
+            session.add_transcript(t.kind, t.message, t.id)
             return
 
         # ── SubTask（递归子任务）───────────────────────
@@ -313,8 +339,9 @@ class Scheduler:
                 "tool_call_id": tool_call_id,
                 "result": result_str,
             }
-            session.add_transcript("tool_result", result_msg, result_id)
-            await channel.flush(result_id, "tool_result", result_msg)
+            t = await channel.flush(result_id, "tool_result", result_msg)
+
+            session.add_transcript(t.kind, t.message, t.id)
             return
 
         # ── 其他工具 ───────────────────────────────────
@@ -328,8 +355,9 @@ class Scheduler:
             "tool_call_id": tool_call_id,
             "result": result_str,
         }
-        session.add_transcript("tool_result", result_msg, result_id)
-        await channel.flush(result_id, "tool_result", result_msg)
+        t = await channel.flush(result_id, "tool_result", result_msg)
+
+        session.add_transcript(t.kind, t.message, t.id)
 
     # ============================================================
     # SubTask
@@ -338,7 +366,7 @@ class Scheduler:
     async def _run_subtask(
         self,
         parent_session: Session,
-        channel: StreamChannel,
+        channel: StreamTranscriptCompletion,
         prompt: str,
         max_steps: int,
     ) -> str:
@@ -359,6 +387,7 @@ class Scheduler:
         ]
 
         last_answer = ""
+        subtask_stream_id = _uuid.uuid4().hex
 
         for _ in range(max_steps):
             output = _LLMOutput()
@@ -368,7 +397,12 @@ class Scheduler:
             ):
                 if ev["kind"] == "content":
                     output.content += ev["token"]
-                    await channel.chunk(_uuid.uuid4().hex, ev["token"])
+                    await channel.chunk(
+                        subtask_stream_id,
+                        "response",
+                        ev["token"],
+                        chunk_id=subtask_stream_id,
+                    )
                 elif ev["kind"] == "tool_call_chunk":
                     tc = ev["tool_call"]
                     idx: int = tc.get("index", 0)
@@ -429,12 +463,17 @@ class Scheduler:
 
                 if func_name == "Shell":
                     parts: list[str] = []
-                    stream_id = _uuid.uuid4().hex
+                    tr_id = _uuid.uuid4().hex
                     async for chunk_text in parent_session._sandbox.stream_shell(
                         action.command, action.timeout_ms
                     ):
                         parts.append(chunk_text)
-                        await channel.chunk(stream_id, chunk_text)
+                        await channel.chunk(
+                            tr_id,
+                            "tool_result",
+                            chunk_text,
+                            chunk_id=tr_id,
+                        )
                     exit_code = parent_session._sandbox.terminal._last_exit_code
                     raw = "".join(parts)
                     result = (

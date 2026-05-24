@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import useAgentStream from "../hooks/useAgentStream";
-import Markdown from "./Markdown";
-import type { DisplayTranscript, SessionCache } from "../types";
+import TranscriptCard from "./TranscriptCard";
+import type { SessionCache } from "../types";
 import "./AgentDemo.css";
 
 interface AgentDemoProps {
@@ -17,7 +17,7 @@ export default function AgentDemo({
   onSessionCreated,
   cache,
 }: AgentDemoProps) {
-  const { question, setQuestion, running, transcripts, answer, handleRun } =
+  const { question, setQuestion, running, transcripts, handleRun } =
     useAgentStream({ sessionId, pendingNew, onSessionCreated, cache });
 
   const composingRef = useRef(false);
@@ -43,57 +43,9 @@ export default function AgentDemo({
     <div className="agent-demo">
       <div className="agent-scroll">
         <div className="agent-scroll-inner">
-          {transcripts.map((t) => {
-            const isUser = t.kind === "user_question";
-            const content = String(t.message.content || t.pendingChunks || "");
-            const isStreaming = !t.isFlushed && t.pendingChunks;
-
-            if (isUser) {
-              return (
-                <div key={t.id} className="user-bubble">
-                  <span className="user-bubble-label">You</span>
-                  <p>{content}</p>
-                </div>
-              );
-            }
-
-            // Assistant / tool / error transcripts
-            const label =
-              t.kind === "tool_result"
-                ? "\uD83D\uDD27 Tool"
-                : t.kind === "assistant"
-                  ? "\uD83D\uDCAC Assistant"
-                  : t.kind === "error"
-                    ? "\u26A0\uFE0F Error"
-                    : t.kind;
-
-            return (
-              <div
-                key={t.id}
-                className={`transcript-card ${isStreaming ? "streaming" : ""}`}
-              >
-                <span className="transcript-label">{label}</span>
-                <div className="transcript-body">
-                  {t.kind === "tool_result" ? (
-                    <pre>
-                      {content.length > 500
-                        ? content.slice(0, 500) + "..."
-                        : content}
-                    </pre>
-                  ) : (
-                    <Markdown text={content} />
-                  )}
-                </div>
-              </div>
-            );
-          })}
-
-          {answer && (
-            <div className="agent-answer">
-              <h3>{"\u2705"} Answer</h3>
-              <Markdown text={answer} />
-            </div>
-          )}
+          {transcripts.map((t) => (
+            <TranscriptCard key={t.id} transcript={t} />
+          ))}
 
           <div className="agent-bottom-spacer" />
         </div>

@@ -3,6 +3,7 @@ import type {
     DisplayTranscript,
     SessionCache,
     StreamEvent,
+    SubStream,
     Transcript,
     RecoverResponse,
 } from "../types";
@@ -39,14 +40,11 @@ export default function useAgentStream({
     const lazyCreatedRef = useRef<string | null>(null);
     const lastIdRef = useRef<string | null>(null);
     const fetchForRef = useRef<string | null>(null);
-    // Set before onSessionCreated, cleared when SSE ends — prevents
-    // the effect from doing a recover fetch while SSE is populating.
     const streamingSidRef = useRef<string | null>(null);
 
     // ── session switch: save & restore ────────────────
 
     useEffect(() => {
-        // Save current state ONLY when switching to a different session
         if (currentSid && currentSid !== sessionId) {
             cache[currentSid] = {
                 transcripts,
@@ -55,9 +53,7 @@ export default function useAgentStream({
             };
         }
 
-        // ── No session selected / New Session (blank slate) ──
         if (!sessionId) {
-            // Abort any in-flight stream from previous session
             if (abortRef.current) {
                 abortRef.current.abort();
                 abortRef.current = null;
@@ -69,19 +65,16 @@ export default function useAgentStream({
             return;
         }
 
-        // ── Currently streaming — don't fetch, SSE is populating ──
         if (sessionId === streamingSidRef.current) {
             setCurrentSid(sessionId);
             return;
         }
 
-        // Abort previous stream (only when genuinely switching sessions)
         if (abortRef.current) {
             abortRef.current.abort();
             abortRef.current = null;
         }
 
-        // ── Cache hit (completed session) ──────────────
         const cached = cache[sessionId];
         if (cached && cached._complete) {
             setTranscripts(cached.transcripts || []);
@@ -93,7 +86,6 @@ export default function useAgentStream({
             return;
         }
 
-        // ── Lazy-created, SSE about to start ──────────
         if (sessionId === lazyCreatedRef.current) {
             lazyCreatedRef.current = null;
             streamingSidRef.current = sessionId;
@@ -101,7 +93,6 @@ export default function useAgentStream({
             return;
         }
 
-        // ── Cache miss — fetch from server ─────────────
         if (currentSid !== sessionId) {
             setTranscripts([]);
             setAnswer(null);
@@ -124,7 +115,8 @@ export default function useAgentStream({
                         id: t.id,
                         kind: t.kind,
                         message: t.message,
-                        pendingChunks: "",
+                        subStreams: [],
+                        activeSubStream: null,
                         isFlushed: true,
                     }),
                 );
@@ -183,13 +175,40 @@ export default function useAgentStream({
                         (item) => item.id === ev.transcript_id,
                     );
                     const existing = idx >= 0 ? prev[idx] : null;
-                    const accumulated =
-                        (existing?.pendingChunks ?? "") + ev.text;
+                    let subStreams = existing?.subStreams ?? [];
+                    let active = existing?.activeSubStream ?? null;
+
+                    if (
+                        active &&
+                        (active.id !== ev.id || active.kind !== ev.kind)
+                    ) {
+                        subStreams = [...subStreams, active];
+                        active = null;
+                    }
+
+                    if (
+                        active &&
+                        active.id === ev.id &&
+                        active.kind === ev.kind
+                    ) {
+                        active = {
+                            ...active,
+                            text: active.text + ev.text,
+                        };
+                    } else {
+                        active = {
+                            id: ev.id,
+                            kind: ev.kind,
+                            text: ev.text,
+                        };
+                    }
+
                     const t: DisplayTranscript = {
                         id: ev.transcript_id,
-                        kind: existing?.kind ?? "",
-                        message: existing?.message ?? { content: "" },
-                        pendingChunks: accumulated,
+                        kind: existing?.kind ?? "assistant",
+                        message: existing?.message ?? {},
+                        subStreams,
+                        activeSubStream: active,
                         isFlushed: false,
                     };
                     if (idx >= 0) {
@@ -208,11 +227,21 @@ export default function useAgentStream({
                 ) {
                     setAnswer(String(msg.content));
                 }
+
+                // 后端 StreamChannel 内部 Transcript 已等效拼接，
+                // flush 直接携带完整 sub_streams，无需前端重建
+                const ss: SubStream[] = (ev.sub_streams || []).map((s) => ({
+                    id: s.id,
+                    kind: s.kind,
+                    text: s.text,
+                }));
+
                 upsertTranscript({
                     id: ev.transcript_id,
                     kind: ev.kind,
                     message: msg,
-                    pendingChunks: "",
+                    subStreams: ss,
+                    activeSubStream: null,
                     isFlushed: true,
                 });
                 lastIdRef.current = ev.transcript_id;
@@ -231,7 +260,6 @@ export default function useAgentStream({
         setAnswer(null);
         setQuestion("");
 
-        // Lazy-create session
         let sid = currentSid;
         if (!sid && pendingNew) {
             try {
@@ -241,7 +269,7 @@ export default function useAgentStream({
                 sid = data.session_id;
                 setCurrentSid(sid);
                 lazyCreatedRef.current = sid;
-                streamingSidRef.current = sid; // block recover fetch
+                streamingSidRef.current = sid;
                 if (onSessionCreated) onSessionCreated(sid);
             } catch (err) {
                 setAnswer(
@@ -257,12 +285,8 @@ export default function useAgentStream({
             return;
         }
 
-        // User question is sent by backend SSE — no manual insert needed
-
-        // Block recover fetch while SSE is populating (for all messages, not just lazy-created)
         streamingSidRef.current = sid;
 
-        // POST /chat returns SSE directly (subscribe-before-start)
         const controller = new AbortController();
         abortRef.current = controller;
         try {
@@ -311,8 +335,8 @@ export default function useAgentStream({
             );
         } finally {
             if (abortRef.current === controller) abortRef.current = null;
-            streamingSidRef.current = null; // allow recover fetch again
-            lazyCreatedRef.current = null; // allow recover fetch for this session later
+            streamingSidRef.current = null;
+            lazyCreatedRef.current = null;
             setRunning(false);
         }
     }, [

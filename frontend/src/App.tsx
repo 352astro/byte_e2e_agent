@@ -23,6 +23,17 @@ export default function App() {
     setPendingNew(true);
   }, []);
 
+  // Called when a session is deleted — if it was the active one, reset
+  const handleDelete = useCallback(
+    (sid: string) => {
+      if (sessionId === sid) {
+        setSessionId(null);
+        setPendingNew(false);
+      }
+    },
+    [sessionId],
+  );
+
   // Called when a new session is lazy-created (first message sent in "New Session" mode)
   const handleSessionCreated = useCallback((sid: string) => {
     setSessionId(sid);
@@ -43,6 +54,7 @@ export default function App() {
         onWorkspaceChange={handleWorkspaceChange}
         onSelect={handleSelect}
         onNew={handleNew}
+        onDelete={handleDelete}
       />
       <div className="app-main">
         {sessionId || pendingNew ? (

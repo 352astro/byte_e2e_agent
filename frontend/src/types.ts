@@ -1,8 +1,8 @@
-// ── Transcript (v2 streaming format) ──────────────────
+// ── Transcript ──────────────────────────────────────────
 
 export interface Transcript {
-    id: string; // transcript_id — unique across session
-    kind: string; // user_question | assistant | tool_result | permission_request | ...
+    id: string;
+    kind: string;
     message: Record<string, unknown>;
 }
 
@@ -12,24 +12,41 @@ export interface RecoverResponse {
     running: boolean;
 }
 
-// ── SSE stream events (from GET /api/stream/{uuid}) ────
+// ── Sub-stream (chunk with kind/id) ──────────────────────
+
+export interface SubStream {
+    id: string; // sub-stream id
+    kind: string; // thinking | response | tool_name | tool_arguments | tool_result
+    text: string; // accumulated text for this sub-stream
+}
+
+// ── SSE stream events ───────────────────────────────────
 
 export type StreamEvent =
-    | { event: "chunk"; transcript_id: string; text: string }
+    | {
+          event: "chunk";
+          transcript_id: string;
+          id: string;
+          kind: string;
+          text: string;
+      }
     | {
           event: "flush";
           transcript_id: string;
           kind: string;
           message: Record<string, unknown>;
+          sub_streams: Array<{ id: string; kind: string; text: string }>;
+          active_sub_stream: { id: string; kind: string; text: string } | null;
       };
 
-// ── Display items (what the UI renders) ────────────────
+// ── Display items ────────────────────────────────────────
 
 export interface DisplayTranscript {
     id: string;
     kind: string;
     message: Record<string, unknown>;
-    pendingChunks: string; // accumulated chunk text before flush
+    subStreams: SubStream[]; // completed sub-streams, in order
+    activeSubStream: SubStream | null; // currently streaming
     isFlushed: boolean;
 }
 

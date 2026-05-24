@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { SessionInfo } from "../types";
 
 interface SessionSidebarProps {
@@ -7,6 +7,7 @@ interface SessionSidebarProps {
   onWorkspaceChange: (workspace: string) => void;
   onSelect: (sid: string) => void;
   onNew: () => void;
+  onDelete?: (sid: string) => void;
 }
 
 export default function SessionSidebar({
@@ -15,12 +16,16 @@ export default function SessionSidebar({
   onWorkspaceChange,
   onSelect,
   onNew,
+  onDelete,
 }: SessionSidebarProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selecting, setSelecting] = useState(false);
+  const [menuSid, setMenuSid] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const sidebarRef = useRef<HTMLDivElement | null>(null);
 
-  const fetchSessions = async () => {
+  const fetchSessions = useCallback(async () => {
     try {
       const res = await fetch("/api/sessions");
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
@@ -40,11 +45,11 @@ export default function SessionSidebar({
       setSessions([]);
       setError(err instanceof Error ? err.message : String(err));
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchSessions();
-  }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchSessions, activeId]);
 
   // Fetch current workspace on mount
   useEffect(() => {
@@ -57,6 +62,21 @@ export default function SessionSidebar({
       })
       .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Close context menu on outside click
+  useEffect(() => {
+    if (!menuSid) return;
+    const close = (e: MouseEvent) => {
+      if (
+        sidebarRef.current &&
+        !sidebarRef.current.contains(e.target as Node)
+      ) {
+        setMenuSid(null);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [menuSid]);
 
   const chooseWorkspace = async () => {
     setSelecting(true);
@@ -102,8 +122,25 @@ export default function SessionSidebar({
     }
   };
 
+  const handleDelete = async (sid: string) => {
+    setMenuSid(null);
+    setDeleting(sid);
+    try {
+      const res = await fetch(`/api/session/${sid}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      if (activeId === sid && onDelete) {
+        onDelete(sid);
+      }
+      await fetchSessions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeleting(null);
+    }
+  };
+
   return (
-    <div className="sidebar">
+    <div className="sidebar" ref={sidebarRef}>
       <div className="sidebar-workspace">
         <span>Workspace</span>
         <div className="sidebar-workspace-path">
@@ -125,12 +162,14 @@ export default function SessionSidebar({
       <div className="sidebar-list">
         {sessions.map((session) => {
           const label = session.session_name || session.session_id;
+          const isActive = session.session_id === activeId;
+          const isMenuOpen = session.session_id === menuSid;
+          const isDeleting = session.session_id === deleting;
+
           return (
             <div
               key={session.session_id}
-              className={`sidebar-item ${
-                session.session_id === activeId ? "active" : ""
-              }`}
+              className={`sidebar-item ${isActive ? "active" : ""}`}
               onClick={() => onSelect(session.session_id)}
             >
               <span className="sidebar-item-dot" />
@@ -138,6 +177,35 @@ export default function SessionSidebar({
                 <span className="sidebar-item-title">{label}</span>
                 <span className="sidebar-item-id">{session.session_id}</span>
               </span>
+
+              {/* three-dot menu */}
+              <div className="sidebar-item-actions">
+                <button
+                  className="sidebar-menu-btn"
+                  title="Session actions"
+                  disabled={isDeleting}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuSid(isMenuOpen ? null : session.session_id);
+                  }}
+                >
+                  ⋮
+                </button>
+
+                {isMenuOpen && (
+                  <div className="sidebar-context-menu">
+                    <button
+                      className="sidebar-context-item sidebar-context-item--danger"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(session.session_id);
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           );
         })}
