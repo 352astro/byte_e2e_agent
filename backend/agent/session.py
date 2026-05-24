@@ -8,10 +8,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 import uuid as _uuid
+from collections.abc import Callable
 from pathlib import Path
 
 from agent.llm import HelloAgentsLLM
@@ -20,6 +20,12 @@ from agent.tools.toolset import ToolSet
 from agent.transcript import Transcript, TranscriptKind
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+MessageConverter = Callable[[Transcript], dict | None]
+_LEGACY_ROLE_TO_KIND: dict[str, TranscriptKind] = {
+    "user": "user_question",
+    "assistant": "assistant",
+    "tool": "tool_result",
+}
 
 
 def _default_toolset() -> ToolSet:
@@ -72,7 +78,13 @@ class Session:
 
         # 必须同步写入以保持 assistant tool_calls -> tool_result 的落盘顺序。
         # fire-and-forget 任务可能乱序完成，重启后会形成孤立 tool message。
-        _save_transcript_sync(self._sandbox.workspace, self.session_id, kind, tid, message)
+        _save_transcript_sync(
+            self._sandbox.workspace,
+            self.session_id,
+            kind,
+            tid,
+            message,
+        )
         return t
 
     def get_transcripts(self) -> list[dict]:
@@ -118,7 +130,7 @@ class Session:
 
 
 # ============================================================
-# Public API（兼容旧前端）
+# Module API（供 app/services/project.py 调用）
 # ============================================================
 
 
@@ -141,6 +153,49 @@ def load_session(
     if not messages_path.exists():
         return session
 
+    session.replace_transcripts(_load_transcripts(messages_path))
+    return session
+
+
+def get_history(session: Session) -> list[dict]:
+    """从 transcripts 重建 Turn 兼容格式的历史记录。"""
+    result: list[dict] = []
+
+    for t in session._transcripts:
+        msg = t.message
+        if t.kind == "user_question":
+            result.append(
+                {
+                    "role": "user",
+                    "question": msg.get("content", ""),
+                    "reasoning": "",
+                    "content": "",
+                    "tool_calls": [],
+                    "finish_answer": None,
+                }
+            )
+        elif t.kind == "assistant":
+            result.append(_assistant_history_turn(msg))
+        elif t.kind == "tool_result":
+            _attach_tool_result(result, msg)
+
+    for turn in result:
+        for tc in turn.get("tool_calls", []):
+            tc.pop("_tc_id", None)
+    return result
+
+
+async def clear(session: Session) -> None:
+    session.replace_transcripts([])
+    await session._sandbox.shutdown()
+
+
+# ============================================================
+# Transcript loading / persistence
+# ============================================================
+
+
+def _load_transcripts(messages_path: Path) -> list[Transcript]:
     transcripts: list[Transcript] = []
     with open(messages_path, encoding="utf-8") as fh:
         for line in fh:
@@ -151,31 +206,54 @@ def load_session(
                 record = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if isinstance(record, dict) and "uuid" in record and "kind" in record:
-                transcripts.append(
-                    Transcript(
-                        id=record["uuid"],
-                        kind=record["kind"],
-                        message=record.get("message", {}),
-                    )
-                )
-            elif isinstance(record, dict) and "role" in record:
-                role = record.get("role", "")
-                kind = {
-                    "user": "user_question",
-                    "assistant": "assistant",
-                    "tool": "tool_result",
-                }.get(role, "assistant")
-                transcripts.append(
-                    Transcript(
-                        id=_uuid.uuid4().hex,
-                        kind=kind,
-                        message=record,
-                    )
-                )
 
-    session.replace_transcripts(transcripts)
-    return session
+            transcript = _record_to_transcript(record)
+            if transcript is not None:
+                transcripts.append(transcript)
+    return transcripts
+
+
+def _record_to_transcript(record: object) -> Transcript | None:
+    """读取当前 JSONL 格式，并兼容早期直接落 OpenAI message 的格式。"""
+    if not isinstance(record, dict):
+        return None
+
+    if "uuid" in record and "kind" in record:
+        return Transcript(
+            id=record["uuid"],
+            kind=record["kind"],
+            message=record.get("message", {}),
+        )
+
+    if "role" in record:
+        role = record.get("role", "")
+        return Transcript(
+            id=_uuid.uuid4().hex,
+            kind=_LEGACY_ROLE_TO_KIND.get(role, "assistant"),
+            message=record,
+        )
+
+    return None
+
+
+def _save_transcript_sync(
+    workspace: str | Path,
+    session_id: str,
+    kind: TranscriptKind,
+    transcript_uuid: str,
+    message: dict,
+) -> None:
+    messages_path = _messages_path(workspace, session_id)
+    messages_path.parent.mkdir(parents=True, exist_ok=True)
+    record = {"kind": kind, "uuid": transcript_uuid, "message": message}
+    with open(messages_path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+        fh.write("\n")
+
+
+# ============================================================
+# Transcript repair / LLM message cache
+# ============================================================
 
 
 def _normalize_transcript_order(transcripts: list[Transcript]) -> list[Transcript]:
@@ -224,8 +302,11 @@ def _has_open_tool_call(transcripts: list[Transcript], tool_call_id: str) -> boo
     return False
 
 
-def _build_llm_messages(transcripts: list[Transcript], convert) -> list[dict]:
-    """Build OpenAI messages while skipping orphan tool results."""
+def _build_llm_messages(
+    transcripts: list[Transcript],
+    convert: MessageConverter,
+) -> list[dict]:
+    """重建 OpenAI messages；跳过没有对应 assistant tool_calls 的 tool 结果。"""
     messages: list[dict] = []
     open_tool_call_ids: set[str] = set()
 
@@ -253,107 +334,61 @@ def _build_llm_messages(transcripts: list[Transcript], convert) -> list[dict]:
     return messages
 
 
-def get_history(session: Session) -> list[dict]:
-    """从 transcripts 重建 Turn 兼容格式的历史记录。"""
-    result: list[dict] = []
+# ============================================================
+# History compatibility helpers
+# ============================================================
 
-    for t in session._transcripts:
-        msg = t.message
-        if t.kind == "user_question":
-            result.append(
-                {
-                    "role": "user",
-                    "question": msg.get("content", ""),
-                    "reasoning": "",
-                    "content": "",
-                    "tool_calls": [],
-                    "finish_answer": None,
-                }
-            )
-        elif t.kind == "assistant":
-            tool_calls: list[dict] = []
-            for tc in msg.get("tool_calls", []):
-                tool_calls.append(
-                    {
-                        "name": tc["function"]["name"],
-                        "arguments": _safe_json_loads(
-                            tc["function"].get("arguments", "{}")
-                        ),
-                        "result": None,
-                        "_tc_id": tc.get("id", ""),
-                    }
+
+def _assistant_history_turn(message: dict) -> dict:
+    tool_calls = [_history_tool_call(tc) for tc in message.get("tool_calls", [])]
+    turn: dict = {
+        "role": "assistant",
+        "question": "",
+        "reasoning": message.get("reasoning_content", ""),
+        "content": message.get("content") or "",
+        "tool_calls": tool_calls,
+        "finish_answer": None,
+    }
+    if not tool_calls and message.get("content"):
+        turn["finish_answer"] = message["content"]
+    return turn
+
+
+def _history_tool_call(tool_call: dict) -> dict:
+    function = tool_call["function"]
+    return {
+        "name": function["name"],
+        "arguments": _safe_json_loads(function.get("arguments", "{}")),
+        "result": None,
+        "_tc_id": tool_call.get("id", ""),
+    }
+
+
+def _attach_tool_result(history: list[dict], message: dict) -> None:
+    tool_call_id = message.get("tool_call_id", "")
+    for turn in reversed(history):
+        if turn["role"] != "assistant":
+            continue
+        for tool_call in turn["tool_calls"]:
+            if tool_call.get("_tc_id") == tool_call_id:
+                tool_call["result"] = message.get(
+                    "result",
+                    message.get("content", ""),
                 )
-            turn: dict = {
-                "role": "assistant",
-                "question": "",
-                "reasoning": msg.get("reasoning_content", ""),
-                "content": msg.get("content") or "",
-                "tool_calls": tool_calls,
-                "finish_answer": None,
-            }
-            if not tool_calls and msg.get("content"):
-                turn["finish_answer"] = msg["content"]
-            result.append(turn)
-        elif t.kind == "tool_result":
-            tc_id = msg.get("tool_call_id", "")
-            for turn in reversed(result):
-                if turn["role"] != "assistant":
-                    continue
-                for tc in turn["tool_calls"]:
-                    if tc.get("_tc_id") == tc_id:
-                        tc["result"] = msg.get("result", msg.get("content", ""))
-                        break
                 break
-
-    for turn in result:
-        for tc in turn.get("tool_calls", []):
-            tc.pop("_tc_id", None)
-    return result
+        break
 
 
-async def clear(session: Session) -> None:
-    session.replace_transcripts([])
-    await session._sandbox.shutdown()
-
-
-# ============================================================
-# helpers
-# ============================================================
-
-
-def _safe_json_loads(s: str) -> dict:
+def _safe_json_loads(value: str) -> dict:
     try:
-        return json.loads(s)
+        return json.loads(value)
     except json.JSONDecodeError:
         return {}
 
 
-async def save_transcript(
-    workspace: str | Path,
-    session_id: str,
-    kind: TranscriptKind,
-    transcript_uuid: str,
-    message: dict,
-) -> None:
-    """追加保存一条 transcript 到当前 session 的 JSONL 文件。"""
-    await asyncio.to_thread(
-        _save_transcript_sync, workspace, session_id, kind, transcript_uuid, message
-    )
-
-
-def _save_transcript_sync(
-    workspace: str | Path,
-    session_id: str,
-    kind: TranscriptKind,
-    transcript_uuid: str,
-    message: dict,
-) -> None:
-    messages_path = _messages_path(workspace, session_id)
-    messages_path.parent.mkdir(parents=True, exist_ok=True)
-    record = {"kind": kind, "uuid": transcript_uuid, "message": message}
-    with open(messages_path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
-        fh.write("\n")
+# ============================================================
+# Filesystem helpers
+# ============================================================
 
 
 def _messages_path(workspace: str | Path, session_id: str) -> Path:

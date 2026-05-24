@@ -12,6 +12,7 @@ import json
 import uuid as _uuid
 from dataclasses import dataclass, field
 
+from agent.metrics import LLMCallContext
 from agent.session import Session
 from agent.tools.shell import get_platform_hint
 from agent.tools.skill import skill_context_message
@@ -237,7 +238,15 @@ class Scheduler:
         """
         output = _LLMOutput()
 
-        async for ev in session.llm_client.think_stream(messages=messages, tools=tools):
+        async for ev in session.llm_client.think_stream(
+            messages=messages,
+            tools=tools,
+            metrics_context=LLMCallContext(
+                session_id=session.session_id,
+                transcript_id=transcript_id,
+                call_type="agent_step",
+            ),
+        ):
             if ev["kind"] == "reasoning":
                 output.reasoning += ev["token"]
                 await channel.chunk(transcript_id, "thinking", ev["token"])
@@ -408,7 +417,13 @@ class Scheduler:
             output = _LLMOutput()
 
             async for ev in parent_session.llm_client.think_stream(
-                messages=subtask_messages, tools=subtask_tools
+                messages=subtask_messages,
+                tools=subtask_tools,
+                metrics_context=LLMCallContext(
+                    session_id=parent_session.session_id,
+                    transcript_id=subtask_stream_id,
+                    call_type="subtask_step",
+                ),
             ):
                 if ev["kind"] == "content":
                     output.content += ev["token"]

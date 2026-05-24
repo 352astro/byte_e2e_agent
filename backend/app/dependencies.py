@@ -7,4 +7,7 @@ from app.services.project import Project
 @lru_cache
 def get_project() -> Project:
     settings = get_settings()
-    return Project(settings.agent_workspace)
+    return Project(
+        settings.agent_workspace,
+        metrics_db_path=settings.llm_metrics_db_path,
+    )

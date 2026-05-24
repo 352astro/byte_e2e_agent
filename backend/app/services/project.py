@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.llm import HelloAgentsLLM
+from agent.metrics import SQLiteLLMMetricsStore
 from agent.sandbox import SandBox
 from agent.scheduler import Scheduler
 from agent.session import Session, clear, get_history, load_session
@@ -37,11 +38,16 @@ class SessionStream:
 class Project:
     """Global singleton per workspace."""
 
-    def __init__(self, workspace: str) -> None:
+    def __init__(self, workspace: str, metrics_db_path: str) -> None:
         self._workspace = self._normalize(workspace)
         self._sessions: dict[str, Session] = {}  # session_id → Session
         self._scheduler: Scheduler | None = None  # ONE global scheduler
         self._llm: HelloAgentsLLM | None = None
+        self._metrics_db_path = metrics_db_path
+        metrics_path = Path(metrics_db_path).expanduser()
+        if not metrics_path.is_absolute():
+            metrics_path = Path(self._workspace) / metrics_path
+        self.metrics_store = SQLiteLLMMetricsStore(metrics_path)
 
     # ── properties ───────────────────────────────────────
 
@@ -52,7 +58,7 @@ class Project:
     @property
     def llm(self) -> HelloAgentsLLM:
         if self._llm is None:
-            self._llm = HelloAgentsLLM()
+            self._llm = HelloAgentsLLM(metrics_store=self.metrics_store)
         return self._llm
 
     # ── workspace ────────────────────────────────────────
@@ -60,6 +66,12 @@ class Project:
     def set_workspace(self, path: str) -> None:
         resolved = self._normalize(path)
         self._workspace = resolved
+        metrics_path = Path(self._metrics_db_path).expanduser()
+        if not metrics_path.is_absolute():
+            metrics_path = Path(self._workspace) / metrics_path
+        self.metrics_store = SQLiteLLMMetricsStore(metrics_path)
+        if self._llm is not None:
+            self._llm.metrics_store = self.metrics_store
 
     def resolve_workspace(self, path: str | None = None) -> str:
         if path is None or not path.strip():
@@ -147,6 +159,32 @@ class Project:
             "buffered": channel.get_buffered() if (is_running and channel) else {},
             "running": is_running,
         }
+
+    # ── LLM metrics / monitoring ────────────────────────
+
+    def list_llm_calls(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self.metrics_store.list_calls(
+            limit=limit,
+            offset=offset,
+            session_id=session_id,
+        )
+
+    def get_llm_summary(self, session_id: str | None = None) -> dict[str, Any]:
+        return self.metrics_store.summary(session_id=session_id)
+
+    def get_llm_dashboard(
+        self,
+        *,
+        limit: int = 20,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self.metrics_store.dashboard(limit=limit, session_id=session_id)
 
     # ── scheduler (singleton) ────────────────────────────
 

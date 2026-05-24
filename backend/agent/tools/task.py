@@ -63,7 +63,7 @@ class TaskRewrite(BaseTool):
         if error:
             return f"Error: {error}"
         await _save_tasks(sandbox, tasks)
-        return "Task list updated.\n" + _dump({"tasks": _with_blocked(tasks)})
+        return "Task list updated."
 
 
 class TaskUpdate(BaseTool):
@@ -108,7 +108,7 @@ class TaskUpdate(BaseTool):
                 )
 
         await _save_tasks(sandbox, next_tasks)
-        return "Task updated.\n" + _dump({"task": _with_blocked(next_tasks)[index]})
+        return "Task updated."
 
 
 def _tasks_path(sandbox) -> Path:

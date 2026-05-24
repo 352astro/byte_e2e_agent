@@ -122,6 +122,9 @@ npm run dev
 | `GET` | `/api/session/{sid}/stream` | 断线重连 / 追赶 SSE |
 | `GET` | `/api/session/{sid}/recover` | 恢复 Session 状态 |
 | `POST` | `/api/session/{sid}/respond` | 响应权限确认等等待项 |
+| `GET` | `/api/metrics/llm/calls` | LLM 调用明细（tokens / 延迟 / 成本元） |
+| `GET` | `/api/metrics/llm/summary` | LLM 调用汇总 |
+| `GET` | `/api/metrics/llm/dashboard` | 简易监控面板数据 |
 
 ## 核心架构
 
@@ -133,6 +136,39 @@ npm run dev
 - **PersistentTerminal** — 跨平台持久 Shell（`cd` 状态保留），Shell 输出通过 SSE 流式推送
 - **角色化消息协议** — `system → user → assistant(tool_calls) → tool → …` 标准对话链
 - **Session 持久化** — Transcript 顺序落盘，并在加载旧历史时修复孤立 tool 结果
+- **LLM 调用监控** — 每次 AI 调用写入 SQLite，记录 tokens、延迟、状态与人民币成本
+
+## LLM 调用监控
+
+每次 AI 调用都会记录到 SQLite，默认数据库路径为当前工作区下的 `.tmp/ai_metrics.sqlite3`。
+可通过 `LLM_METRICS_DB_PATH` 覆盖路径；相对路径会按当前工作区解析。
+
+成本字段为 `cost_yuan`，默认按以下单价计算：
+
+| 环境变量 | 默认值 | 说明 |
+|------|------:|------|
+| `LLM_INPUT_COST_YUAN_PER_1M_TOKENS` | `3` | 输入 token 单价（元 / 百万） |
+| `LLM_OUTPUT_COST_YUAN_PER_1M_TOKENS` | `6` | 输出 token 单价（元 / 百万） |
+
+快速查看最近调用和 token 总消耗：
+
+```bash
+sqlite3 -header -column /Users/352astro/workspace/byte_e2e_agent/.tmp/ai_metrics.sqlite3 "
+SELECT created_at, session_id, call_type, model, status, latency_ms,
+       prompt_tokens, completion_tokens, total_tokens, cost_yuan
+FROM llm_calls
+ORDER BY created_at DESC
+LIMIT 20;
+
+SELECT
+  COUNT(*) AS calls,
+  COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+  COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+  COALESCE(SUM(total_tokens), 0) AS total_tokens,
+  COALESCE(SUM(cost_yuan), 0) AS cost_yuan
+FROM llm_calls;
+"
+```
 
 ## Skill 扩展
 

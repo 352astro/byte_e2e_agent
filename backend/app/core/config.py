@@ -11,6 +11,8 @@ PROJECT_ROOT = BACKEND_DIR.parent
 load_dotenv(BACKEND_DIR / ".env")
 load_dotenv()
 
+DEFAULT_LLM_METRICS_DB_PATH = ".tmp/ai_metrics.sqlite3"
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -19,6 +21,7 @@ class Settings:
     cors_allow_origins: tuple[str, ...]
     cors_allow_origin_regex: str
     cors_allow_credentials: bool
+    llm_metrics_db_path: str
 
 
 @lru_cache
@@ -29,4 +32,7 @@ def get_settings() -> Settings:
         cors_allow_origins=("http://localhost:5173",),
         cors_allow_origin_regex=r"http://localhost:\d+",
         cors_allow_credentials=True,
+        llm_metrics_db_path=(
+            os.environ.get("LLM_METRICS_DB_PATH") or DEFAULT_LLM_METRICS_DB_PATH
+        ),
     )
