@@ -71,6 +71,7 @@ export default function useAgentStream({
             }
             setTranscripts([]);
             setAnswer(null);
+            setInterrupting(false);
             lastIdRef.current = null;
             setCurrentSid(null);
             return;
@@ -94,6 +95,16 @@ export default function useAgentStream({
                 ? cached.transcripts[cached.transcripts.length - 1].id
                 : null;
             setCurrentSid(sessionId);
+            // Verify running state with backend (cache may be stale)
+            fetch(`/api/session/${sessionId}/recover`)
+                .then((r) => r.json())
+                .then((data: RecoverResponse) => {
+                    if (data.running) {
+                        setRunning(true);
+                        cache[sessionId]._complete = false;
+                    }
+                })
+                .catch(() => {});
             return;
         }
 
@@ -134,6 +145,8 @@ export default function useAgentStream({
                 );
 
                 setTranscripts(items);
+                if (data.running) setRunning(true);
+                setInterrupting(false);
 
                 const lastAssistant = [...items]
                     .reverse()
@@ -181,6 +194,8 @@ export default function useAgentStream({
                     }),
                 );
                 setTranscripts(items);
+                if (data.running) setRunning(true);
+                setInterrupting(false);
                 const lastAssistant = [...items].reverse().find((t: any) => t.kind === "assistant" && t.message.content);
                 setAnswer(lastAssistant ? String(lastAssistant.message.content || "") : null);
                 lastIdRef.current = items.length ? items[items.length - 1].id : null;
@@ -192,12 +207,14 @@ export default function useAgentStream({
     // ── interrupt ─────────────────────────────────
 
     const handleInterrupt = useCallback(async () => {
-        if (!sessionId || interrupting) return;
+        if (interrupting) return;
         setInterrupting(true);
         try {
-            await fetch(`/api/session/${sessionId}/interrupt`, { method: "POST" });
+            await fetch("/api/interrupt", { method: "POST" });
         } catch {}
-    }, [sessionId, interrupting]);
+        setInterrupting(false);
+        setRunning(false);
+    }, [interrupting]);
 
     // ── helpers ──────────────────────────────────────
 
@@ -311,6 +328,7 @@ export default function useAgentStream({
         if (!q || running) return;
 
         setRunning(true);
+        setInterrupting(false);
         setAnswer(null);
         setQuestion("");
 
@@ -391,8 +409,6 @@ export default function useAgentStream({
             if (abortRef.current === controller) abortRef.current = null;
             streamingSidRef.current = null;
             lazyCreatedRef.current = null;
-            setRunning(false);
-            setInterrupting(false);
         }
     }, [
         question,

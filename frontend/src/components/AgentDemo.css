@@ -67,8 +67,8 @@
     color: #1a1a1a;
     background: #fafafa;
     transition:
-        border-color 0.15s,
-        box-shadow 0.15s;
+        border-color var(--anim-fast),
+        box-shadow var(--anim-fast);
 }
 .agent-textarea:focus {
     border-color: #555;
@@ -88,7 +88,7 @@
     cursor: pointer;
     white-space: nowrap;
     height: 44px;
-    transition: background 0.15s;
+    transition: background var(--anim-fast);
 }
 .agent-send-btn:hover:not(:disabled) {
     background: #333;
@@ -429,7 +429,17 @@
 }
 
 .tool-card-body {
-    /* container for the code block */
+    display: grid;
+    grid-template-rows: 1fr;
+    transition: grid-template-rows var(--anim-fast);
+}
+
+.tool-card-body--collapsed {
+    grid-template-rows: 0fr;
+}
+
+.tool-card-body-inner {
+    overflow: hidden;
 }
 
 .tool-code-block pre {
@@ -813,7 +823,7 @@
 .card-chevron {
     color: #bbb;
     opacity: 0;
-    transition: opacity 0.15s;
+    transition: opacity var(--anim-fast);
     flex-shrink: 0;
     cursor: pointer;
 }
@@ -1079,7 +1089,7 @@
     box-shadow:
         0 0 12px rgba(0, 0, 0, 0.06),
         0 0 4px rgba(0, 0, 0, 0.04);
-    transition: all 0.18s;
+    transition: all var(--anim-fast);
 }
 
 .commit-badge:hover {
@@ -1105,7 +1115,7 @@
     max-height: 0;
     opacity: 0;
     overflow: hidden;
-    transition: all 0.18s;
+    transition: all var(--anim-fast);
 }
 
 .commit-badge::after {
@@ -1131,7 +1141,7 @@
 .agent-prefill {
     max-height: 0;
     overflow: hidden;
-    transition: max-height 0.25s ease;
+    transition: max-height var(--anim-leisurely);
     margin: 0 32px;
 }
 

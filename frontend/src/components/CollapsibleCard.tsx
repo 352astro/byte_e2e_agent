@@ -62,8 +62,10 @@ export default function CollapsibleCard({
         </div>
       )}
 
-      {hasContent && !collapsed && (
-        <div className="tool-card-body card-body--relative">
+      {hasContent && (
+        <div
+          className={`tool-card-body card-body--relative${collapsed ? " tool-card-body--collapsed" : ""}`}
+        >
           {!hasHeader && showChevron && (
             <Icon
               name={collapsed ? "chevron-down" : "chevron-up"}
@@ -72,7 +74,7 @@ export default function CollapsibleCard({
               onClick={() => onToggle(id)}
             />
           )}
-          {children}
+          <div className="tool-card-body-inner">{children}</div>
         </div>
       )}
     </div>

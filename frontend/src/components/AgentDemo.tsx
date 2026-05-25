@@ -24,8 +24,17 @@ function CommitBadge({
   onCheckout: (sha: string) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const badgeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!confirming) return;
+    const close = (e: MouseEvent) => {
+      if (badgeRef.current && !badgeRef.current.contains(e.target as Node)) setConfirming(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [confirming]);
   return (
-    <div className="commit-badge">
+    <div className="commit-badge" ref={badgeRef}>
       <span className="commit-short-id">{shortSha}</span>
       {confirming ? (
         <span
@@ -75,24 +84,30 @@ export default function AgentDemo({
 
   const scrollToBottom = useCallback(() => {
     scrollingRef.current = true;
-    requestAnimationFrame(() => {
-      const el = scrollRef.current;
-      if (el) {
-        el.scrollTop = el.scrollHeight;
-      }
-      requestAnimationFrame(() => {
-        scrollingRef.current = false;
-      });
-    });
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
+    }
+    // Reset after animation completes
+    setTimeout(() => {
+      scrollingRef.current = false;
+    }, 100);
   }, []);
 
   const handleScroll = useCallback(() => {
     if (scrollingRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
-    const threshold = 40;
-    atBottomRef.current =
-      el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+    const threshold = 8;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    // Only break sticky when user explicitly scrolls up
+    if (distFromBottom > threshold) {
+      atBottomRef.current = false;
+    }
+    // Re-engage when user scrolls back to bottom
+    if (distFromBottom <= 4) {
+      atBottomRef.current = true;
+    }
   }, []);
 
   useEffect(() => {
@@ -328,7 +343,14 @@ export default function AgentDemo({
                 ? "agent-send-btn agent-send-btn--stop"
                 : "agent-send-btn"
           }
-          onClick={running && !interrupting ? handleInterrupt : handleRun}
+          onClick={() => {
+            if (running && !interrupting) { handleInterrupt(); return; }
+            if (prefillContent.trim()) {
+              prefillRef.current = prefillContent.trim();
+              setPrefillContent('');
+            }
+            handleRun();
+          }}
           disabled={interrupting || (!running && !question.trim() && !prefillContent.trim())}
         >
           {interrupting ? "Stopping…" : running ? "Stop" : "Send"}

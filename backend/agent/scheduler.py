@@ -23,55 +23,6 @@ from agent.transcript import StreamTranscriptCompletion
 from agent.shadow_repo import ShadowRepo
 
 
-class InterruptedError(Exception):
-    """Raised when the user interrupts the agent loop."""
-    pass
-
-
-async def _repair_unpaired_tools(session: "Session", channel: "StreamTranscriptCompletion") -> None:
-    """After interrupt, fill any unpaired tool_calls with Error tool_results.
-
-    Scans ALL assistant transcripts (not just the last one) to find
-    tool_calls that have no matching tool_result, and creates error
-    results for them.
-    """
-    transcripts = session._transcripts
-    if not transcripts:
-        return
-
-    # Collect all paired tool_call_ids
-    paired: set[str] = set()
-    for t in transcripts:
-        if t.kind == "tool_result":
-            tcid = t.message.get("tool_call_id", "")
-            if tcid:
-                paired.add(tcid)
-
-    # Find the most recent assistant that has unpaired tool_calls
-    for t in reversed(transcripts):
-        if t.kind != "assistant":
-            continue
-        tool_calls = t.message.get("tool_calls", [])
-        if not tool_calls:
-            continue
-        for tc in tool_calls:
-            tcid = tc.get("id", "")
-            if tcid and tcid not in paired:
-                result_id = _uuid.uuid4().hex
-                result_msg = {
-                    "tool_call_id": tcid,
-                    "tool_name": tc.get("function", {}).get("name", "unknown"),
-                    "arguments": tc.get("function", {}).get("arguments", ""),
-                    "result": "Error: The user interrupted before this tool could execute.",
-                }
-                try:
-                    t = await channel.flush(result_id, "tool_result", result_msg)
-                    session.add_transcript(t.kind, t.message, t.id)
-                except Exception:
-                    pass
-        break  # only repair the most recent assistant with tool_calls
-
-
 # ── System prompt（只定义一次）─────────────────────────────
 
 SYSTEM_PROMPT = """\
@@ -296,7 +247,7 @@ class Scheduler:
         except InterruptedError:
             try:
                 # Fill unpaired tool_calls with error results
-                await _repair_unpaired_tools(session, channel)
+                await repair_unpaired_tools_async(session, channel)
                 err_id = _uuid.uuid4().hex
                 err_msg = {"message": "The user interrupted the agent before it could finish. Summarize what you have done so far and ask how to proceed."}
                 t = await channel.flush(err_id, "error", err_msg)

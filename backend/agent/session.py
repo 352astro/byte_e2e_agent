@@ -185,6 +185,9 @@ def load_session(
         return session
 
     session.replace_transcripts(_load_transcripts(messages_path))
+    # Repair any unpaired tool_calls from interrupted sessions
+    from agent.interrupt import repair_unpaired_tools
+    repair_unpaired_tools(session)
     return session
 
 

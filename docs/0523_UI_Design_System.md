@@ -1,6 +1,6 @@
 # UI Design System — Monochrome Agent Interface
 
-> **生效日期**：2026-05-23
+> **生效日期**：2026-05-23（最后修订：2026-06）
 > **适用范围**：`frontend/` 下所有组件与样式
 > **原则**：黑白灰主色调 + 语义色彩克制使用 + 融入式布局
 
@@ -35,14 +35,15 @@
 
 | Token | 色值 | 用途 |
 |---|---|---|
-| `semantic-danger` | `#c00` | 错误文字、删除按钮、错误左边框 |
+| `semantic-danger` | `#c00` | 错误文字、删除按钮、Stop 按钮 |
 | `semantic-danger-bg` | `#fff5f5` | 错误块背景 |
 | `semantic-danger-hover` | `#fff0f0` | 删除按钮 hover 背景 |
+| `semantic-stop-dimmed` | `rgba(204,0,0,0.6)` | Stop 按钮 waiting 态 |
 | `semantic-link` | `#1a56db` | Markdown 超链接（仅此一处） |
 
 > **铁律 1**：除 `semantic-*` 外，不允许出现红/绿/蓝/紫/橙等彩色。绿色、紫色、橙色在任何情况下都不得使用。蓝色仅限超链接。
-> **铁律 2**：当卡片具有与页面底色不同的背景时，卡片内部元素不得再使用第二重色差（即不得在有色卡片内再嵌套不同背景色的子元素）。内部元素应直接使用卡片背景色。
-> **铁律 3**：Card 与周围文本之间的 margin 必须保持一致。若 Card 内部有多层嵌套，仅 Card 自身拥有 margin，内部所有子元素的 margin 必须为 0。
+> **铁律 2**：当卡片具有与页面底色不同的背景时，卡片内部元素不得再使用第二重色差。内部元素应直接使用卡片背景色。
+> **铁律 3**：Card 与周围文本之间的 margin 必须保持一致。Card 内部所有子元素的 margin 必须为 0。
 
 ---
 
@@ -53,7 +54,7 @@
 | 全局字体 | `system-ui, sans-serif` |
 | 等宽字体 | `ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace` |
 | 基础字号 | `16px`（浏览器默认） |
-| 正文字号 | `0.93rem`（约 14.9px） |
+| 正文字号 | `0.93rem` |
 | 行高（正文） | `1.65` ~ `1.7` |
 | 字重（标题/强调） | `600` ~ `700` |
 | 字体平滑 | `antialiased`（WebKit）/ `grayscale`（Firefox） |
@@ -67,25 +68,32 @@
 ### 3.1 整体布局
 
 ```
-┌──────────┬──────────────────────────────────┐
-│ Sidebar  │  Main Content (max-width: 860px) │
-│ 260px    │  居中对齐，左右 32px 内边距       │
-│ #fafafa  │  #fff                            │
-└──────────┴──────────────────────────────────┘
+┌──────────┬──────────────────────────────────────────┐
+│ Sidebar  │  Scroll Area (不限宽)                     │
+│ 260px    │    ┌──────────────────────────────┐      │
+│ #fafafa  │    │ Chat Area (max-width: 860px) │      │
+│          │    │ 居中对齐                      │      │
+│          │    └──────────────────────────────┘      │
+│          │  #fff                                   │
+└──────────┴──────────────────────────────────────────┘
 ```
+
+- Scroll area：`overflow-y: auto; overflow-x: visible`（允许 commit badge 水平溢出）
+- Chat area：`max-width: 860px; margin: 0 auto` 居中
+- 左右内边距：`32px`
 
 ### 3.2 块间间距
 
 - 卡片之间：`gap: 20px`（由 flex 容器提供）
-- 块内子元素：`margin-bottom: 8px`（thinking 与正文之间）
+- 块内子元素：`margin-bottom: 8px`
 - 底部留白：`height: 16px` spacer
 
-### 3.3 左对齐规则（核心）
+### 3.3 左对齐规则
 
-所有"融入背景"的块（assistant、thinking、tool result、error、fallback）统一 **左内边距 10px**，确保文字沿同一条竖线对齐：
+所有融入背景的块（assistant、thinking、tool、error）统一 **左内边距 10px**：
 
 ```
-│ ← 10px → 💡 thinking
+│ ← 10px → 💡 THINKING
 │ ← 10px →   思考内容……
 │ ← 10px → 正文内容……
 ```
@@ -94,15 +102,15 @@
 |---|---|
 | `.transcript-card` | `padding-left: 10px` |
 | `.thinking-header` | `padding-left: 10px` |
-| `.thinking-body` | `padding-left: 10px; padding-right: 10px` |
-
-chevron 折叠箭头定位在 `right: 8px`（右内边距内）。
+| `.thinking-body` | `padding-left: 10px` |
 
 ---
 
 ## 4. 组件规范
 
-### 4.1 用户气泡（唯一带容器的元素）
+### 4.1 用户气泡 + Commit Badge
+
+用户气泡右对齐（`align-self: flex-end; max-width: 80%`），外层 `.user-bubble-wrapper` 作为 flex 子元素。
 
 ```css
 .user-bubble {
@@ -110,143 +118,198 @@ chevron 折叠箭头定位在 `right: 8px`（右内边距内）。
     border: 1px solid #ddd;   /* border-light */
     border-radius: 12px;
     padding: 14px 18px;
-    align-self: flex-end;     /* 右对齐 */
-    max-width: 80%;
+    box-shadow: 0 0 4px hsla(0,0%,60%,0.2);
 }
 ```
 
-- **不允许**给用户气泡使用彩色边框或彩色背景
-- 标签 `YOU`：大写、小号、`#888`
+**Commit Badge**：绝对定位在气泡右侧 `left: calc(100% + 14px)`，`top: 0`。无背景无边框，仅 `box-shadow` 辉光。默认显示 7 位 short_sha（等宽字体），hover 时向下展开露出 `restore` 按钮。
 
-### 4.2 Assistant / Tool / Error 卡片（融入背景）
+- 首次点击 "restore" → 变红 "confirm"
+- 二次点击确认 → 触发 checkout API
 
-- **无背景色**、**无边框**（融入 `#fff` 页面底色）
-- 仅 error 例外：`border-left: 3px solid #c00` + `background: #fff5f5`（语义红）
-- 卡片间距由 flex `gap: 20px` 提供，卡片自身 `padding: 4px 0 4px 10px`
+### 4.2 可折叠卡片（CollapsibleCard）
+
+通用组件，用于 tool cards、thinking block。展开/折叠使用 CSS grid 动画：
+
+```css
+.tool-card-body {
+    display: grid;
+    grid-template-rows: 1fr;
+    transition: grid-template-rows var(--anim-fast);
+}
+.tool-card-body--collapsed {
+    grid-template-rows: 0fr;
+}
+.tool-card-body-inner {
+    overflow: hidden;
+}
+```
+
+| Prop | 说明 |
+|---|---|
+| `headerClickable` | 默认 `true`，`false` 时 header 不可点 |
+| `hideChevron` | 默认 `false`，`true` 时隐藏默认 chevron |
 
 ### 4.3 Thinking 块
 
-```
-┌─────────────────────────────────────────┐
-│ 💡 THINKING                        ▴/▾  │  ← header（hover 时 ▴▾ 可见）
-├─────────────────────────────────────────┤
-│ 思考内容……                              │  ← body（折叠时隐藏）
-└─────────────────────────────────────────┘
-```
+复用 `CollapsibleCard`。`headerClickable={done}`（仅完成后可折叠），复用默认 chevron（`opacity: 0 → 1` on hover）。
 
-**行为**：
-| 状态 | 展开/折叠 | chevron 可见性 |
-|---|---|---|
-| 流式生成中 | 强制展开 | 无（不可手动折叠） |
-| 生成完毕 | **默认折叠** | hover 时出现（`opacity: 0 → 1`） |
-| 用户手动展开 | 展开 | 始终可见 |
+- 灯泡图标：`<Icon name="bulb" size={14} />`
+- 完成态背景：`#f9f9f9`，`border-radius: 6px`
+- 流式生成中：label 有 `think-pulse` 呼吸动画，不可折叠
 
-**样式**：
-- 完成态背景：`#f9f9f9`（`bg-subtle`），`border-radius: 6px`
-- 灯泡图标：`<Icon name="bulb" size={14} />`，颜色 `#999`（完成态 `#aaa`）
-- thinking 正文：`#777`，比主文本弱化
-- 流式生成中：label 有 `think-pulse` 呼吸动画
+### 4.4 工具卡片（Tool Cards）
 
-### 4.4 输入栏
+全部方角（`border-radius: 0`），统一折叠高度。Header padding 统一由 `.tool-card-header` 提供（`3px 0`）。
 
-- 固定底部，`border-top: 1px solid #e0e0e0`，白底
-- textarea：`#fafafa` 背景，focus 时变 `#fff` + `border-color: #555` + 微弱 `box-shadow`
-- 发送按钮：`#1a1a1a` 近黑背景，白色文字，`border-radius: 8px`，disabled 时 `#bbb`
-
-### 4.5 侧边栏
-
-- 宽度固定 `260px`，`border-right: 1px solid #e0e0e0`
-- "New Session" 按钮：`#1a1a1a` 近黑背景，白色文字
-- 列表项：hover `#eee`，active `#e8e8e8`（深灰，绝不使用彩色）
-- 三点菜单按钮：透明底，hover `#e0e0e0`，图标为 `<Icon name="dots-vertical" />`
-- Context menu：白底卡片，`box-shadow`，Delete 项使用 `semantic-danger` 色
-
-### 4.6 Markdown 渲染
-
-- 正文：`#2a2a2a`，行高 `1.7`
-- 内联代码：`#f0f0f0` 背景，`#333` 文字
-- 代码块：`#f4f4f4` 背景 + `1px solid #e8e8e8` 边框（不用深色背景）
-- 链接：`#1a56db`，带下划线
-- 引用块：`border-left: 3px solid #ccc`，`#666` 文字，斜体
-- 表格：边框 `#ddd`，表头 `#f6f6f6`
-
-
-### 4.7 工具卡片（Tool Cards）
-
-**流式卡片**（构建中）与 **独立卡片**（完成态）均使用 **方角**（`border-radius: 0`）。
-
-#### Shell
+#### Shell（Run Command）
 - 深色底 `#1e1e1e`，白字 `#d4d4d4`
-- 头部 `#2a2a2a`，底部边框 `#333`
-- timeout 徽章位于头部**最右上角**（`margin-left: auto`），`background: #333`，方角
-- 输出区使用等宽字体，`padding: 12px 14px`
+- timeout 徽章位于头部最右上角
 
 #### Write / Read
-- 浅灰底 `#fafafa`，头部 `#f3f3f3`，底部边框 `#e8e8e8`
-- 文件路径显示在头部右侧，等宽字体
-- 内容区根据文件扩展名识别语言（`.py`, `.ts`, `.md` 等），使用对应语法高亮
-- 无法识别时默认使用 Markdown 渲染
+- 浅灰底 `#fafafa`，文件路径显示在头部右侧
+- 内容区按文件扩展名识别语言并语法高亮
 
 #### 其他工具
-- 与 Write/Read 相同亮色风格，头部显示工具名
-- 正文使用 Markdown 渲染
+- 默认亮色风格，正文 Markdown 渲染
 
-> **新增禁止事项**：工具卡片不得使用圆角（`border-radius` 必须为 `0`）。
+### 4.5 错误卡片（Error）
 
----
+使用 `<Icon name="error" size={12} />` SVG 三角警告图标（**禁止 emoji**）。
+
+```css
+.error-card .transcript-label {
+    color: #c00;           /* semantic-danger */
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.error-card .transcript-body {
+    color: #b00;
+    background: #fff5f5;  /* semantic-danger-bg */
+    border-left: 3px solid #c00;
+}
+```
+
+### 4.6 输入栏 + Prefill
+
+Input bar 固定底部，`border-top: 1px solid #e0e0e0`，白底。textarea `#fafafa`，focus 变 `#fff`。
+
+**Prefill**：回溯后弹出在 input bar 上方。`max-height` 动画滑入/滑出，无外边框，textarea 自带 `border-radius: 8px 8px 0 0` + `box-shadow` 辉光。有内容时 Send 按钮联动判空。
+
+**Send 按钮**三态：
+
+| 状态 | 样式 | 行为 |
+|---|---|---|
+| idle | `#1a1a1a` 近黑 | 发送 |
+| running | `#c00` 红底 "Stop" | 中断 |
+| interrupting | `#c00` 60% opacity "Stopping…" | 禁用，等待后端 |
+
+### 4.7 侧边栏
+
+- 宽度固定 `260px`，`border-right: 1px solid #e0e0e0`
+- "New Session" 按钮：`#1a1a1a`
+- 列表项 hover `#eee`，active `#e8e8e8`
+- Context menu：白底卡片 + `box-shadow`，Delete 项 `semantic-danger`
+
+### 4.8 Markdown 渲染
+
+- 正文 `#2a2a2a`，内联代码 `#f0f0f0` 背景 `#333` 文字
+- 代码块 `#f4f4f4` 背景 + `1px solid #e8e8e8`（不用深色背景）
+- 链接 `#1a56db` 带下划线
+- 引用块 `border-left: 3px solid #ccc`
 
 ---
 
 ## 5. 图标系统
 
-### 5.1 组件
+### 5.1 图标清单
 
-所有矢量图标通过 `<Icon>` 组件统一管理：
-
-```tsx
-import Icon from "./components/Icon";
-
-<Icon name="bulb" size={14} />
-<Icon name="chevron-up" size={10} />
-<Icon name="chevron-down" size={10} />
-<Icon name="dots-vertical" size={16} />
-```
+| name | 用途 |
+|---|---|
+| `bulb` | thinking 块 |
+| `chevron-up` / `chevron-down` | 折叠展开 |
+| `dots-vertical` | 侧边栏三点菜单 |
+| `tool` | 工具卡片 |
+| `write` | Write/Read 文件操作 |
+| `error` | 错误块（三角警告） |
+| `restore` | commit 回溯按钮 |
 
 ### 5.2 图标规范
 
-- 所有图标共用 `viewBox="0 0 24 24"`
-- 线条风格：`stroke="currentColor"`、`strokeWidth={1.5}`、`strokeLinecap="round"`、`strokeLinejoin="round"`、`fill="none"`
-- 颜色由 CSS `color` 属性继承，天然适配黑白灰
-- **禁止使用 emoji 作为图标**，必须使用 `<Icon>` 或等价的 SVG 线条图
-
-### 5.3 新增图标
-
-1. 设计或选取符合 `24×24` 画布、`1.5px` 线宽的 SVG path
-2. 在 `Icon.tsx` 的 `paths` 字典中添加条目
-3. 同时在 `IconName` 类型中注册
+- 所有图标 `viewBox="0 0 24 24"`
+- `stroke="currentColor"`、`strokeWidth={1.5}`、`strokeLinecap="round"`、`strokeLinejoin="round"`、`fill="none"`
+- 颜色由 CSS `color` 继承
+- **禁止 emoji 作为图标**
 
 ---
 
 ## 6. 动效
 
-| 场景 | 效果 |
-|---|---|
-| 按钮 hover | `background` / `border-color` 0.15s |
-| thinking 流式脉冲 | `think-pulse` 1.4s ease-in-out（label 透明度呼吸） |
-| chevron 显示/隐藏 | `opacity` 0.15s（hover 触发） |
-| sidebar 列表项 | `background` 0.1s |
+### 6.1 速度令牌
 
-- **不使用**弹跳、缩放、旋转等夸张动效
-- 过渡时间统一 `0.15s`（微交互），脉冲 `1.4s`（唯一例外）
+在 `:root` 中定义，所有 `transition` 必须引用令牌：
+
+| Token | 值 | 用途 |
+|---|---|---|
+| `--anim-leisurely` | `0.35s ease` | prefill 滑入、大面积展开 |
+| `--anim-fast` | `0.18s ease` | hover、chevron、卡片折叠、按钮 |
+| `--anim-urgent` | `0.08s ease` | 即时反馈、自动置底 |
+
+### 6.2 应用规则
+
+| 场景 | 令牌 |
+|---|---|
+| CollapsibleCard 折叠/展开 | `--anim-fast` |
+| 按钮 hover、chevron 显隐 | `--anim-fast` |
+| commit badge hover 展开 | `--anim-fast` |
+| prefill 滑入/滑出 | `--anim-leisurely` |
+| 自动置底（scrollToBottom） | `behavior: "auto"`（即时） |
+
+### 6.3 关键帧动画
+
+| 场景 | 时长 | 说明 |
+|---|---|---|
+| `think-pulse` | `1.4s` | thinking 流式呼吸 |
+| `tool-icon-pulse` | `1.2s` | 工具图标流式脉冲 |
+| `shell-spin` | `0.8s` | Shell spinner |
+| `rainbow-glow` | `3s` | click-to-focus 辉光 |
+
+> 不使用弹跳、缩放、旋转等夸张动效。
 
 ---
 
-## 7. 禁止事项
+## 7. 交互行为
 
-- ❌ 紫色（`#7c3aed` 及其任何变体）
-- ❌ 绿色（包括 `#f0fdf4` 等浅绿背景）
-- ❌ emoji 作为 UI 图标（灯泡、箭头、三点等必须用 SVG）
+### 7.1 自动置底
+
+- 新内容到达时，若用户在底部（距底 ≤ 8px），自动滚到底
+- 用户手动上滚超过阈值（> 8px）打破 sticky 状态
+- 用户滚回底部（距底 ≤ 4px）自动重连 sticky
+- 自动滚动为即时（`behavior: "auto"`）
+
+### 7.2 Interrupt（中断）
+
+- 点击 Stop → 前端 `interrupting=true`，仅发 `POST /interrupt`，不 abort SSE
+- 等待后端完整清理（LLM 停、工具停、transcript 修复）
+- SSE 流自然关闭后 `finally` 清零 `running` + `interrupting`
+- 中断后的 error transcript 对 LLM 友好：`"The user interrupted the agent..."`
+
+### 7.3 Click-to-Focus（彩虹辉光）
+
+- 所有带 `data-fid` 的元素可点击聚焦
+- 聚焦时添加 `.card-latest` 类，触发 `rainbow-glow` 动画
+- 同 `data-fid` 的元素共享聚焦态（用于 tool pair 的双卡）
+
+---
+
+## 8. 禁止事项
+
+- ❌ 彩色（紫/绿/橙/蓝，除 `semantic-*` 和链接）
+- ❌ emoji 作为 UI 图标
 - ❌ 彩色渐变
-- ❌ 融入背景的块使用边框或彩色背景（error 除外）
-- ❌ 卡片内边距不一致导致文字不对齐
-- ❌ 过大的阴影（仅在 context menu 使用 `0 4px 16px rgba(0,0,0,0.1)`）
+- ❌ 融入背景的块使用边框或背景色（error 除外）
+- ❌ 卡片内边距不一致
+- ❌ 过大的阴影
+- ❌ 弹跳/旋转/缩放等夸张动效
+- ❌ 硬编码过渡时间 — 必须使用 `--anim-*` 令牌

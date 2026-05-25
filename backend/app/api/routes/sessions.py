@@ -112,3 +112,10 @@ async def interrupt_session(sid: str, project: Project = Depends(get_project)):
         raise HTTPException(status_code=404, detail="Session not found")
     ok = await project.scheduler.interrupt()
     return {"ok": ok}
+
+
+@router.post("/interrupt")
+async def interrupt_global(project: Project = Depends(get_project)):
+    """Interrupt whatever session is currently running (no session ID needed)."""
+    ok = await project.scheduler.interrupt()
+    return {"ok": ok}

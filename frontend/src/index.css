@@ -6,6 +6,13 @@
     padding: 0;
 }
 
+/* ── Animation speed tokens ─────────────────── */
+:root {
+    --anim-leisurely: 0.35s ease;
+    --anim-fast: 0.18s ease;
+    --anim-urgent: 0.08s ease;
+}
+
 body {
     background: #fff;
     color: #1a1a1a;
