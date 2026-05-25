@@ -20,6 +20,7 @@ from agent.tools.subtask import SubTask
 from agent.tools.task import task_context_message
 from agent.tools.toolset import ToolSet
 from agent.transcript import StreamTranscriptCompletion
+from agent.shadow_repo import ShadowRepo
 
 # ── System prompt（只定义一次）─────────────────────────────
 
@@ -70,6 +71,7 @@ class Scheduler:
         self._pending: dict[str, dict] = {}
         self._current_session: Session | None = None
         self._current_channel: StreamTranscriptCompletion | None = None
+        self._shadow_repo: ShadowRepo | None = None
 
     # ── public ────────────────────────────────────────────
 
@@ -108,6 +110,7 @@ class Scheduler:
         question: str,
         channel: StreamTranscriptCompletion | None = None,
         max_steps: int = 50,
+        shadow_repo: ShadowRepo | None = None,
     ) -> str:
         """启动 session 执行。可传入外部创建的 channel（subscribe-before-start 模式）。"""
         if self._state != "idle":
@@ -116,6 +119,7 @@ class Scheduler:
         self._current_channel = (
             channel if channel is not None else StreamTranscriptCompletion()
         )
+        self._shadow_repo = shadow_repo
         self._state = "running"
         self._loop_task = asyncio.create_task(
             self._query_loop(question, max_steps),
@@ -142,12 +146,24 @@ class Scheduler:
         assert session is not None and channel is not None
 
         try:
-            # ── 1. 保存 user question transcript ─────────
+            # ── 1. snapshot workspace on every user message ─
             user_id = _uuid.uuid4().hex
-            user_msg = {"role": "user", "content": question}
-            t = await channel.flush(user_id, "user_question", user_msg)
+            commit_sha = ""
+            if self._shadow_repo is not None:
+                try:
+                    commit_sha = self._shadow_repo.snapshot(
+                        question, transcript_id=user_id
+                    )
+                except Exception:
+                    pass  # snapshot is best-effort, never block the agent
 
-            session.add_transcript(t.kind, t.message, t.id)
+            # ── 2. save user question transcript ─────────
+            user_msg = {"role": "user", "content": question}
+            t = await channel.flush(
+                user_id, "user_question", user_msg, commit_sha=commit_sha
+            )
+
+            session.add_transcript(t.kind, t.message, t.id, commit_sha=commit_sha)
 
             for _ in range(max_steps):
                 # ── 构建消息 ──────────────────────────

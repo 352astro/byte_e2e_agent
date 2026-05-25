@@ -4,15 +4,20 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
-    max-width: 860px;
-    margin: 0 auto;
     width: 100%;
 }
 
 .agent-scroll {
     flex: 1;
     overflow-y: auto;
+    overflow-x: visible;
     padding: 24px 32px 0;
+}
+
+.agent-scroll-center {
+    max-width: 860px;
+    margin: 0 auto;
+    overflow: visible;
 }
 
 .agent-scroll-inner {
@@ -35,6 +40,14 @@
     padding: 16px 32px;
     border-top: 1px solid #e0e0e0;
     background: #fff;
+}
+
+.agent-input-bar-inner {
+    max-width: 860px;
+    width: 100%;
+    margin: 0 auto;
+    display: flex;
+    gap: 10px;
 }
 
 .agent-textarea {
@@ -1031,3 +1044,69 @@
         0 0 1px hsla(0, 0%, 60%, 0.1);
 }
 
+/* ── Commit badge on user bubble ────────────── */
+
+.user-bubble-wrapper {
+    position: relative;
+    align-self: flex-end;
+    max-width: 80%;
+}
+
+.user-bubble-wrapper .user-bubble {
+    max-width: 100%;
+}
+
+.commit-badge {
+    position: absolute;
+    left: calc(100% + 14px);
+    top: 0;
+    padding: 4px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+    font-family: ui-monospace, monospace;
+    font-size: 0.68rem;
+    color: #aaa;
+    cursor: default;
+    white-space: nowrap;
+    line-height: 1.4;
+    box-shadow:
+        0 0 12px rgba(0, 0, 0, 0.06),
+        0 0 4px rgba(0, 0, 0, 0.04);
+    transition: all 0.18s;
+}
+
+.commit-badge:hover {
+    color: #555;
+    padding-bottom: 6px;
+    box-shadow:
+        0 0 20px rgba(0, 0, 0, 0.12),
+        0 0 8px rgba(0, 0, 0, 0.08);
+}
+
+.commit-badge .commit-short-id {
+    display: block;
+}
+
+.commit-badge .commit-restore {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #444;
+    cursor: pointer;
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: all 0.18s;
+}
+
+.commit-badge:hover .commit-restore {
+    max-height: 18px;
+    opacity: 1;
+}
+
+.commit-badge .commit-restore:hover {
+    color: #000;
+}

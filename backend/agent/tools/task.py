@@ -115,7 +115,7 @@ def _tasks_path(sandbox) -> Path:
     if sandbox is None:
         raise ValueError("sandbox is required")
     session_id = sandbox.session_id or "default"
-    return Path(sandbox.resolve_path(f".tmp/{session_id}/tasks.json"))
+    return Path(sandbox.resolve_path(f"{TMP_DIR}/{session_id}/tasks.json"))
 
 
 def _load_tasks_for_context(sandbox) -> list[dict]:

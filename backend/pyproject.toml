@@ -11,6 +11,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "serpapi>=0.1.0",
     "socksio>=1.0.0",
+    "dulwich>=1.2.4",
 ]
 
 [tool.uv.workspace]

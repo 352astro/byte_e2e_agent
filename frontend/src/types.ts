@@ -4,6 +4,7 @@ export interface Transcript {
     id: string;
     kind: string;
     message: Record<string, unknown>;
+    commit_sha?: string; // non-empty when a shadow commit is attached
 }
 
 export interface RecoverResponse {
@@ -37,6 +38,7 @@ export type StreamEvent =
           message: Record<string, unknown>;
           sub_streams: Array<{ id: string; kind: string; text: string }>;
           active_sub_stream: { id: string; kind: string; text: string } | null;
+          commit_sha?: string;
       };
 
 // ── Display items ────────────────────────────────────────
@@ -48,8 +50,8 @@ export interface DisplayTranscript {
     subStreams: SubStream[]; // completed sub-streams, in order
     activeSubStream: SubStream | null; // currently streaming
     isFlushed: boolean;
+    commitSha?: string; // shadow commit sha for user_question transcripts
 }
-
 
 // ── Tool call ↔ result pairing ───────────────────────────
 
@@ -81,3 +83,26 @@ export interface CacheEntry {
 }
 
 export type SessionCache = Record<string, CacheEntry>;
+
+
+// ── Shadow commit ────────────────────────────────────────
+
+export interface CommitInfo {
+    sha: string;
+    short_sha: string;
+    message: string;
+    author_time: number;
+    transcript_id: string | null;
+}
+
+export interface CommitDetail extends CommitInfo {
+    files: string[];
+}
+
+export interface CommitListResponse {
+    commits: CommitInfo[];
+}
+
+export interface CheckoutRequest {
+    commit_sha: string;
+}

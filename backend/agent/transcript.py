@@ -36,6 +36,7 @@ class Transcript:
     id: str  # UUID, unique across the session
     kind: TranscriptKind
     message: dict = field(default_factory=dict)
+    commit_sha: str = ""  # non-empty when a shadow commit is attached
 
 
 # ── 构建过程中的子流（StreamTranscriptCompletion 内部类型）─
@@ -103,13 +104,16 @@ class StreamTranscriptCompletion:
         ss = self._sub_streams.copy()
         if self._active:
             ss.append(self._active)
-        return {
+        result = {
             "transcript_id": t.id,
             "kind": t.kind,
             "message": t.message,
             "sub_streams": [{"id": s.id, "kind": s.kind, "text": s.text} for s in ss],
             "active_sub_stream": None,
         }
+        if t.commit_sha:
+            result["commit_sha"] = t.commit_sha
+        return result
 
     # ── write ────────────────────────────────────────────
 
@@ -153,6 +157,7 @@ class StreamTranscriptCompletion:
         transcript_id: str,
         kind: str,
         message: dict | None = None,
+        commit_sha: str = "",
     ) -> Transcript:
         """收尾当前 Transcript 并广播。
 
@@ -171,6 +176,8 @@ class StreamTranscriptCompletion:
         t.kind = kind
         if message is not None:
             t.message = message
+        if commit_sha:
+            t.commit_sha = commit_sha
 
         await self._broadcast(StreamEvent("flush", self._build_payload()))
 

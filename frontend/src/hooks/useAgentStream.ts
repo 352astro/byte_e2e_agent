@@ -123,6 +123,7 @@ export default function useAgentStream({
                         subStreams: [],
                         activeSubStream: null,
                         isFlushed: true,
+                        commitSha: t.commit_sha,
                     }),
                 );
 
@@ -215,6 +216,7 @@ export default function useAgentStream({
                         subStreams,
                         activeSubStream: active,
                         isFlushed: false,
+                        commitSha: existing?.commitSha,
                     };
                     if (idx >= 0) {
                         const copy = [...prev];
@@ -248,6 +250,7 @@ export default function useAgentStream({
                     subStreams: ss,
                     activeSubStream: null,
                     isFlushed: true,
+                    commitSha: (ev as Record<string, unknown>).commit_sha as string | undefined,
                 });
                 lastIdRef.current = ev.transcript_id;
             }

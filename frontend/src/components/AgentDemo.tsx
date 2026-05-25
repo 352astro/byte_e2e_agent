@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import useAgentStream from "../hooks/useAgentStream";
+import Icon from "./Icon";
 import TranscriptCard from "./TranscriptCard";
 import ToolPairCard from "./ToolPairCard";
 import { pairToolCalls } from "../hooks/pairTools";
@@ -110,6 +111,31 @@ export default function AgentDemo({
     setFocusedId(id);
   }, []);
 
+  // ── Commit checkout ──────────────────────────
+  const [checkingOut, setCheckingOut] = useState<string | null>(null);
+  const handleCheckout = useCallback(
+    async (commitSha: string) => {
+      if (!sessionId || checkingOut) return;
+      setCheckingOut(commitSha);
+      try {
+        const res = await fetch(
+          `/api/session/${sessionId}/checkout`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ commit_sha: commitSha }),
+          },
+        );
+        if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      } catch (err) {
+        console.error("Checkout failed", err);
+      } finally {
+        setCheckingOut(null);
+      }
+    },
+    [sessionId, checkingOut],
+  );
+
   // ── Input handlers ───────────────────────────
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -130,6 +156,7 @@ export default function AgentDemo({
   return (
     <div className="agent-demo">
       <div className="agent-scroll" ref={scrollRef} onScroll={handleScroll}>
+        <div className="agent-scroll-center">
         <div
           className="agent-scroll-inner"
           onClick={(e) => {
@@ -169,7 +196,34 @@ export default function AgentDemo({
             }
             // Regular transcript — user bubbles need to be direct flex children
             if (t.kind === "user_question") {
-              return <TranscriptCard key={t.id} transcript={t} />;
+              const commitSha = t.commitSha;
+              const shortSha = commitSha ? commitSha.slice(0, 7) : null;
+              return (
+                <div key={t.id} className="user-bubble-wrapper">
+                  <TranscriptCard transcript={t} />
+                  {shortSha && (
+                    <div className="commit-badge">
+                      <span className="commit-short-id">{shortSha}</span>
+                      <span
+                        className="commit-restore"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (commitSha) handleCheckout(commitSha);
+                        }}
+                      >
+                        {checkingOut === commitSha ? (
+                          "…"
+                        ) : (
+                          <>
+                            <Icon name="restore" size={12} />
+                            restore
+                          </>
+                        )}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
             }
             return (
               <span key={t.id}>
@@ -183,9 +237,11 @@ export default function AgentDemo({
 
           <div className="agent-bottom-spacer" />
         </div>
+        </div>
       </div>
 
       <div className="agent-input-bar">
+        <div className="agent-input-bar-inner">
         <textarea
           className="agent-textarea"
           placeholder="Ask the agent something… (Enter to send, Ctrl/Shift+Enter for newline)"
@@ -207,6 +263,7 @@ export default function AgentDemo({
         >
           {running ? "…" : "Send"}
         </button>
+        </div>
       </div>
     </div>
   );

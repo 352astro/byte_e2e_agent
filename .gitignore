@@ -39,3 +39,6 @@ pnpm-debug.log*
 # ─── OS ──────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# Testfield
+agent_workspace

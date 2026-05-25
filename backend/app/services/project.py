@@ -18,7 +18,9 @@ from agent.metrics import SQLiteLLMMetricsStore
 from agent.sandbox import SandBox
 from agent.scheduler import Scheduler
 from agent.session import Session, clear, get_history, load_session
+from agent.shadow_repo import ShadowRepo
 from agent.transcript import StreamTranscriptCompletion
+from app.core.config import TMP_DIR
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -48,6 +50,7 @@ class Project:
         if not metrics_path.is_absolute():
             metrics_path = Path(self._workspace) / metrics_path
         self.metrics_store = SQLiteLLMMetricsStore(metrics_path)
+        self._shadow_repo: ShadowRepo | None = None
 
     # ── properties ───────────────────────────────────────
 
@@ -61,6 +64,15 @@ class Project:
             self._llm = HelloAgentsLLM(metrics_store=self.metrics_store)
         return self._llm
 
+    # ── shadow repo ─────────────────────────────────────
+
+    @property
+    def shadow_repo(self) -> ShadowRepo:
+        if self._shadow_repo is None:
+            repodir = str(Path(self._workspace) / TMP_DIR / ".shadow-vcs")
+            self._shadow_repo = ShadowRepo(self._workspace, repodir)
+        return self._shadow_repo
+
     # ── workspace ────────────────────────────────────────
 
     def set_workspace(self, path: str) -> None:
@@ -70,6 +82,7 @@ class Project:
         if not metrics_path.is_absolute():
             metrics_path = Path(self._workspace) / metrics_path
         self.metrics_store = SQLiteLLMMetricsStore(metrics_path)
+        self._shadow_repo: ShadowRepo | None = None
         if self._llm is not None:
             self._llm.metrics_store = self.metrics_store
 
@@ -89,7 +102,7 @@ class Project:
         return {"session_id": session_id, "workspace": self._workspace}
 
     def list_sessions(self) -> list[dict[str, Any]]:
-        tmp_dir = Path(self._workspace) / ".tmp"
+        tmp_dir = Path(self._workspace) / TMP_DIR
         if not tmp_dir.is_dir():
             return []
         result: list[tuple[float, dict[str, Any]]] = []
@@ -140,7 +153,8 @@ class Project:
         queue = channel.subscribe()
         try:
             self.scheduler.start(
-                session, question, channel=channel, max_steps=max_steps
+                session, question, channel=channel, max_steps=max_steps,
+                shadow_repo=self.shadow_repo,
             )
         except RuntimeError:
             channel.unsubscribe(queue)
@@ -205,7 +219,7 @@ class Project:
     def _session_dir(self, session_id: str) -> Path:
         if not self._valid_id(session_id):
             raise ValueError(f"Invalid session_id: {session_id!r}")
-        return Path(self._workspace) / ".tmp" / session_id
+        return Path(self._workspace) / TMP_DIR / session_id
 
     def _messages_path(self, session_id: str) -> Path:
         return self._session_dir(session_id) / "messages.jsonl"

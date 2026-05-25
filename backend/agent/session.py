@@ -18,6 +18,7 @@ from agent.llm import HelloAgentsLLM
 from agent.sandbox import SandBox
 from agent.tools.toolset import ToolSet
 from agent.transcript import Transcript, TranscriptKind
+from app.core.config import TMP_DIR
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 MessageConverter = Callable[[Transcript], dict | None]
@@ -63,6 +64,7 @@ class Session:
         kind: TranscriptKind,
         message: dict,
         transcript_id: str | None = None,
+        commit_sha: str = "",
     ) -> Transcript:
         """添加一条已完成 transcript。
 
@@ -70,7 +72,7 @@ class Session:
         返回创建的 Transcript 对象。
         """
         tid = transcript_id or _uuid.uuid4().hex
-        t = Transcript(id=tid, kind=kind, message=message)
+        t = Transcript(id=tid, kind=kind, message=message, commit_sha=commit_sha)
         self._transcripts.append(t)
         llm_message = self._transcript_to_message(t)
         if llm_message is not None:
@@ -84,13 +86,14 @@ class Session:
             kind,
             tid,
             message,
+            commit_sha,
         )
         return t
 
     def get_transcripts(self) -> list[dict]:
         """返回所有已完成 transcript 的序列化形式。"""
         return [
-            {"id": t.id, "kind": t.kind, "message": t.message}
+            {"id": t.id, "kind": t.kind, "message": t.message, "commit_sha": t.commit_sha}
             for t in self._transcripts
         ]
 
@@ -223,6 +226,7 @@ def _record_to_transcript(record: object) -> Transcript | None:
             id=record["uuid"],
             kind=record["kind"],
             message=record.get("message", {}),
+            commit_sha=record.get("commit_sha", ""),
         )
 
     if "role" in record:
@@ -242,10 +246,13 @@ def _save_transcript_sync(
     kind: TranscriptKind,
     transcript_uuid: str,
     message: dict,
+    commit_sha: str = "",
 ) -> None:
     messages_path = _messages_path(workspace, session_id)
     messages_path.parent.mkdir(parents=True, exist_ok=True)
     record = {"kind": kind, "uuid": transcript_uuid, "message": message}
+    if commit_sha:
+        record["commit_sha"] = commit_sha
     with open(messages_path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
         fh.write("\n")
@@ -397,7 +404,7 @@ def _messages_path(workspace: str | Path, session_id: str) -> Path:
 
 def _session_dir(workspace: str | Path, session_id: str) -> Path:
     _validate_session_id(session_id)
-    return Path(workspace).expanduser().resolve() / ".tmp" / session_id
+    return Path(workspace).expanduser().resolve() / TMP_DIR / session_id
 
 
 def _validate_session_id(session_id: str) -> None:

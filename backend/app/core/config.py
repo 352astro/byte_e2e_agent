@@ -11,7 +11,11 @@ PROJECT_ROOT = BACKEND_DIR.parent
 load_dotenv(BACKEND_DIR / ".env")
 load_dotenv()
 
-DEFAULT_LLM_METRICS_DB_PATH = ".tmp/ai_metrics.sqlite3"
+# Central constant for the project's temporary / cache directory.
+# All session data, shadow VCS, metrics DB, etc. live under this directory.
+TMP_DIR = ".tmp"
+
+DEFAULT_LLM_METRICS_DB_PATH = f"{TMP_DIR}/ai_metrics.sqlite3"
 
 
 @dataclass(frozen=True)
