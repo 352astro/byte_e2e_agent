@@ -22,7 +22,7 @@ async def chat(
     scheduler starts. No events are lost.
     """
     try:
-        stream = project.start_chat(sid, req.question)
+        stream = project.start_chat(sid, req.question, req.max_steps)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
     except RuntimeError as exc:

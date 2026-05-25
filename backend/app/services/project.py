@@ -132,12 +132,16 @@ class Project:
 
     # ── chat / streaming ─────────────────────────────────
 
-    def start_chat(self, session_id: str, question: str) -> ActiveStream:
+    def start_chat(
+        self, session_id: str, question: str, max_steps: int
+    ) -> ActiveStream:
         session = self.get_session(session_id)
         channel = StreamTranscriptCompletion()
         queue = channel.subscribe()
         try:
-            self.scheduler.start(session, question, channel=channel)
+            self.scheduler.start(
+                session, question, channel=channel, max_steps=max_steps
+            )
         except RuntimeError:
             channel.unsubscribe(queue)
             raise

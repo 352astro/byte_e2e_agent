@@ -107,6 +107,7 @@ class Scheduler:
         session: Session,
         question: str,
         channel: StreamTranscriptCompletion | None = None,
+        max_steps: int = 50,
     ) -> str:
         """启动 session 执行。可传入外部创建的 channel（subscribe-before-start 模式）。"""
         if self._state != "idle":
@@ -117,7 +118,7 @@ class Scheduler:
         )
         self._state = "running"
         self._loop_task = asyncio.create_task(
-            self._query_loop(question),
+            self._query_loop(question, max_steps),
             name="sched",
         )
         self._loop_task.add_done_callback(self._on_done)
@@ -135,7 +136,7 @@ class Scheduler:
     # query loop
     # ============================================================
 
-    async def _query_loop(self, question: str) -> None:
+    async def _query_loop(self, question: str, max_steps: int) -> None:
         session = self._current_session
         channel = self._current_channel
         assert session is not None and channel is not None
@@ -148,13 +149,14 @@ class Scheduler:
 
             session.add_transcript(t.kind, t.message, t.id)
 
-            max_steps = 50
-
             for _ in range(max_steps):
                 # ── 构建消息 ──────────────────────────
                 messages: list[dict] = [
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "system", "content": f"## Platform\n{get_platform_hint()}"},
+                    {
+                        "role": "system",
+                        "content": f"## Platform\n{get_platform_hint()}",
+                    },
                     skill_context_message(),
                     task_context_message(session._sandbox),
                 ]
@@ -375,8 +377,8 @@ class Scheduler:
         result_id = _uuid.uuid4().hex
         result_msg = {
             "tool_call_id": tool_call_id,
-                "tool_name": func_name,
-                "arguments": func_args,
+            "tool_name": func_name,
+            "arguments": func_args,
             "result": result_str,
         }
         t = await channel.flush(result_id, "tool_result", result_msg)
