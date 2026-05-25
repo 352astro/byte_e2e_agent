@@ -96,9 +96,9 @@ export default function useAgentStream({
                 : null;
             setCurrentSid(sessionId);
             // Verify running state with backend (cache may be stale)
-            fetch(`/api/session/${sessionId}/recover`)
+            fetch(`/api/session/${sessionId}/status`)
                 .then((r) => r.json())
-                .then((data: RecoverResponse) => {
+                .then((data: { running: boolean }) => {
                     if (data.running) {
                         setRunning(true);
                         cache[sessionId]._complete = false;
@@ -188,20 +188,42 @@ export default function useAgentStream({
                 if (fetchForRef.current !== fetchFor) return;
                 const items: DisplayTranscript[] = (data.transcripts || []).map(
                     (t: Transcript) => ({
-                        id: t.id, kind: t.kind, message: t.message,
-                        subStreams: [], activeSubStream: null, isFlushed: true,
+                        id: t.id,
+                        kind: t.kind,
+                        message: t.message,
+                        subStreams: [],
+                        activeSubStream: null,
+                        isFlushed: true,
                         commitSha: t.commit_sha,
                     }),
                 );
                 setTranscripts(items);
                 if (data.running) setRunning(true);
                 setInterrupting(false);
-                const lastAssistant = [...items].reverse().find((t: any) => t.kind === "assistant" && t.message.content);
-                setAnswer(lastAssistant ? String(lastAssistant.message.content || "") : null);
-                lastIdRef.current = items.length ? items[items.length - 1].id : null;
-                cache[sessionId] = { transcripts: items, answer: lastAssistant ? String(lastAssistant.message.content || "") : null, _complete: !data.running };
+                const lastAssistant = [...items]
+                    .reverse()
+                    .find(
+                        (t: any) => t.kind === "assistant" && t.message.content,
+                    );
+                setAnswer(
+                    lastAssistant
+                        ? String(lastAssistant.message.content || "")
+                        : null,
+                );
+                lastIdRef.current = items.length
+                    ? items[items.length - 1].id
+                    : null;
+                cache[sessionId] = {
+                    transcripts: items,
+                    answer: lastAssistant
+                        ? String(lastAssistant.message.content || "")
+                        : null,
+                    _complete: !data.running,
+                };
             })
-            .catch((err) => { console.error("Failed to reload session", fetchFor, err); });
+            .catch((err) => {
+                console.error("Failed to reload session", fetchFor, err);
+            });
     }, [sessionId, cache]);
 
     // ── interrupt ─────────────────────────────────
@@ -270,7 +292,11 @@ export default function useAgentStream({
 
                     const t: DisplayTranscript = {
                         id: ev.transcript_id,
-                        kind: existing?.kind ?? (ev.kind === "tool_result" ? "tool_result" : "assistant"),
+                        kind:
+                            existing?.kind ??
+                            (ev.kind === "tool_result"
+                                ? "tool_result"
+                                : "assistant"),
                         message: existing?.message ?? {},
                         subStreams,
                         activeSubStream: active,
@@ -309,7 +335,9 @@ export default function useAgentStream({
                     subStreams: ss,
                     activeSubStream: null,
                     isFlushed: true,
-                    commitSha: (ev as Record<string, unknown>).commit_sha as string | undefined,
+                    commitSha: (ev as Record<string, unknown>).commit_sha as
+                        | string
+                        | undefined,
                 });
                 lastIdRef.current = ev.transcript_id;
             }
@@ -366,7 +394,10 @@ export default function useAgentStream({
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ question: q, max_steps: 50 }),
-                signal: AbortSignal.any([controller.signal, AbortSignal.timeout(300_000)]),
+                signal: AbortSignal.any([
+                    controller.signal,
+                    AbortSignal.timeout(300_000),
+                ]),
             });
             if (!streamRes.ok) {
                 throw new Error(
@@ -409,6 +440,24 @@ export default function useAgentStream({
             if (abortRef.current === controller) abortRef.current = null;
             streamingSidRef.current = null;
             lazyCreatedRef.current = null;
+            // 向后端确认 session 是否仍在运行，避免 running 状态永不停止
+            if (sid) {
+                try {
+                    const res = await fetch(`/api/session/${sid}/status`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (!data.running) {
+                            setRunning(false);
+                        }
+                    } else {
+                        setRunning(false);
+                    }
+                } catch {
+                    setRunning(false);
+                }
+            } else {
+                setRunning(false);
+            }
         }
     }, [
         question,

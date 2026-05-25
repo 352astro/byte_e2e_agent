@@ -14,14 +14,13 @@ from dataclasses import dataclass, field
 
 from agent.metrics import LLMCallContext
 from agent.session import Session
+from agent.shadow_repo import ShadowRepo
 from agent.tools.shell import get_platform_hint
 from agent.tools.skill import skill_context_message
 from agent.tools.subtask import SubTask
 from agent.tools.task import task_context_message
 from agent.tools.toolset import ToolSet
 from agent.transcript import StreamTranscriptCompletion
-from agent.shadow_repo import ShadowRepo
-
 
 # ── System prompt（只定义一次）─────────────────────────────
 
@@ -249,7 +248,9 @@ class Scheduler:
                 # Fill unpaired tool_calls with error results
                 await repair_unpaired_tools_async(session, channel)
                 err_id = _uuid.uuid4().hex
-                err_msg = {"message": "The user interrupted the agent before it could finish. Summarize what you have done so far and ask how to proceed."}
+                err_msg = {
+                    "message": "The user interrupted the agent before it could finish. Summarize what you have done so far and ask how to proceed."
+                }
                 t = await channel.flush(err_id, "error", err_msg)
                 session.add_transcript(t.kind, t.message, t.id)
             except Exception:
@@ -384,7 +385,8 @@ class Scheduler:
             output_parts: list[str] = []
             result_id = _uuid.uuid4().hex
             async for chunk_text in session._sandbox.stream_shell(
-                action.command, action.timeout_ms,
+                action.command,
+                action.timeout_ms,
                 interrupt_event=self._interrupt_event,
             ):
                 output_parts.append(chunk_text)
@@ -561,7 +563,8 @@ class Scheduler:
                     parts: list[str] = []
                     tr_id = _uuid.uuid4().hex
                     async for chunk_text in parent_session._sandbox.stream_shell(
-                        action.command, action.timeout_ms,
+                        action.command,
+                        action.timeout_ms,
                         interrupt_event=self._interrupt_event,
                     ):
                         parts.append(chunk_text)
@@ -611,13 +614,3 @@ class Scheduler:
             import traceback
 
             traceback.print_exception(type(exc), exc, exc.__traceback__)
-
-
-# ── helpers ────────────────────────────────────────────────
-
-
-def _safe_json_loads(s: str) -> dict:
-    try:
-        return json.loads(s)
-    except json.JSONDecodeError:
-        return {}

@@ -6,7 +6,6 @@ import serpapi
 from pydantic import Field
 
 from agent.tools.base import BaseTool
-from agent.utils._term import magenta
 
 
 class Search(BaseTool):
@@ -15,7 +14,6 @@ class Search(BaseTool):
     hl: str = Field(default="zh-cn", description="Language code")
 
     async def execute(self, sandbox=None) -> str:
-        print(magenta(f"[Search] {self.query}"))
         try:
             api_key = os.getenv("SERPAPI_KEY")
             if not api_key:

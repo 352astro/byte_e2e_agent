@@ -3,6 +3,7 @@ import os
 import time
 from typing import Any, AsyncIterator, Dict, List
 
+from agent.utils._term import dim, error, info, success
 from openai import AsyncOpenAI
 
 from agent.metrics import (
@@ -11,7 +12,6 @@ from agent.metrics import (
     usage_to_dict,
     utc_now_iso,
 )
-from agent.utils._term import dim, error, info, success
 
 
 class HelloAgentsLLM:
@@ -60,7 +60,6 @@ class HelloAgentsLLM:
             {"kind": "tool_call_chunk", "tool_call": {...}}
             {"kind": "finish_reason",   "finish_reason": "stop"|"tool_calls"}
         """
-        print(info(f"Calling {self.model} ..."))
 
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -151,40 +150,3 @@ class HelloAgentsLLM:
                     )
                 except Exception as exc:
                     print(error(f"Failed to record LLM metrics: {exc}"))
-
-    async def think(
-        self,
-        messages: List[Dict[str, str]],
-        temperature: float = 0,
-        tools: List[dict] | None = None,
-    ) -> str | None:
-        """CLI 用——完整响应 + 终端打印。"""
-        print(success("Response:"))
-        collected: list[str] = []
-        has_reasoning = False
-
-        try:
-            async for event in self.think_stream(messages, temperature, tools):
-                token = event.get("token", "")
-                if event["kind"] == "reasoning":
-                    if not has_reasoning:
-                        print(dim("  [Deep Think]"))
-                        has_reasoning = True
-                    print(dim(token), end="", flush=True)
-                elif event["kind"] == "content":
-                    if has_reasoning and not collected:
-                        print()
-                    print(token, end="", flush=True)
-                    collected.append(token)
-                elif event["kind"] == "tool_call_chunk":
-                    tc = event["tool_call"]
-                    if tc["function"]["name"]:
-                        print(f"\n{tool('[Tool]')} {tc['function']['name']}", end="")
-                elif event["kind"] == "finish_reason":
-                    print()
-        except Exception:
-            pass
-
-        print()
-        full = "".join(collected)
-        return full if full.strip() else None

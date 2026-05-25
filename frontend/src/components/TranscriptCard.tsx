@@ -3,7 +3,6 @@ import Markdown from "./Markdown";
 import Icon from "./Icon";
 import CollapsibleCard from "./CollapsibleCard";
 import ToolResult from "./ToolResult";
-import { Focusable } from "../hooks/FocusContext";
 import { TranscriptKind, ChunkKind } from "../constants";
 import type { DisplayTranscript, SubStream } from "../types";
 
@@ -320,7 +319,13 @@ type ChunkRenderer = (props: {
 }) => React.ReactNode;
 
 const chunkRenderers: Partial<Record<string, ChunkRenderer>> = {
-  [ChunkKind.Thinking]: ({ ss, active, thinkingState, onToggleThinking, focusId }) => (
+  [ChunkKind.Thinking]: ({
+    ss,
+    active,
+    thinkingState,
+    onToggleThinking,
+    focusId,
+  }) => (
     <ThinkingBlock
       ss={ss}
       active={active}
@@ -411,7 +416,9 @@ export default function TranscriptCard({
     );
     return (
       <div className="transcript-card error-card">
-        <span className="transcript-label"><Icon name="error" size={12} /> Error</span>
+        <span className="transcript-label">
+          <Icon name="error" size={12} /> Error
+        </span>
         <div className="transcript-body">{content}</div>
       </div>
     );

@@ -40,6 +40,16 @@ def get_history(sid: str, project: Project = Depends(get_project)) -> dict:
     return {"session": info, "history": history}
 
 
+@router.get("/session/{sid}/status")
+async def session_status(sid: str, project: Project = Depends(get_project)):
+    """Lightweight check: is the scheduler currently running this session?"""
+    try:
+        project.get_session(sid)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"running": project.scheduler.state != "idle"}
+
+
 @router.get("/session/{sid}/recover")
 async def recover_session(sid: str, project: Project = Depends(get_project)):
     """Return full session state for frontend recovery after refresh."""
@@ -100,7 +110,12 @@ async def checkout_commit(
             break
     # Truncate transcripts from this commit onward
     removed = session.truncate_transcripts_from(req.commit_sha)
-    return {"ok": True, "commit_sha": req.commit_sha, "removed": removed, "user_content": user_content}
+    return {
+        "ok": True,
+        "commit_sha": req.commit_sha,
+        "removed": removed,
+        "user_content": user_content,
+    }
 
 
 @router.post("/session/{sid}/interrupt")
