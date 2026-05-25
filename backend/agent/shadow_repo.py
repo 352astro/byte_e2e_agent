@@ -195,12 +195,41 @@ class ShadowRepo:
             with open(target, "wb") as f:
                 f.write(blob.data)
 
-        # Remove files that are in current workspace but not in target tree
-        for name in self._idx:
-            if name not in tracked:
-                target = os.path.join(self._workdir, name.decode())
-                if os.path.isfile(target):
-                    os.remove(target)
+        # Remove workspace files that are not in the target tree.
+        # Walk the workdir and delete any non-ignored file not in tracked.
+        for root, dirs, files in os.walk(self._workdir, topdown=True):
+            dirs[:] = [
+                d
+                for d in dirs
+                if d not in self._ignores
+                and not self._ignore_mgr.is_ignored(
+                    os.path.relpath(os.path.join(root, d), self._workdir) + "/"
+                )
+            ]
+            for fn in files:
+                full = os.path.join(root, fn)
+                rel = os.path.relpath(full, self._workdir).encode()
+                if self._ignore_mgr.is_ignored(rel.decode()):
+                    continue
+                if rel not in tracked:
+                    try:
+                        os.remove(full)
+                    except OSError:
+                        pass
+
+        # Remove empty directories (bottom-up)
+        for root, dirs, _ in os.walk(self._workdir, topdown=False):
+            for d in dirs:
+                if d in self._ignores:
+                    continue
+                full = os.path.join(root, d)
+                rel = os.path.relpath(full, self._workdir).encode()
+                if self._ignore_mgr.is_ignored(rel.decode() + "/"):
+                    continue
+                try:
+                    os.rmdir(full)  # only removes if empty
+                except OSError:
+                    pass
 
         # Rebuild index from the restored tree
         self._idx = Index(self._index_path)

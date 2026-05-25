@@ -9,6 +9,7 @@ export type IconName =
   | "dots-vertical"
   | "restore"
   | "tool"
+  | "error"
   | "write";
 
 const paths: Record<IconName, SVGProps<SVGPathElement>> = {
@@ -23,6 +24,9 @@ const paths: Record<IconName, SVGProps<SVGPathElement>> = {
   },
   "dots-vertical": {
     d: "M12 5v.01M12 12v.01M12 19v.01",
+  },
+  error: {
+    d: "M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01",
   },
   restore: {
     d: "M3 10h10a5 5 0 0 1 0 10H8M3 10l4-4M3 10l4 4",

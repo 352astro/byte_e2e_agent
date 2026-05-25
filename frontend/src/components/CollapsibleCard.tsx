@@ -14,6 +14,10 @@ interface CollapsibleCardProps {
   standalone?: boolean;
   /** Optional data-fid for focus targeting. */
   dataFid?: string;
+  /** If false, header is not clickable (default true). */
+  headerClickable?: boolean;
+  /** If true, hide the default chevron (use headerRight for custom chevron). */
+  hideChevron?: boolean;
 }
 
 export default function CollapsibleCard({
@@ -27,17 +31,22 @@ export default function CollapsibleCard({
   children,
   standalone = false,
   dataFid,
+  headerClickable = true,
+  hideChevron = false,
 }: CollapsibleCardProps) {
   const hasContent = Boolean(children);
   const hasHeader = Boolean(title);
-  const showChevron = hasContent && (hasHeader || standalone);
+  const showChevron = !hideChevron && hasContent && (hasHeader || standalone);
 
   return (
-    <div className={`tool-card${cardClassName ? ` ${cardClassName}` : ""}`} data-fid={dataFid}>
+    <div
+      className={`tool-card${cardClassName ? ` ${cardClassName}` : ""}`}
+      data-fid={dataFid}
+    >
       {hasHeader && (
         <div
           className={`tool-card-header${headerClassName ? ` ${headerClassName}` : ""}`}
-          onClick={() => hasContent && onToggle(id)}
+          onClick={() => hasContent && headerClickable && onToggle(id)}
         >
           {title}
           <span className="shell-call-right">

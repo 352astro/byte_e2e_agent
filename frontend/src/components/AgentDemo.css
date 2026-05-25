@@ -34,6 +34,8 @@
 /* ── Fixed input bar ────────────────────────── */
 
 .agent-input-bar {
+    position: relative;
+    z-index: 1;
     flex-shrink: 0;
     display: flex;
     gap: 10px;
@@ -41,6 +43,7 @@
     border-top: 1px solid #e0e0e0;
     background: #fff;
 }
+
 
 .agent-input-bar-inner {
     max-width: 860px;
@@ -92,6 +95,19 @@
 }
 .agent-send-btn:disabled {
     background: #bbb;
+    cursor: not-allowed;
+}
+
+.agent-send-btn--stop {
+    background: #c00;
+}
+.agent-send-btn--stop:hover {
+    background: #a00;
+}
+
+.agent-send-btn--stopping {
+    background: #c00;
+    opacity: 0.6;
     cursor: not-allowed;
 }
 
@@ -169,6 +185,9 @@
 
 .transcript-card.error-card .transcript-label {
     color: #c00;
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 .transcript-card.error-card .transcript-body {
     color: #b00;
@@ -275,17 +294,17 @@
 
 /* ── Thinking block ─────────────────────────── */
 
-.thinking-block {
-    margin-bottom: 8px;
+.tool-card.thinking-block {
+    margin: 0 0 8px 0;
     border-radius: 6px;
     overflow: hidden;
 }
 
-.thinking-block--done {
+.tool-card.thinking-block--done {
     background: #f9f9f9;
 }
 
-.thinking-header {
+.tool-card-header.thinking-header {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -294,7 +313,7 @@
     user-select: none;
     position: relative;
 }
-.thinking-block--done .thinking-header {
+.tool-card.thinking-block--done .thinking-header {
     cursor: pointer;
 }
 
@@ -302,7 +321,7 @@
     flex-shrink: 0;
     color: #999;
 }
-.thinking-block--done .thinking-bulb {
+.tool-card.thinking-block--done .thinking-bulb {
     color: #aaa;
 }
 
@@ -312,19 +331,6 @@
     color: #888;
     text-transform: uppercase;
     letter-spacing: 0.4px;
-}
-
-.thinking-chevron {
-    position: absolute;
-    right: 8px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #bbb;
-    opacity: 0;
-    transition: opacity 0.15s;
-}
-.thinking-block--done:hover .thinking-chevron {
-    opacity: 1;
 }
 
 .thinking-body {
@@ -339,7 +345,7 @@
 }
 
 /* Streaming thinking — subtle pulse on the label */
-.thinking-block:not(.thinking-block--done) .thinking-label {
+.tool-card.thinking-block:not(.thinking-block--done) .thinking-label {
     color: #555;
     animation: think-pulse 1.4s ease-in-out infinite;
 }
@@ -826,7 +832,6 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 8px 14px 6px 14px;
 }
 
 .write-call-icon {
@@ -1070,6 +1075,7 @@
     cursor: default;
     white-space: nowrap;
     line-height: 1.4;
+    text-align: center;
     box-shadow:
         0 0 12px rgba(0, 0, 0, 0.06),
         0 0 4px rgba(0, 0, 0, 0.04);
@@ -1102,11 +1108,92 @@
     transition: all 0.18s;
 }
 
+.commit-badge::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: 20px;
+}
+
 .commit-badge:hover .commit-restore {
     max-height: 18px;
     opacity: 1;
 }
 
-.commit-badge .commit-restore:hover {
+.commit-badge:hover .commit-restore:hover {
     color: #000;
 }
+
+/* ── Prefill card (pops above send bar) ─────── */
+
+.agent-prefill {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.25s ease;
+    margin: 0 32px;
+}
+
+.agent-prefill--open {
+    max-height: 52px;
+}
+
+.agent-prefill-inner {
+    max-width: 860px;
+    margin: 0 auto;
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 10px 0 0 0;
+}
+
+.agent-prefill-textarea {
+    flex: 1;
+    padding: 8px 14px;
+    font-size: 0.85rem;
+    font-family: ui-monospace, monospace;
+    border: 1px solid #d0d0d0;
+    border-radius: 8px 8px 0 0;
+    outline: none;
+    resize: none;
+    line-height: 1.4;
+    color: #666;
+    background: #fff;
+    box-shadow: 0 -2px 12px rgba(0,0,0,0.06);
+}
+
+.agent-prefill-textarea:focus {
+    border-color: #888;
+    box-shadow: 0 -4px 16px rgba(0,0,0,0.10);
+}
+
+
+
+.agent-prefill-close {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    font-size: 1.1rem;
+    color: #aaa;
+    cursor: pointer;
+    border-radius: 4px;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.agent-prefill-close:hover {
+    color: #555;
+    background: #e8e8e8;
+}
+
+/* ── Commit restore confirm (red) ───────────── */
+
+.commit-restore--confirm {
+    color: #c00 !important;
+}
+

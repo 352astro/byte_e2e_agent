@@ -137,16 +137,26 @@ class PersistentTerminal:
             parts.append(chunk)
         return TerminalResult(output="".join(parts), exit_code=self._last_exit_code)
 
-    def run_stream(self, command: str, timeout_ms: int = 30000) -> Iterator[str]:
+    def write_command(self, command: str) -> tuple[str, float]:
+        """Write a command to stdin, return (marker, deadline_ms).
+
+        Call this before read_stream() so the command starts immediately
+        and the caller can signal readiness before blocking on I/O.
+        """
         if not self.alive:
             raise RuntimeError("PersistentTerminal not started.")
-
         marker = f"__TERM_MARK_{uuid.uuid4().hex[:8]}__"
         wrapped = self._build_wrapped(command, marker)
         self._write_stdin(wrapped)
-
         self._last_exit_code = -1
-        deadline = time.monotonic() + timeout_ms / 1000.0
+        return marker, time.monotonic()
+
+    def read_stream(self, marker: str, start_time: float, timeout_ms: int = 30000) -> Iterator[str]:
+        """Read command output until the marker is found or timeout.
+
+        Must be called after write_command(); the command is already running.
+        """
+        deadline = start_time + timeout_ms / 1000.0
         marker_found = False
 
         if sys.platform == "win32":
@@ -158,10 +168,32 @@ class PersistentTerminal:
                 yield chunk
             marker_found = self._last_exit_code != -1
 
-        # If marker never appeared, the command is still running (e.g. npm run dev).
-        # Send SIGINT to the process group to interrupt it.
         if not marker_found and self.alive:
             self._recover_after_timeout()
+
+    def run_stream(self, command: str, timeout_ms: int = 30000) -> Iterator[str]:
+        """Convenience: write + read in one call (backward-compatible)."""
+        marker, start = self.write_command(command)
+        yield from self.read_stream(marker, start, timeout_ms)
+
+    def interrupt(self) -> None:
+        """Send SIGINT to the foreground process group.
+
+        Unlike _recover_after_timeout, does NOT drain output —
+        the worker thread's _read_stream_unix will catch the
+        marker and finish naturally.
+        """
+        if not self.alive:
+            return
+        try:
+            if sys.platform == "win32":
+                self._write_stdin("\x03")
+            else:
+                assert self._proc is not None
+                pgid = os.getpgid(self._proc.pid)
+                os.killpg(pgid, signal.SIGINT)
+        except Exception:
+            pass
 
     def get_cwd(self) -> str:
         if not self.alive:

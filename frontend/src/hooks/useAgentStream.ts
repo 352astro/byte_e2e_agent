@@ -22,6 +22,10 @@ interface UseAgentStreamReturn {
     transcripts: DisplayTranscript[];
     answer: string | null;
     handleRun: () => Promise<void>;
+    prefillRef: React.MutableRefObject<string>;
+    reloadTranscripts: () => void;
+    handleInterrupt: () => Promise<void>;
+    interrupting: boolean;
 }
 
 export default function useAgentStream({
@@ -34,6 +38,7 @@ export default function useAgentStream({
     const [running, setRunning] = useState(false);
     const [transcripts, setTranscripts] = useState<DisplayTranscript[]>([]);
     const [answer, setAnswer] = useState<string | null>(null);
+    const [interrupting, setInterrupting] = useState(false);
     const [currentSid, setCurrentSid] = useState<string | null>(sessionId);
 
     const abortRef = useRef<AbortController | null>(null);
@@ -41,6 +46,7 @@ export default function useAgentStream({
     const lastIdRef = useRef<string | null>(null);
     const fetchForRef = useRef<string | null>(null);
     const streamingSidRef = useRef<string | null>(null);
+    const prefillRef = useRef<string>("");
 
     // ── session switch: save & restore ────────────────
 
@@ -157,6 +163,42 @@ export default function useAgentStream({
             });
     }, [sessionId, pendingNew]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // ── reload ─────────────────────────────────────
+
+    const reloadTranscripts = useCallback(() => {
+        if (!sessionId) return;
+        const fetchFor = sessionId;
+        fetchForRef.current = fetchFor;
+        fetch(`/api/session/${sessionId}/recover`)
+            .then((r) => r.json())
+            .then((data: RecoverResponse) => {
+                if (fetchForRef.current !== fetchFor) return;
+                const items: DisplayTranscript[] = (data.transcripts || []).map(
+                    (t: Transcript) => ({
+                        id: t.id, kind: t.kind, message: t.message,
+                        subStreams: [], activeSubStream: null, isFlushed: true,
+                        commitSha: t.commit_sha,
+                    }),
+                );
+                setTranscripts(items);
+                const lastAssistant = [...items].reverse().find((t: any) => t.kind === "assistant" && t.message.content);
+                setAnswer(lastAssistant ? String(lastAssistant.message.content || "") : null);
+                lastIdRef.current = items.length ? items[items.length - 1].id : null;
+                cache[sessionId] = { transcripts: items, answer: lastAssistant ? String(lastAssistant.message.content || "") : null, _complete: !data.running };
+            })
+            .catch((err) => { console.error("Failed to reload session", fetchFor, err); });
+    }, [sessionId, cache]);
+
+    // ── interrupt ─────────────────────────────────
+
+    const handleInterrupt = useCallback(async () => {
+        if (!sessionId || interrupting) return;
+        setInterrupting(true);
+        try {
+            await fetch(`/api/session/${sessionId}/interrupt`, { method: "POST" });
+        } catch {}
+    }, [sessionId, interrupting]);
+
     // ── helpers ──────────────────────────────────────
 
     const upsertTranscript = useCallback((t: DisplayTranscript) => {
@@ -261,7 +303,11 @@ export default function useAgentStream({
     // ── run ──────────────────────────────────────────
 
     const handleRun = useCallback(async () => {
-        const q = question.trim();
+        const prefill = prefillRef.current.trim();
+        if (prefill) {
+            prefillRef.current = "";
+        }
+        const q = (prefill ? prefill + "\n" + question : question).trim();
         if (!q || running) return;
 
         setRunning(true);
@@ -302,7 +348,7 @@ export default function useAgentStream({
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ question: q, max_steps: 50 }),
-                signal: controller.signal,
+                signal: AbortSignal.any([controller.signal, AbortSignal.timeout(300_000)]),
             });
             if (!streamRes.ok) {
                 throw new Error(
@@ -346,6 +392,7 @@ export default function useAgentStream({
             streamingSidRef.current = null;
             lazyCreatedRef.current = null;
             setRunning(false);
+            setInterrupting(false);
         }
     }, [
         question,
@@ -361,8 +408,12 @@ export default function useAgentStream({
         question,
         setQuestion,
         running,
+        interrupting,
         transcripts,
         answer,
         handleRun,
+        prefillRef,
+        reloadTranscripts,
+        handleInterrupt,
     };
 }

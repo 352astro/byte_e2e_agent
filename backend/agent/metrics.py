@@ -22,7 +22,8 @@ class SQLiteLLMMetricsStore:
         self.db_path = Path(db_path).expanduser().resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self._init_db()
+        with self._lock:
+            self._init_db()
 
     def record_call(
         self,
@@ -221,7 +222,7 @@ class SQLiteLLMMetricsStore:
                 conn.execute("ALTER TABLE llm_calls ADD COLUMN cost_yuan REAL")
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         return conn
 

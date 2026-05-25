@@ -14,13 +14,54 @@ interface AgentDemoProps {
   cache: SessionCache;
 }
 
+function CommitBadge({
+  shortSha,
+  commitSha,
+  onCheckout,
+}: {
+  shortSha: string;
+  commitSha: string;
+  onCheckout: (sha: string) => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <div className="commit-badge">
+      <span className="commit-short-id">{shortSha}</span>
+      {confirming ? (
+        <span
+          className="commit-restore commit-restore--confirm"
+          onClick={(e) => {
+            e.stopPropagation();
+            setConfirming(false);
+            onCheckout(commitSha);
+          }}
+        >
+          <Icon name="restore" size={12} />
+          confirm
+        </span>
+      ) : (
+        <span
+          className="commit-restore"
+          onClick={(e) => {
+            e.stopPropagation();
+            setConfirming(true);
+          }}
+        >
+          <Icon name="restore" size={12} />
+          restore
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function AgentDemo({
   sessionId,
   pendingNew,
   onSessionCreated,
   cache,
 }: AgentDemoProps) {
-  const { question, setQuestion, running, transcripts, handleRun } =
+  const { question, setQuestion, running, interrupting, transcripts, handleRun, prefillRef, reloadTranscripts, handleInterrupt } =
     useAgentStream({ sessionId, pendingNew, onSessionCreated, cache });
 
   const composingRef = useRef(false);
@@ -113,6 +154,7 @@ export default function AgentDemo({
 
   // ── Commit checkout ──────────────────────────
   const [checkingOut, setCheckingOut] = useState<string | null>(null);
+  const [prefillContent, setPrefillContent] = useState("");
   const handleCheckout = useCallback(
     async (commitSha: string) => {
       if (!sessionId || checkingOut) return;
@@ -127,6 +169,11 @@ export default function AgentDemo({
           },
         );
         if (!res.ok) throw new Error(`Server returned ${res.status}`);
+        const data = await res.json();
+        if (data.user_content) {
+          setPrefillContent(data.user_content);
+        }
+        reloadTranscripts();
       } catch (err) {
         console.error("Checkout failed", err);
       } finally {
@@ -143,6 +190,10 @@ export default function AgentDemo({
       if (e.ctrlKey || e.metaKey || e.shiftKey) return;
       if (composingRef.current) return;
       e.preventDefault();
+      if (prefillContent.trim()) {
+        prefillRef.current = prefillContent.trim();
+        setPrefillContent("");
+      }
       handleRun();
     }
   };
@@ -202,25 +253,11 @@ export default function AgentDemo({
                 <div key={t.id} className="user-bubble-wrapper">
                   <TranscriptCard transcript={t} />
                   {shortSha && (
-                    <div className="commit-badge">
-                      <span className="commit-short-id">{shortSha}</span>
-                      <span
-                        className="commit-restore"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (commitSha) handleCheckout(commitSha);
-                        }}
-                      >
-                        {checkingOut === commitSha ? (
-                          "…"
-                        ) : (
-                          <>
-                            <Icon name="restore" size={12} />
-                            restore
-                          </>
-                        )}
-                      </span>
-                    </div>
+                    <CommitBadge
+                      shortSha={shortSha}
+                      commitSha={commitSha!}
+                      onCheckout={handleCheckout}
+                    />
                   )}
                 </div>
               );
@@ -240,6 +277,33 @@ export default function AgentDemo({
         </div>
       </div>
 
+      <div className={`agent-prefill${prefillContent.trim() ? " agent-prefill--open" : ""}`}>
+        <div className="agent-prefill-inner">
+        <textarea
+          className="agent-prefill-textarea"
+          placeholder="(prefix)"
+          value={prefillContent}
+          onChange={(e) => setPrefillContent(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+              e.preventDefault();
+              if (prefillContent.trim()) {
+                prefillRef.current = prefillContent.trim();
+                setPrefillContent("");
+                handleRun();
+              }
+            }
+          }}
+          rows={1}
+        />
+        <button
+          className="agent-prefill-close"
+          onClick={() => setPrefillContent("")}
+        >
+          ×
+        </button>
+        </div>
+      </div>
       <div className="agent-input-bar">
         <div className="agent-input-bar-inner">
         <textarea
@@ -257,11 +321,17 @@ export default function AgentDemo({
           rows={rows}
         />
         <button
-          className="agent-send-btn"
-          onClick={handleRun}
-          disabled={running || !question.trim()}
+          className={
+            interrupting
+              ? "agent-send-btn agent-send-btn--stopping"
+              : running
+                ? "agent-send-btn agent-send-btn--stop"
+                : "agent-send-btn"
+          }
+          onClick={running && !interrupting ? handleInterrupt : handleRun}
+          disabled={interrupting || (!running && !question.trim() && !prefillContent.trim())}
         >
-          {running ? "…" : "Send"}
+          {interrupting ? "Stopping…" : running ? "Stop" : "Send"}
         </button>
         </div>
       </div>

@@ -106,3 +106,10 @@ export interface CommitListResponse {
 export interface CheckoutRequest {
     commit_sha: string;
 }
+
+export interface CheckoutResponse {
+    ok: boolean;
+    commit_sha: string;
+    removed: number;
+    user_content: string;
+}

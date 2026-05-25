@@ -81,15 +81,34 @@ async def checkout_commit(
     req: CheckoutRequest,
     project: Project = Depends(get_project),
 ):
-    """Restore workspace to a specific commit."""
+    """Restore workspace and truncate transcripts at the given commit."""
     try:
-        project.get_session(sid)
+        session = project.get_session(sid)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
         project.shadow_repo.restore(req.commit_sha)
-        return {"ok": True, "commit_sha": req.commit_sha}
     except KeyError:
         raise HTTPException(
             status_code=404, detail=f"Commit not found: {req.commit_sha}"
         )
+    # Capture user question text before truncation
+    user_content = ""
+    for t in session._transcripts:
+        if t.commit_sha == req.commit_sha and t.kind == "user_question":
+            user_content = t.message.get("content", "")
+            break
+    # Truncate transcripts from this commit onward
+    removed = session.truncate_transcripts_from(req.commit_sha)
+    return {"ok": True, "commit_sha": req.commit_sha, "removed": removed, "user_content": user_content}
+
+
+@router.post("/session/{sid}/interrupt")
+async def interrupt_session(sid: str, project: Project = Depends(get_project)):
+    """Interrupt the running agent loop for this session."""
+    try:
+        project.get_session(sid)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+    ok = await project.scheduler.interrupt()
+    return {"ok": ok}

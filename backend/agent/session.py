@@ -104,6 +104,34 @@ class Session:
             self._transcripts, self._transcript_to_message
         )
 
+    def truncate_transcripts_from(self, commit_sha: str) -> int:
+        """删除匹配 commit_sha 的 transcript 及其后所有 transcript。
+
+        同步重写磁盘 JSONL 文件。
+        返回被删除的数量。
+        """
+        cutoff = -1
+        for i, t in enumerate(self._transcripts):
+            if t.commit_sha == commit_sha:
+                cutoff = i
+                break
+        if cutoff < 0:
+            return 0
+
+        # Keep only transcripts before the cutoff
+        kept = self._transcripts[:cutoff]
+        removed_count = len(self._transcripts) - cutoff
+        self._transcripts = kept
+        self._messages = _build_llm_messages(kept, self._transcript_to_message)
+
+        # Rewrite disk file
+        _rewrite_messages_file(
+            self._sandbox.workspace,
+            self.session_id,
+            kept,
+        )
+        return removed_count
+
     def get_messages(self) -> list[dict]:
         """返回缓存的 OpenAI 格式消息列表（供 LLM 调用）。"""
         return [dict(message) for message in self._messages]
@@ -238,6 +266,23 @@ def _record_to_transcript(record: object) -> Transcript | None:
         )
 
     return None
+
+
+def _rewrite_messages_file(
+    workspace: str | Path,
+    session_id: str,
+    transcripts: list[Transcript],
+) -> None:
+    """Rewrite the entire JSONL file with the given transcripts."""
+    messages_path = _messages_path(workspace, session_id)
+    messages_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(messages_path, "w", encoding="utf-8") as fh:
+        for t in transcripts:
+            record = {"kind": t.kind, "uuid": t.id, "message": t.message}
+            if t.commit_sha:
+                record["commit_sha"] = t.commit_sha
+            fh.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+            fh.write("\n")
 
 
 def _save_transcript_sync(

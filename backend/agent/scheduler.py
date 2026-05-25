@@ -22,6 +22,56 @@ from agent.tools.toolset import ToolSet
 from agent.transcript import StreamTranscriptCompletion
 from agent.shadow_repo import ShadowRepo
 
+
+class InterruptedError(Exception):
+    """Raised when the user interrupts the agent loop."""
+    pass
+
+
+async def _repair_unpaired_tools(session: "Session", channel: "StreamTranscriptCompletion") -> None:
+    """After interrupt, fill any unpaired tool_calls with Error tool_results.
+
+    Scans ALL assistant transcripts (not just the last one) to find
+    tool_calls that have no matching tool_result, and creates error
+    results for them.
+    """
+    transcripts = session._transcripts
+    if not transcripts:
+        return
+
+    # Collect all paired tool_call_ids
+    paired: set[str] = set()
+    for t in transcripts:
+        if t.kind == "tool_result":
+            tcid = t.message.get("tool_call_id", "")
+            if tcid:
+                paired.add(tcid)
+
+    # Find the most recent assistant that has unpaired tool_calls
+    for t in reversed(transcripts):
+        if t.kind != "assistant":
+            continue
+        tool_calls = t.message.get("tool_calls", [])
+        if not tool_calls:
+            continue
+        for tc in tool_calls:
+            tcid = tc.get("id", "")
+            if tcid and tcid not in paired:
+                result_id = _uuid.uuid4().hex
+                result_msg = {
+                    "tool_call_id": tcid,
+                    "tool_name": tc.get("function", {}).get("name", "unknown"),
+                    "arguments": tc.get("function", {}).get("arguments", ""),
+                    "result": "Error: The user interrupted before this tool could execute.",
+                }
+                try:
+                    t = await channel.flush(result_id, "tool_result", result_msg)
+                    session.add_transcript(t.kind, t.message, t.id)
+                except Exception:
+                    pass
+        break  # only repair the most recent assistant with tool_calls
+
+
 # ── System prompt（只定义一次）─────────────────────────────
 
 SYSTEM_PROMPT = """\
@@ -72,6 +122,7 @@ class Scheduler:
         self._current_session: Session | None = None
         self._current_channel: StreamTranscriptCompletion | None = None
         self._shadow_repo: ShadowRepo | None = None
+        self._interrupt_event: asyncio.Event | None = None
 
     # ── public ────────────────────────────────────────────
 
@@ -120,6 +171,7 @@ class Scheduler:
             channel if channel is not None else StreamTranscriptCompletion()
         )
         self._shadow_repo = shadow_repo
+        self._interrupt_event = asyncio.Event()
         self._state = "running"
         self._loop_task = asyncio.create_task(
             self._query_loop(question, max_steps),
@@ -135,6 +187,24 @@ class Scheduler:
             raise KeyError(f"No pending request: {transcript_id}")
         pending["response"] = response
         pending["event"].set()
+
+    async def interrupt(self) -> bool:
+        """Signal the running query loop to stop and WAIT for full shutdown.
+
+        Blocks until the entire execution tree (LLM, tools, SubTasks) has
+        finished, transcripts are repaired, and the channel is closed.
+        Returns True if a loop was running.
+        """
+        if self._interrupt_event is None:
+            return False
+        self._interrupt_event.set()
+        task = self._loop_task
+        if task is not None:
+            try:
+                await task
+            except Exception:
+                pass  # exceptions already handled by _on_done
+        return True
 
     # ============================================================
     # query loop
@@ -166,6 +236,9 @@ class Scheduler:
             session.add_transcript(t.kind, t.message, t.id, commit_sha=commit_sha)
 
             for _ in range(max_steps):
+                # ── interrupt check ─────────────────
+                if self._interrupt_event and self._interrupt_event.is_set():
+                    raise InterruptedError("Interrupted by user")
                 # ── 构建消息 ──────────────────────────
                 messages: list[dict] = [
                     {"role": "system", "content": SYSTEM_PROMPT},
@@ -216,8 +289,20 @@ class Scheduler:
 
                 # ── 执行每个 tool_call ─────────────────
                 for tc in output.tool_calls:
+                    if self._interrupt_event and self._interrupt_event.is_set():
+                        raise InterruptedError("Interrupted between tools")
                     await self._execute_one_tool(tc, session, channel)
 
+        except InterruptedError:
+            try:
+                # Fill unpaired tool_calls with error results
+                await _repair_unpaired_tools(session, channel)
+                err_id = _uuid.uuid4().hex
+                err_msg = {"message": "The user interrupted the agent before it could finish. Summarize what you have done so far and ask how to proceed."}
+                t = await channel.flush(err_id, "error", err_msg)
+                session.add_transcript(t.kind, t.message, t.id)
+            except Exception:
+                pass
         except Exception as exc:
             import traceback
 
@@ -265,6 +350,8 @@ class Scheduler:
                 call_type="agent_step",
             ),
         ):
+            if self._interrupt_event and self._interrupt_event.is_set():
+                raise InterruptedError("Interrupted during LLM call")
             if ev["kind"] == "reasoning":
                 output.reasoning += ev["token"]
                 await channel.chunk(transcript_id, "thinking", ev["token"])
@@ -322,6 +409,9 @@ class Scheduler:
         func_args: str = tc["function"]["arguments"]
         tool_call_id: str = tc["id"]
 
+        if self._interrupt_event and self._interrupt_event.is_set():
+            raise InterruptedError("Interrupted before tool execution")
+
         try:
             action = session._toolset.parse(func_name, func_args)
         except Exception as exc:
@@ -343,7 +433,8 @@ class Scheduler:
             output_parts: list[str] = []
             result_id = _uuid.uuid4().hex
             async for chunk_text in session._sandbox.stream_shell(
-                action.command, action.timeout_ms
+                action.command, action.timeout_ms,
+                interrupt_event=self._interrupt_event,
             ):
                 output_parts.append(chunk_text)
                 await channel.chunk(
@@ -432,6 +523,8 @@ class Scheduler:
         subtask_stream_id = _uuid.uuid4().hex
 
         for _ in range(max_steps):
+            if self._interrupt_event and self._interrupt_event.is_set():
+                break
             output = _LLMOutput()
 
             async for ev in parent_session.llm_client.think_stream(
@@ -443,6 +536,8 @@ class Scheduler:
                     call_type="subtask_step",
                 ),
             ):
+                if self._interrupt_event and self._interrupt_event.is_set():
+                    break
                 if ev["kind"] == "content":
                     output.content += ev["token"]
                     await channel.chunk(
@@ -494,6 +589,8 @@ class Scheduler:
 
             # 执行工具
             for tc in output.tool_calls:
+                if self._interrupt_event and self._interrupt_event.is_set():
+                    break
                 func_name = tc["function"]["name"]
                 func_args = tc["function"]["arguments"]
 
@@ -513,7 +610,8 @@ class Scheduler:
                     parts: list[str] = []
                     tr_id = _uuid.uuid4().hex
                     async for chunk_text in parent_session._sandbox.stream_shell(
-                        action.command, action.timeout_ms
+                        action.command, action.timeout_ms,
+                        interrupt_event=self._interrupt_event,
                     ):
                         parts.append(chunk_text)
                         await channel.chunk(

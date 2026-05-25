@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -79,21 +80,103 @@ class SandBox:
             parts.append(f"[exit code: {result.exit_code}]")
         return "\n".join(parts) if parts else "(no output)"
 
-    async def stream_shell(self, command: str, timeout_ms: int = 30000):
-        """流式执行 Shell 命令，yield 输出块。"""
+    async def stream_shell(
+        self, command: str, timeout_ms: int = 30000,
+        interrupt_event: asyncio.Event | None = None,
+    ):
+        """流式执行 Shell 命令，yield 输出块。
+
+        无 interrupt_event 时走同步路径（零线程开销）。
+        有 interrupt_event 时在后台线程运行终端 I/O，保持 event loop
+        空闲以响应中断。
+        """
         try:
             check_command_safety(command)
         except ValueError as exc:
             yield f"Error: {exc}"
             return
 
-        for chunk in self.terminal.run_stream(command, timeout_ms):
-            yield chunk
+        # ── 无中断需求：同步路径，零额外开销 ──────────
+        if interrupt_event is None:
+            for chunk in self.terminal.run_stream(command, timeout_ms):
+                yield chunk
+            return
 
-    async def terminal_chunks(self, command: str, timeout_ms: int = 30000):
-        """与 stream_shell 相同，命名更明确。"""
-        async for chunk in self.stream_shell(command, timeout_ms):
-            yield chunk
+        # ── 可中断路径：terminal 在 background task，外层 asyncio.wait 竞速 ──
+        loop = asyncio.get_event_loop()
+        chunk_queue: asyncio.Queue[str | None] = asyncio.Queue()
+        interrupted = asyncio.Event()
+
+        # 1. Write command synchronously (fast, no blocking)
+        marker, start_time = self.terminal.write_command(command)
+
+        # 2. Background task: read output in thread, feed chunks to queue
+        async def _read_task() -> None:
+            def _run() -> None:
+                try:
+                    for chunk in self.terminal.read_stream(marker, start_time, timeout_ms):
+                        loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
+                finally:
+                    loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
+            await loop.run_in_executor(None, _run)
+
+        read_task = asyncio.create_task(_read_task())
+
+        # 3. Fuse timeout + user interrupt into a single trigger
+        trigger = asyncio.Event()
+
+        async def _timeout_task() -> None:
+            await asyncio.sleep(timeout_ms / 1000.0)
+            trigger.set()
+
+        async def _user_intr_task() -> None:
+            await interrupt_event.wait()
+            trigger.set()
+
+        asyncio.create_task(_timeout_task())
+        asyncio.create_task(_user_intr_task())
+
+        # 4. Background task: on trigger, SIGINT, signal done
+        async def _interrupt_task() -> None:
+            await trigger.wait()
+            self.terminal.interrupt()
+            interrupted.set()
+
+        asyncio.create_task(_interrupt_task())
+
+        asyncio.create_task(_interrupt_task())
+
+        try:
+            while not interrupted.is_set():
+                # Race: next chunk vs interrupt signal
+                chunk_future = asyncio.ensure_future(chunk_queue.get())
+                intr_future = asyncio.ensure_future(interrupted.wait())
+                done, _ = await asyncio.wait(
+                    [chunk_future, intr_future],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                # Cancel the loser
+                if chunk_future in done:
+                    intr_future.cancel()
+                    chunk = chunk_future.result()
+                    if chunk is None:
+                        break
+                    yield chunk
+                else:
+                    chunk_future.cancel()
+            # Interrupted: drain remaining chunks
+            while True:
+                try:
+                    chunk = chunk_queue.get_nowait()
+                    if chunk is None:
+                        break
+                    yield chunk
+                except asyncio.QueueEmpty:
+                    break
+        finally:
+            if not read_task.done():
+                read_task.cancel()
+            await asyncio.gather(read_task, return_exceptions=True)
 
     # ── Read ──────────────────────────────────────────
 

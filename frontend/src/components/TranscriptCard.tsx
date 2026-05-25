@@ -106,27 +106,25 @@ function ThinkingBlock({
   const done = !active;
   const expanded = active || thinkingState.has(ss.id);
   return (
-    <div
-      data-fid={focusId}
-      className={`thinking-block${expanded ? " thinking-block--open" : ""}${done ? " thinking-block--done" : ""}`}
+    <CollapsibleCard
+      id={ss.id}
+      dataFid={focusId}
+      collapsed={!expanded}
+      onToggle={onToggle}
+      headerClickable={done}
+      cardClassName={`thinking-block${expanded ? " thinking-block--open" : ""}${done ? " thinking-block--done" : ""}`}
+      headerClassName="thinking-header"
+      title={
+        <>
+          <Icon name="bulb" size={14} className="thinking-bulb" />
+          <span className="thinking-label">thinking</span>
+        </>
+      }
     >
-      <div className="thinking-header" onClick={() => done && onToggle(ss.id)}>
-        <Icon name="bulb" size={14} className="thinking-bulb" />
-        <span className="thinking-label">thinking</span>
-        {done && (
-          <Icon
-            name={expanded ? "chevron-up" : "chevron-down"}
-            size={10}
-            className="thinking-chevron"
-          />
-        )}
+      <div className="thinking-body">
+        <Markdown text={ss.text} />
       </div>
-      {expanded && (
-        <div className="thinking-body">
-          <Markdown text={ss.text} />
-        </div>
-      )}
-    </div>
+    </CollapsibleCard>
   );
 }
 
@@ -413,7 +411,7 @@ export default function TranscriptCard({
     );
     return (
       <div className="transcript-card error-card">
-        <span className="transcript-label">{"\u26A0\uFE0F"} Error</span>
+        <span className="transcript-label"><Icon name="error" size={12} /> Error</span>
         <div className="transcript-body">{content}</div>
       </div>
     );
