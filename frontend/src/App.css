@@ -25,6 +25,7 @@
 /* ── Sidebar ──────────────────────────────────── */
 
 .sidebar {
+    position: relative;
     width: 260px;
     flex-shrink: 0;
     border-right: 1px solid #e0e0e0;
@@ -242,4 +243,341 @@
 }
 .sidebar-context-item--danger:hover {
     background: #fff0f0;
+}
+
+
+/* ── Commit badge pop ─────────────────────── */
+
+@keyframes badge-pop {
+    from { opacity: 0; transform: scale(0.85); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+/* ── Commit badge ─────────────────────────────── */
+
+.commit-badge {
+    animation: badge-pop 0.25s ease;
+    position: absolute;
+    left: calc(100% + 14px);
+    top: 0;
+    padding: 4px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+    font-family: ui-monospace, monospace;
+    font-size: 0.68rem;
+    color: #aaa;
+    cursor: default;
+    white-space: nowrap;
+    line-height: 1.4;
+    text-align: center;
+    box-shadow:
+        0 0 12px rgba(0, 0, 0, 0.06),
+        0 0 4px rgba(0, 0, 0, 0.04);
+    transition: all var(--anim-fast);
+}
+
+.commit-badge:hover {
+    color: #555;
+    padding-bottom: 6px;
+    box-shadow:
+        0 0 20px rgba(0, 0, 0, 0.12),
+        0 0 8px rgba(0, 0, 0, 0.08);
+}
+
+.commit-badge .commit-short-id {
+    display: block;
+}
+
+.lockable-btn {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #444;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s, text-shadow 0.15s;
+}
+
+.lockable-btn:hover {
+    color: #2563eb;
+    text-shadow:
+        0 0 6px rgba(37, 99, 235, 0.6),
+        0 0 14px rgba(96, 165, 250, 0.35),
+        0 0 24px rgba(147, 197, 253, 0.2);
+}
+
+/* badge-specific: hide/show animation */
+.commit-badge .lockable-btn {
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: all var(--anim-fast);
+}
+
+.commit-badge::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: 20px;
+}
+
+.commit-badge:hover .lockable-btn {
+    max-height: 18px;
+    opacity: 1;
+}
+
+
+.lockable-btn--confirm {
+    color: #c00 !important;
+}
+
+.lockable-btn--locked {
+    color: #ccc !important;
+    cursor: not-allowed;
+    user-select: none;
+}
+
+/* ── Commit graph toggle button ────────────────── */
+
+.commit-graph-toggle {
+    position: absolute;
+    left: 100%;
+    top: 0;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 0 8px 8px 0;
+    background: transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    padding: 0;
+    color: #999;
+    box-shadow:
+        0 0 6px rgba(0, 0, 0, 0.06),
+        0 0 2px rgba(0, 0, 0, 0.04);
+    transition: color 0.15s, box-shadow 0.15s;
+}
+
+.commit-graph-toggle:hover {
+    color: #555;
+    box-shadow:
+        0 0 10px rgba(0, 0, 0, 0.10),
+        0 0 4px rgba(0, 0, 0, 0.06);
+}
+
+
+/* ── Commit graph wrapper (hover detection) ──── */
+
+.commit-graph-wrapper {
+    position: fixed;
+    left: 260px;
+    top: 0;
+    z-index: 20;
+}
+
+
+.commit-graph-panel {
+    position: relative;
+    width: fit-content;
+    max-width: 460px;
+    max-height: 100vh;
+    transition: max-width 0.18s ease;
+    overflow: hidden;
+    border-right: 1px solid #e0e0e0;
+    border-bottom: 1px solid #e0e0e0;
+    border-radius: 0 0 8px 0;
+    background: #f8f8f8;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.commit-graph-panel--closed {
+    max-width: 0;
+    border-right: none;
+}
+
+.commit-graph-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 10px 12px;
+    border-bottom: 1px solid #e0e0e0;
+    flex-shrink: 0;
+}
+
+.commit-graph-title {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+
+
+.commit-graph-body {
+    width: 100%;
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+    scrollbar-width: none;
+}
+.commit-graph-body::-webkit-scrollbar {
+    display: none;
+}
+
+.commit-graph-status {
+    padding: 16px 12px;
+    font-size: 0.78rem;
+    color: #999;
+    text-align: center;
+}
+
+.commit-graph-status--error {
+    color: #c00;
+}
+
+.commit-graph-list {
+    display: flex;
+    flex-direction: column;
+    padding: 0 12px;
+    align-items: flex-end;
+}
+
+
+/* ── Commit node action buttons ──────────────── */
+
+.commit-node-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+    padding-top: 2px;
+    min-width: 52px;
+}
+
+.commit-node-actions--show {
+    opacity: 1;
+}
+
+.commit-node-actions .lockable-btn {
+    font-size: 0.6rem;
+}
+
+
+.commit-node--new {
+    animation: commit-grow 0.18s ease;
+}
+
+
+.commit-node--removing {
+    animation: commit-shrink 0.18s ease forwards;
+}
+
+@keyframes commit-shrink {
+    from {
+        max-height: 300px;
+        min-height: 0;
+        overflow: hidden;
+    }
+    to {
+        max-height: 0;
+        min-height: 0;
+        overflow: hidden;
+    }
+}
+
+@keyframes commit-grow {
+    from {
+        max-height: 0;
+        min-height: 0;
+        overflow: hidden;
+    }
+    to {
+        max-height: 300px;
+        min-height: 0;
+        overflow: hidden;
+    }
+}
+
+/* ── Commit node ───────────────────────────────── */
+
+.commit-node {
+    display: grid;
+    grid-template-columns: 52px 14px 170px;
+    gap: 10px;
+    min-height: 48px;
+}
+
+.commit-node-line {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 6px;
+}
+
+.commit-node-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #bbb;
+    flex-shrink: 0;
+}
+
+.commit-node-trail {
+    flex: 1;
+    width: 2px;
+    background: #ddd;
+    margin-top: 4px;
+}
+
+.commit-node-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 2px 6px 10px;
+    min-width: 0;
+    align-items: flex-end;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.1s;
+    flex: 1;
+}
+.commit-node-body:hover {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+.commit-node-sha {
+    font-family: ui-monospace, monospace;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #777;
+}
+
+.commit-node-msg {
+    font-size: 0.75rem;
+    color: #444;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 170px;
+    display: block;
+}
+
+.commit-node-time {
+    font-family: ui-monospace, monospace;
+    font-size: 0.65rem;
+    color: #aaa;
 }

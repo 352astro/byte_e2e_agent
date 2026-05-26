@@ -166,24 +166,29 @@ class Scheduler:
         assert session is not None and channel is not None
 
         try:
-            # ── 1. snapshot workspace on every user message ─
+            # ── 1. snapshot: first turn → before; every turn → after LLM ─
+            is_first = (
+                self._shadow_repo is not None
+                and len(self._shadow_repo.list_commits(session.session_id)) == 0
+            )
             user_id = _uuid.uuid4().hex
             commit_sha = ""
-            if self._shadow_repo is not None:
+            if is_first and self._shadow_repo is not None:
                 try:
-                    commit_sha = self._shadow_repo.snapshot(
-                        question, transcript_id=user_id
+                    self._shadow_repo.snapshot(
+                        session.session_id,
+                        "Initial workspace state",
+                        transcript_id="__init__",
                     )
                 except Exception:
-                    pass  # snapshot is best-effort, never block the agent
+                    pass
 
             # ── 2. save user question transcript ─────────
             user_msg = {"role": "user", "content": question}
             t = await channel.flush(
-                user_id, "user_question", user_msg, commit_sha=commit_sha
+                user_id, "user_question", user_msg, commit_sha=""
             )
-
-            session.add_transcript(t.kind, t.message, t.id, commit_sha=commit_sha)
+            session.add_transcript(t.kind, t.message, t.id, commit_sha="")
 
             for _ in range(max_steps):
                 # ── interrupt check ─────────────────
@@ -226,6 +231,24 @@ class Scheduler:
 
                 # ── finish_reason == "stop" → 结束 ────
                 if output.finish_reason == "stop":
+                    if self._shadow_repo is not None:
+                        try:
+                            sha = self._shadow_repo.snapshot(
+                                session.session_id, question, transcript_id=user_id
+                            )
+                            aid = _uuid.uuid4().hex
+                            t = await channel.flush(
+                                aid, "commit_attachment",
+                                {"target_tid": user_id, "commit_sha": sha},
+                            )
+                            session.add_transcript(t.kind, t.message, t.id)
+                            # Also set commit_sha on the user_question transcript in memory (reverse: most recent first)
+                            for ut in reversed(session._transcripts):
+                                if ut.id == user_id and ut.kind == "user_question":
+                                    ut.commit_sha = sha
+                                    break
+                        except Exception:
+                            pass
                     return
 
                 # ── 无 tool_calls → 错误 ──────────────
@@ -243,6 +266,36 @@ class Scheduler:
                         raise InterruptedError("Interrupted between tools")
                     await self._execute_one_tool(tc, session, channel)
 
+            # Max steps exhausted → snapshot before exit
+            if self._shadow_repo is not None:
+                try:
+                    sha = self._shadow_repo.snapshot(
+                        session.session_id, question, transcript_id=user_id
+                    )
+                    aid = _uuid.uuid4().hex
+                    t = await channel.flush(
+                        aid, "commit_attachment",
+                        {"target_tid": user_id, "commit_sha": sha},
+                    )
+                    session.add_transcript(t.kind, t.message, t.id)
+                    for ut in reversed(session._transcripts):
+                        if ut.id == user_id and ut.kind == "user_question":
+                            ut.commit_sha = sha
+                            break
+                except Exception:
+                    pass
+
+        except ToolMismatchError:
+            try:
+                await repair_unpaired_tools_async(session, channel)
+                err_id = _uuid.uuid4().hex
+                err_msg = {
+                    "message": "A tool call / result mismatch was detected. The conversation has been repaired. Please continue."
+                }
+                t = await channel.flush(err_id, "error", err_msg)
+                session.add_transcript(t.kind, t.message, t.id)
+            except Exception:
+                pass
         except InterruptedError:
             try:
                 # Fill unpaired tool_calls with error results
@@ -344,6 +397,10 @@ class Scheduler:
                     )
             elif ev["kind"] == "finish_reason":
                 output.finish_reason = ev["finish_reason"]
+
+        # Detect tool mismatch errors from the LLM
+        if output.content and "tool" in output.content.lower() and ("mismatch" in output.content.lower() or "not found" in output.content.lower()):
+            raise ToolMismatchError(output.content.strip())
 
         return output
 

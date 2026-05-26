@@ -139,6 +139,11 @@ class Project:
         agent = self._sessions.pop(session_id, None)
         if agent is not None:
             await clear(agent)
+        # Drop shadow branch (commits), keep workspace untouched
+        try:
+            self.shadow_repo.delete_branch(session_id)
+        except Exception:
+            pass
         session_dir = self._session_dir(session_id)
         if session_dir.is_dir():
             shutil.rmtree(session_dir)

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import Icon from "./Icon";
+import { useFocusedId } from "../hooks/FocusContext";
 
 interface CollapsibleCardProps {
   id: string;
@@ -34,13 +35,15 @@ export default function CollapsibleCard({
   headerClickable = true,
   hideChevron = false,
 }: CollapsibleCardProps) {
+  const focusedId = useFocusedId();
+  const isFocused = dataFid && focusedId === dataFid;
   const hasContent = Boolean(children);
   const hasHeader = Boolean(title);
   const showChevron = !hideChevron && hasContent && (hasHeader || standalone);
 
   return (
     <div
-      className={`tool-card${cardClassName ? ` ${cardClassName}` : ""}`}
+      className={`tool-card${cardClassName ? ` ${cardClassName}` : ""}${isFocused ? " card-latest" : ""}`}
       data-fid={dataFid}
     >
       {hasHeader && (

@@ -13,6 +13,8 @@ interface UseAgentStreamOptions {
     pendingNew: boolean;
     onSessionCreated?: (sid: string) => void;
     cache?: SessionCache;
+    scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
+    onCommit?: (targetTid: string, commitSha: string) => void;
 }
 
 interface UseAgentStreamReturn {
@@ -20,12 +22,13 @@ interface UseAgentStreamReturn {
     setQuestion: (q: string) => void;
     running: boolean;
     transcripts: DisplayTranscript[];
-    answer: string | null;
     handleRun: () => Promise<void>;
     prefillRef: React.MutableRefObject<string>;
     reloadTranscripts: () => void;
+    truncateTranscripts: (truncateTid: string) => void;
     handleInterrupt: () => Promise<void>;
     interrupting: boolean;
+    scrollToTranscript: (id: string) => void;
 }
 
 export default function useAgentStream({
@@ -33,11 +36,12 @@ export default function useAgentStream({
     pendingNew,
     onSessionCreated,
     cache = {},
+    scrollContainerRef,
+    onCommit,
 }: UseAgentStreamOptions): UseAgentStreamReturn {
     const [question, setQuestion] = useState("");
     const [running, setRunning] = useState(false);
     const [transcripts, setTranscripts] = useState<DisplayTranscript[]>([]);
-    const [answer, setAnswer] = useState<string | null>(null);
     const [interrupting, setInterrupting] = useState(false);
     const [currentSid, setCurrentSid] = useState<string | null>(sessionId);
 
@@ -48,13 +52,75 @@ export default function useAgentStream({
     const streamingSidRef = useRef<string | null>(null);
     const prefillRef = useRef<string>("");
 
+    // ── reload ─────────────────────────────────────
+
+    const reloadTranscripts = useCallback((): Promise<void> => {
+        if (!sessionId) return Promise.resolve();
+        const fetchFor = sessionId;
+        fetchForRef.current = fetchFor;
+        return fetch(`/api/session/${sessionId}/recover`)
+            .then((r) => r.json())
+            .then((data: RecoverResponse) => {
+                if (fetchForRef.current !== fetchFor) return;
+                const items: DisplayTranscript[] = (data.transcripts || []).map(
+                    (t: Transcript) => ({
+                        id: t.id,
+                        kind: t.kind,
+                        message: t.message,
+                        subStreams: [],
+                        activeSubStream: null,
+                        isFlushed: true,
+                        commitSha: t.commit_sha,
+                    }),
+                );
+                setTranscripts(items);
+                if (data.running) setRunning(true);
+                setInterrupting(false);
+                const lastAssistant = [...items]
+                    .reverse()
+                    .find((t) => t.kind === "assistant" && t.message.content);
+                lastIdRef.current = items.length
+                    ? items[items.length - 1].id
+                    : null;
+                cache[sessionId] = {
+                    transcripts: items,
+                    _complete: !data.running,
+                };
+            });
+    }, [sessionId, cache]);
+
+
+    const truncateTranscripts = useCallback((truncateTid: string) => {
+        if (!sessionId || !truncateTid) return;
+        setTranscripts((prev) => {
+            const idx = prev.findIndex((t) => t.id === truncateTid);
+            if (idx < 0) return prev;
+            const kept = prev.slice(0, idx);
+            const lastAssistant = [...kept]
+                .reverse()
+                .find((t) => t.kind === "assistant" && t.message.content);
+            const ans = lastAssistant
+                ? String(lastAssistant.message.content || "")
+                : null;
+            setRunning(false);
+            setInterrupting(false);
+            lastIdRef.current = kept.length
+                ? kept[kept.length - 1].id
+                : null;
+            cache[sessionId] = {
+                transcripts: kept,
+                _complete: true,
+            };
+            return kept;
+        });
+    }, [sessionId, cache]);
+
     // ── session switch: save & restore ────────────────
 
     useEffect(() => {
         if (currentSid && currentSid !== sessionId) {
             cache[currentSid] = {
                 transcripts,
-                answer,
                 _complete: !running,
             };
         }
@@ -70,7 +136,6 @@ export default function useAgentStream({
                 abortRef.current = null;
             }
             setTranscripts([]);
-            setAnswer(null);
             setInterrupting(false);
             lastIdRef.current = null;
             setCurrentSid(null);
@@ -90,7 +155,6 @@ export default function useAgentStream({
         const cached = cache[sessionId];
         if (cached && cached._complete) {
             setTranscripts(cached.transcripts || []);
-            setAnswer(cached.answer ?? null);
             lastIdRef.current = cached.transcripts?.length
                 ? cached.transcripts[cached.transcripts.length - 1].id
                 : null;
@@ -117,114 +181,27 @@ export default function useAgentStream({
 
         if (currentSid !== sessionId) {
             setTranscripts([]);
-            setAnswer(null);
         }
         setCurrentSid(sessionId);
 
-        const fetchFor = sessionId;
-        fetchForRef.current = fetchFor;
-
-        fetch(`/api/session/${sessionId}/recover`)
-            .then((r) => {
-                if (!r.ok) throw new Error(`Server returned ${r.status}`);
-                return r.json();
-            })
-            .then((data: RecoverResponse) => {
-                if (fetchForRef.current !== fetchFor) return;
-
-                const items: DisplayTranscript[] = (data.transcripts || []).map(
-                    (t: Transcript) => ({
-                        id: t.id,
-                        kind: t.kind,
-                        message: t.message,
-                        subStreams: [],
-                        activeSubStream: null,
-                        isFlushed: true,
-                        commitSha: t.commit_sha,
-                    }),
-                );
-
-                setTranscripts(items);
-                if (data.running) setRunning(true);
-                setInterrupting(false);
-
-                const lastAssistant = [...items]
-                    .reverse()
-                    .find((t) => t.kind === "assistant" && t.message.content);
-                const ans = lastAssistant
-                    ? String(lastAssistant.message.content || "")
-                    : null;
-                setAnswer(ans);
-
-                lastIdRef.current = items.length
-                    ? items[items.length - 1].id
-                    : null;
-
-                cache[sessionId] = {
-                    transcripts: items,
-                    answer: ans,
-                    _complete: !data.running,
-                };
-            })
-            .catch((err) => {
-                console.error("Failed to recover session", fetchFor, err);
-                if (fetchForRef.current === fetchFor) {
-                    setAnswer(
-                        `Failed to load session: ${err instanceof Error ? err.message : err}`,
-                    );
-                }
-            });
+        reloadTranscripts().catch((err) => {
+            console.error("Failed to recover session", sessionId, err);
+        });
     }, [sessionId, pendingNew]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // ── reload ─────────────────────────────────────
+    // ── scroll to transcript ──────────────────────
 
-    const reloadTranscripts = useCallback(() => {
-        if (!sessionId) return;
-        const fetchFor = sessionId;
-        fetchForRef.current = fetchFor;
-        fetch(`/api/session/${sessionId}/recover`)
-            .then((r) => r.json())
-            .then((data: RecoverResponse) => {
-                if (fetchForRef.current !== fetchFor) return;
-                const items: DisplayTranscript[] = (data.transcripts || []).map(
-                    (t: Transcript) => ({
-                        id: t.id,
-                        kind: t.kind,
-                        message: t.message,
-                        subStreams: [],
-                        activeSubStream: null,
-                        isFlushed: true,
-                        commitSha: t.commit_sha,
-                    }),
-                );
-                setTranscripts(items);
-                if (data.running) setRunning(true);
-                setInterrupting(false);
-                const lastAssistant = [...items]
-                    .reverse()
-                    .find(
-                        (t: any) => t.kind === "assistant" && t.message.content,
-                    );
-                setAnswer(
-                    lastAssistant
-                        ? String(lastAssistant.message.content || "")
-                        : null,
-                );
-                lastIdRef.current = items.length
-                    ? items[items.length - 1].id
-                    : null;
-                cache[sessionId] = {
-                    transcripts: items,
-                    answer: lastAssistant
-                        ? String(lastAssistant.message.content || "")
-                        : null,
-                    _complete: !data.running,
-                };
-            })
-            .catch((err) => {
-                console.error("Failed to reload session", fetchFor, err);
-            });
-    }, [sessionId, cache]);
+    const scrollToTranscript = useCallback(
+        (id: string) => {
+            const el = scrollContainerRef?.current;
+            if (!el) return;
+            const target = el.querySelector(`[data-transcript-id="${id}"]`);
+            if (target) {
+                target.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+        },
+        [scrollContainerRef],
+    );
 
     // ── interrupt ─────────────────────────────────
 
@@ -312,12 +289,31 @@ export default function useAgentStream({
                 });
             } else if (ev.event === "flush") {
                 const msg = ev.message || {};
+
+                // commit_attachment: update transcript + notify graph directly
+                if (ev.kind === "commit_attachment") {
+                    const targetTid = (msg as Record<string, unknown>)
+                        .target_tid as string | undefined;
+                    const commitSha = (msg as Record<string, unknown>)
+                        .commit_sha as string | undefined;
+                    if (targetTid && commitSha) {
+                        setTranscripts((prev) =>
+                            prev.map((item) =>
+                                item.id === targetTid
+                                    ? { ...item, commitSha }
+                                    : item,
+                            ),
+                        );
+                        onCommit?.(targetTid, commitSha);
+                    }
+                    return;
+                }
+
                 if (
                     ev.kind === "assistant" &&
                     msg.content &&
                     !(msg as Record<string, unknown>).tool_calls
                 ) {
-                    setAnswer(String(msg.content));
                 }
 
                 // 后端 StreamChannel 内部 Transcript 已等效拼接，
@@ -357,7 +353,6 @@ export default function useAgentStream({
 
         setRunning(true);
         setInterrupting(false);
-        setAnswer(null);
         setQuestion("");
 
         let sid = currentSid;
@@ -372,15 +367,11 @@ export default function useAgentStream({
                 streamingSidRef.current = sid;
                 if (onSessionCreated) onSessionCreated(sid);
             } catch (err) {
-                setAnswer(
-                    `Failed to create session: ${err instanceof Error ? err.message : err}`,
-                );
                 setRunning(false);
                 return;
             }
         }
         if (!sid) {
-            setAnswer("No session selected.");
             setRunning(false);
             return;
         }
@@ -433,9 +424,6 @@ export default function useAgentStream({
         } catch (err) {
             if (err instanceof DOMException && err.name === "AbortError")
                 return;
-            setAnswer(
-                `Connection error: ${err instanceof Error ? err.message : err}`,
-            );
         } finally {
             if (abortRef.current === controller) abortRef.current = null;
             streamingSidRef.current = null;
@@ -475,10 +463,11 @@ export default function useAgentStream({
         running,
         interrupting,
         transcripts,
-        answer,
         handleRun,
         prefillRef,
         reloadTranscripts,
+        truncateTranscripts,
         handleInterrupt,
+        scrollToTranscript,
     };
 }

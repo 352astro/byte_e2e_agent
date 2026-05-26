@@ -23,6 +23,7 @@ TranscriptKind = Literal[
     "permission_request",
     "permission_response",
     "error",
+    "commit_attachment",
 ]
 
 

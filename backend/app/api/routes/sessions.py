@@ -9,6 +9,9 @@ router = APIRouter(prefix="/api")
 
 class CheckoutRequest(BaseModel):
     commit_sha: str
+    keep: bool = False
+    truncate_tid: str | None = None
+    keep_tid: bool = False
 
 
 @router.post("/session")
@@ -69,7 +72,7 @@ async def list_commits(sid: str, project: Project = Depends(get_project)):
         project.get_session(sid)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
-    return {"commits": project.shadow_repo.list_commits()}
+    return {"commits": project.shadow_repo.list_commits(sid)}
 
 
 @router.get("/session/{sid}/commits/{sha}")
@@ -102,14 +105,25 @@ async def checkout_commit(
         raise HTTPException(
             status_code=404, detail=f"Commit not found: {req.commit_sha}"
         )
-    # Capture user question text before truncation
+    # Capture user question text (for restore prefill)
     user_content = ""
-    for t in session._transcripts:
-        if t.commit_sha == req.commit_sha and t.kind == "user_question":
-            user_content = t.message.get("content", "")
-            break
-    # Truncate transcripts from this commit onward
-    removed = session.truncate_transcripts_from(req.commit_sha)
+    if req.truncate_tid:
+        for t in session._transcripts:
+            if t.id == req.truncate_tid and t.kind == "user_question":
+                user_content = t.message.get("content", "")
+                break
+    # Truncate transcripts
+    removed = session.truncate_transcripts_by_tid(
+        req.truncate_tid or "", keep=req.keep_tid
+    )
+    # Both regret and restore use set_head: HEAD → checkout sha,
+    # dropping everything after it. The difference is which sha:
+    #   regret → parent sha (keep parent, drop this and later)
+    #   restore → self sha  (keep self,  drop later only)
+    try:
+        project.shadow_repo.set_head(sid, req.commit_sha)
+    except Exception:
+        pass
     return {
         "ok": True,
         "commit_sha": req.commit_sha,

@@ -3,6 +3,7 @@ import Markdown from "./Markdown";
 import Icon from "./Icon";
 import CollapsibleCard from "./CollapsibleCard";
 import ToolResult from "./ToolResult";
+import { useFocusedId } from "../hooks/FocusContext";
 import { TranscriptKind, ChunkKind } from "../constants";
 import type { DisplayTranscript, SubStream } from "../types";
 
@@ -351,6 +352,7 @@ export default function TranscriptCard({
   transcript: t,
   hideToolCards = false,
 }: TranscriptCardProps) {
+  const focusedId = useFocusedId();
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(
     new Set(),
   );
@@ -469,7 +471,11 @@ export default function TranscriptCard({
             })}
           </span>
         ) : (
-          <div key={`${ss.id}-${i}`} className="transcript-body" data-fid={fid}>
+          <div
+            key={`${ss.id}-${i}`}
+            className={`transcript-body${focusedId === fid ? " card-latest" : ""}`}
+            data-fid={fid}
+          >
             <Markdown text={ss.text} />
           </div>
         );

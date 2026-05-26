@@ -44,7 +44,6 @@
     background: #fff;
 }
 
-
 .agent-input-bar-inner {
     max-width: 860px;
     width: 100%;
@@ -163,6 +162,8 @@
 .transcript-body {
     color: #2a2a2a;
     padding-right: 10px;
+    overflow-wrap: break-word;
+    word-break: break-word;
 }
 
 /* Tool result — monospace block */
@@ -699,6 +700,9 @@
 
 .tool-file-md {
     padding: 8px 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 /* ── Default tool ───────────────────────────── */
@@ -1104,7 +1108,7 @@
     display: block;
 }
 
-.commit-badge .commit-restore {
+.commit-badge .commit-action {
     display: flex;
     align-items: center;
     gap: 3px;
@@ -1127,13 +1131,17 @@
     height: 20px;
 }
 
-.commit-badge:hover .commit-restore {
+.commit-badge:hover .commit-action {
     max-height: 18px;
     opacity: 1;
 }
 
-.commit-badge:hover .commit-restore:hover {
-    color: #000;
+.commit-badge:hover .commit-action:hover {
+    color: #2563eb;
+    text-shadow:
+        0 0 6px rgba(37, 99, 235, 0.6),
+        0 0 14px rgba(96, 165, 250, 0.35),
+        0 0 24px rgba(147, 197, 253, 0.2);
 }
 
 /* ── Prefill card (pops above send bar) ─────── */
@@ -1170,15 +1178,13 @@
     line-height: 1.4;
     color: #666;
     background: #fff;
-    box-shadow: 0 -2px 12px rgba(0,0,0,0.06);
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
 }
 
 .agent-prefill-textarea:focus {
     border-color: #888;
-    box-shadow: 0 -4px 16px rgba(0,0,0,0.10);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.1);
 }
-
-
 
 .agent-prefill-close {
     width: 28px;
@@ -1201,9 +1207,8 @@
     background: #e8e8e8;
 }
 
-/* ── Commit restore confirm (red) ───────────── */
+/* ── Commit action confirm (red) ────────────── */
 
-.commit-restore--confirm {
+.commit-action--confirm {
     color: #c00 !important;
 }
-

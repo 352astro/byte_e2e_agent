@@ -16,8 +16,6 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-from app.core.config import TMP_DIR
-
 from dulwich.diff import write_object_diff
 from dulwich.diff_tree import tree_changes
 from dulwich.ignore import IgnoreFilter, IgnoreFilterManager, get_xdg_config_home_path
@@ -26,6 +24,8 @@ from dulwich.objects import Blob, Commit, Tree
 from dulwich.repo import Repo
 from dulwich.walk import Walker
 
+from app.core.config import TMP_DIR
+
 # ── helpers ──────────────────────────────────────────────
 
 
@@ -33,7 +33,9 @@ def _ensure_dir(p: str) -> None:
     Path(p).mkdir(parents=True, exist_ok=True)
 
 
-def _walk_tree(store, tree_id: bytes, prefix: bytes = b"") -> list[tuple[bytes, int, bytes]]:
+def _walk_tree(
+    store, tree_id: bytes, prefix: bytes = b""
+) -> list[tuple[bytes, int, bytes]]:
     """Recursively collect all file entries from a tree, skipping directories."""
     import stat
 
@@ -58,7 +60,9 @@ class ShadowRepo:
     repodir  = path to bare repo, e.g. "<workdir>/<TMP_DIR>/.shadow-vcs"
     """
 
-    MAIN_REF = b"refs/heads/main"
+    @staticmethod
+    def _branch_ref(session_id: str) -> bytes:
+        return f"refs/heads/{session_id}".encode()
     MAP_FILE = "transcript_map.json"
 
     def __init__(self, workdir: str, repodir: str) -> None:
@@ -95,7 +99,7 @@ class ShadowRepo:
 
     # ── public API ───────────────────────────────────────
 
-    def snapshot(self, message: str, transcript_id: str) -> str:
+    def snapshot(self, session_id: str, message: str, transcript_id: str) -> str:
         """Take a snapshot of the current workspace.
 
         Returns the full 40-char commit sha hex string.
@@ -154,12 +158,15 @@ class ShadowRepo:
         c.author_timezone = c.commit_timezone = 0
         c.message = msg.encode()
 
-        parent = self._repo.refs.read_ref(self.MAIN_REF)
+        try:
+            parent = self._repo.refs.read_ref(self._branch_ref(session_id))
+        except KeyError:
+            parent = None
         if parent:
             c.parents = [parent]
 
         self._repo.object_store.add_object(c)
-        self._repo.refs[self.MAIN_REF] = c.id
+        self._repo.refs[self._branch_ref(session_id)] = c.id
 
         sha = c.id.decode()
         self._update_transcript_map(transcript_id, sha)
@@ -235,17 +242,17 @@ class ShadowRepo:
         self._idx = Index(self._index_path)
         for name, mode, sha in entries:
             blob = self._repo.object_store[sha]
-            self._idx[name] = IndexEntry(
-                0, 0, 0, 0, mode, 0, 0, len(blob.data), sha
-            )
+            self._idx[name] = IndexEntry(0, 0, 0, 0, mode, 0, 0, len(blob.data), sha)
         self._idx.write()
 
-    def list_commits(self) -> list[dict[str, Any]]:
+    def list_commits(self, session_id: str) -> list[dict[str, Any]]:
         """Walk parent chain from HEAD, return commit metadata list."""
         result: list[dict[str, Any]] = []
         try:
-            head = self._repo.refs.read_ref(self.MAIN_REF)
+            head = self._repo.refs.read_ref(self._branch_ref(session_id))
         except KeyError:
+            return result
+        if head is None:
             return result
 
         for entry in Walker(self._repo.object_store, head):
@@ -297,6 +304,49 @@ class ShadowRepo:
             parts.append(buf.getvalue().decode())
         return "\n".join(parts)
 
+    def soft_reset(self, session_id: str, commit_sha: str) -> str:
+        """Reset HEAD to the parent of commit_sha, keeping the working tree unchanged.
+
+        Similar to ``git reset --soft HEAD~1`` — the commit is discarded but
+        all file changes remain in the workspace.
+
+        Returns the new HEAD sha (the parent commit).
+        """
+        c = self._get_commit(commit_sha)
+        if not c.parents:
+            raise ValueError("Commit has no parent; cannot soft reset")
+        parent_sha_bytes = c.parents[0]
+        parent_sha = parent_sha_bytes.decode()
+
+        # Move HEAD to parent
+        self._repo.refs[self._branch_ref(session_id)] = parent_sha_bytes
+
+        # Remove stale transcript mapping
+        self._remove_from_transcript_map(commit_sha)
+
+        return parent_sha
+
+    def set_head(self, session_id: str, commit_sha: str) -> None:
+        """Point HEAD directly to commit_sha, discarding any later commits."""
+        self._get_commit(commit_sha)
+        self._repo.refs[self._branch_ref(session_id)] = commit_sha.encode()
+
+    def delete_branch(self, session_id: str) -> None:
+        branch = self._branch_ref(session_id)
+        try:
+            head = self._repo.refs.read_ref(branch)
+        except KeyError:
+            return
+        if head is None:
+            return
+        for entry in Walker(self._repo.object_store, head):
+            sha = entry.commit.id.decode()
+            self._remove_from_transcript_map(sha)
+        try:
+            del self._repo.refs[branch]
+        except KeyError:
+            pass
+
     def commit_for_transcript(self, transcript_id: str) -> str | None:
         """O(1) lookup: transcript_id → commit_sha."""
         if self._transcript_map is None:
@@ -328,14 +378,19 @@ class ShadowRepo:
                     tmap = json.load(f)
             except (json.JSONDecodeError, OSError):
                 pass
-        # rebuild from commit trail
+        # rebuild from all branches
         try:
-            head = self._repo.refs.read_ref(self.MAIN_REF)
-            for entry in Walker(self._repo.object_store, head):
-                c = entry.commit
-                tid = self._extract_transcript_id(c)
-                if tid:
-                    tmap.setdefault(tid, c.id.decode())
+            for ref in self._repo.refs.keys():
+                if not ref.startswith(b'refs/heads/'):
+                    continue
+                head = self._repo.refs.read_ref(ref)
+                if head is None:
+                    continue
+                for entry in Walker(self._repo.object_store, head):
+                    c = entry.commit
+                    tid = self._extract_transcript_id(c)
+                    if tid:
+                        tmap.setdefault(tid, c.id.decode())
         except KeyError:
             pass
         self._transcript_map = tmap
@@ -345,6 +400,22 @@ class ShadowRepo:
             self._load_transcript_map()
         assert self._transcript_map is not None
         self._transcript_map[transcript_id] = sha
+        self._write_transcript_map()
+
+    def _remove_from_transcript_map(self, commit_sha: str) -> None:
+        """Remove all transcript entries pointing to the given commit."""
+        if self._transcript_map is None:
+            self._load_transcript_map()
+        assert self._transcript_map is not None
+        to_remove = [
+            tid for tid, sha in self._transcript_map.items() if sha == commit_sha
+        ]
+        for tid in to_remove:
+            del self._transcript_map[tid]
+        if to_remove:
+            self._write_transcript_map()
+
+    def _write_transcript_map(self) -> None:
         map_path = os.path.join(self._repodir, self.MAP_FILE)
         try:
             with open(map_path, "w") as f:

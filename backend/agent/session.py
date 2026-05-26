@@ -99,10 +99,35 @@ class Session:
 
     def replace_transcripts(self, transcripts: list[Transcript]) -> None:
         """替换 transcript 列表，并同步重建 LLM 消息缓存。"""
-        self._transcripts = _normalize_transcript_order(transcripts)
+        self._transcripts = transcripts
         self._messages = _build_llm_messages(
             self._transcripts, self._transcript_to_message
         )
+
+    def truncate_transcripts_by_tid(self, tid: str, keep: bool = False) -> int:
+        """Truncate transcripts by transcript id.
+        keep=False → remove tid and everything after (regret/replay).
+        keep=True  → keep tid, remove everything after (restore).
+        """
+        cutoff = -1
+        for i, t in enumerate(self._transcripts):
+            if t.id == tid:
+                cutoff = i
+                break
+        if cutoff < 0:
+            return 0
+        if keep:
+            cutoff += 1
+        if cutoff >= len(self._transcripts):
+            return 0
+        kept = self._transcripts[:cutoff]
+        removed_count = len(self._transcripts) - cutoff
+        self._transcripts = kept
+        self._messages = _build_llm_messages(kept, self._transcript_to_message)
+        _rewrite_messages_file(
+            self._sandbox.workspace, self.session_id, kept
+        )
+        return removed_count
 
     def truncate_transcripts_from(self, commit_sha: str) -> int:
         """删除匹配 commit_sha 的 transcript 及其后所有 transcript。
@@ -184,7 +209,11 @@ def load_session(
     if not messages_path.exists():
         return session
 
-    session.replace_transcripts(_load_transcripts(messages_path))
+    raw = _load_transcripts(messages_path)
+    cleaned = _merge_commit_attachments(_normalize_transcript_order(raw))
+    session.replace_transcripts(cleaned)
+    # Persist the cleaned list (commit_attachment entries discarded)
+    _rewrite_messages_file(workspace, session_id, cleaned)
     # Repair any unpaired tool_calls from interrupted sessions
     from agent.interrupt import repair_unpaired_tools
     repair_unpaired_tools(session)
@@ -355,6 +384,29 @@ def _has_open_tool_call(transcripts: list[Transcript], tool_call_id: str) -> boo
         }
         return tool_call_id in call_ids and tool_call_id not in answered
     return False
+
+
+def _merge_commit_attachments(
+    transcripts: list[Transcript],
+) -> list[Transcript]:
+    """Fold commit_attachment entries into their target user_question transcripts."""
+    # Build a lookup: transcript_id → commit_sha from commit_attachment entries
+    attachments: dict[str, str] = {}
+    others: list[Transcript] = []
+    for t in transcripts:
+        if t.kind == "commit_attachment":
+            tid = t.message.get("target_tid", "")
+            sha = t.message.get("commit_sha", "")
+            if tid and sha:
+                attachments[tid] = sha
+        else:
+            others.append(t)
+    # Apply to user_question transcripts
+    for t in others:
+        if t.kind == "user_question" and t.id in attachments:
+            t.commit_sha = attachments[t.id]
+            t.message["commit_sha"] = attachments[t.id]
+    return others
 
 
 def _build_llm_messages(

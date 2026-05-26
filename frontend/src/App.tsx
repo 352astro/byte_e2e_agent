@@ -4,7 +4,6 @@ import SessionSidebar from "./components/SessionSidebar";
 import type { SessionCache } from "./types";
 import "./App.css";
 
-// Per-session state cache (survives component switches without remounting)
 const sessionCache: SessionCache = {};
 
 export default function App() {
@@ -23,7 +22,6 @@ export default function App() {
     setPendingNew(true);
   }, []);
 
-  // Called when a session is deleted — if it was the active one, reset
   const handleDelete = useCallback(
     (sid: string) => {
       if (sessionId === sid) {
@@ -34,7 +32,6 @@ export default function App() {
     [sessionId],
   );
 
-  // Called when a new session is lazy-created (first message sent in "New Session" mode)
   const handleSessionCreated = useCallback((sid: string) => {
     setSessionId(sid);
     setPendingNew(false);

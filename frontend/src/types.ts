@@ -78,7 +78,6 @@ export interface SessionInfo {
 
 export interface CacheEntry {
     transcripts: DisplayTranscript[];
-    answer: string | null;
     _complete?: boolean;
 }
 
@@ -105,6 +104,7 @@ export interface CommitListResponse {
 
 export interface CheckoutRequest {
     commit_sha: string;
+    keep?: boolean;
 }
 
 export interface CheckoutResponse {

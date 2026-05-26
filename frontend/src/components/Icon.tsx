@@ -7,6 +7,8 @@ export type IconName =
   | "chevron-up"
   | "chevron-down"
   | "dots-vertical"
+  | "replay"
+  | "git-graph"
   | "restore"
   | "tool"
   | "error"
@@ -27,6 +29,12 @@ const paths: Record<IconName, SVGProps<SVGPathElement>> = {
   },
   error: {
     d: "M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01",
+  },
+  replay: {
+    d: "M3 12a9 9 0 0 1 9-9 9 9 0 0 1 6.4 2.6M21 12a9 9 0 0 1-9 9 9 9 0 0 1-6.4-2.6M21 5v4h-4M3 19v-4h4",
+  },
+  "git-graph": {
+    d: "M5 3v18M5 7a2 2 0 0 1 2-2h10M5 12a2 2 0 0 1 2 2h10M5 17v0",
   },
   restore: {
     d: "M3 10h10a5 5 0 0 1 0 10H8M3 10l4-4M3 10l4 4",
