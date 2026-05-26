@@ -76,9 +76,6 @@ export default function useAgentStream({
                 setTranscripts(items);
                 if (data.running) setRunning(true);
                 setInterrupting(false);
-                const lastAssistant = [...items]
-                    .reverse()
-                    .find((t) => t.kind === "assistant" && t.message.content);
                 lastIdRef.current = items.length
                     ? items[items.length - 1].id
                     : null;
@@ -89,31 +86,33 @@ export default function useAgentStream({
             });
     }, [sessionId, cache]);
 
-
-    const truncateTranscripts = useCallback((truncateTid: string) => {
-        if (!sessionId || !truncateTid) return;
-        setTranscripts((prev) => {
-            const idx = prev.findIndex((t) => t.id === truncateTid);
-            if (idx < 0) return prev;
-            const kept = prev.slice(0, idx);
-            const lastAssistant = [...kept]
-                .reverse()
-                .find((t) => t.kind === "assistant" && t.message.content);
-            const ans = lastAssistant
-                ? String(lastAssistant.message.content || "")
-                : null;
-            setRunning(false);
-            setInterrupting(false);
-            lastIdRef.current = kept.length
-                ? kept[kept.length - 1].id
-                : null;
-            cache[sessionId] = {
-                transcripts: kept,
-                _complete: true,
-            };
-            return kept;
-        });
-    }, [sessionId, cache]);
+    const truncateTranscripts = useCallback(
+        (truncateTid: string) => {
+            if (!sessionId || !truncateTid) return;
+            setTranscripts((prev) => {
+                const idx = prev.findIndex((t) => t.id === truncateTid);
+                if (idx < 0) return prev;
+                const kept = prev.slice(0, idx);
+                const lastAssistant = [...kept]
+                    .reverse()
+                    .find((t) => t.kind === "assistant" && t.message.content);
+                const ans = lastAssistant
+                    ? String(lastAssistant.message.content || "")
+                    : null;
+                setRunning(false);
+                setInterrupting(false);
+                lastIdRef.current = kept.length
+                    ? kept[kept.length - 1].id
+                    : null;
+                cache[sessionId] = {
+                    transcripts: kept,
+                    _complete: true,
+                };
+                return kept;
+            });
+        },
+        [sessionId, cache],
+    );
 
     // ── session switch: save & restore ────────────────
 
@@ -340,6 +339,64 @@ export default function useAgentStream({
         },
         [upsertTranscript],
     );
+
+    // ── auto-reconnect live stream after refresh ────
+    //
+    // /stream 本身就会回放 buffered + completed + 实时，
+    // 不需要事先调 /recover，避免同一份 buffered 被传输两次。
+
+    useEffect(() => {
+        if (!sessionId) return;
+        if (!running) return;
+        // Don't double-connect if handleRun already owns the stream
+        if (streamingSidRef.current === sessionId) return;
+
+        streamingSidRef.current = sessionId;
+        const controller = new AbortController();
+
+        (async () => {
+            try {
+                const res = await fetch(`/api/session/${sessionId}/stream`, {
+                    signal: controller.signal,
+                });
+                if (!res.ok) return;
+
+                const reader = res.body!.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const parts = buffer.split("\n\n");
+                    buffer = parts.pop()!;
+                    for (const part of parts) {
+                        const line = part.trim();
+                        if (!line.startsWith("data: ")) continue;
+                        try {
+                            const event = JSON.parse(
+                                line.slice(6),
+                            ) as StreamEvent;
+                            dispatchStreamEvent(event);
+                        } catch {
+                            // ignore malformed
+                        }
+                    }
+                }
+            } catch (err) {
+                if (err instanceof DOMException && err.name === "AbortError")
+                    return;
+            } finally {
+                if (streamingSidRef.current === sessionId) {
+                    streamingSidRef.current = null;
+                }
+                setRunning(false);
+            }
+        })();
+
+        return () => controller.abort();
+    }, [sessionId, running, dispatchStreamEvent]);
 
     // ── run ──────────────────────────────────────────
 

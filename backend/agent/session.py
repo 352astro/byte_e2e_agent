@@ -194,6 +194,11 @@ class Session:
                 "tool_call_id": message.get("tool_call_id", ""),
                 "content": message.get("result", message.get("content", "")),
             }
+        if transcript.kind == "error":
+            return {
+                "role": "system",
+                "content": message.get("message", ""),
+            }
         return None
 
 

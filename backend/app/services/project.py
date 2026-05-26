@@ -19,7 +19,7 @@ from agent.sandbox import SandBox
 from agent.scheduler import Scheduler
 from agent.session import Session, clear, get_history, load_session
 from agent.shadow_repo import ShadowRepo
-from agent.transcript import StreamTranscriptCompletion
+from agent.transcript import TranscriptStream
 from app.core.config import TMP_DIR
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -27,14 +27,14 @@ _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 @dataclass
 class ActiveStream:
-    channel: StreamTranscriptCompletion
+    channel: TranscriptStream
     queue: Any
 
 
 @dataclass
 class SessionStream:
     session: Session
-    channel: StreamTranscriptCompletion | None
+    channel: TranscriptStream | None
 
 
 class Project:
@@ -154,11 +154,14 @@ class Project:
         self, session_id: str, question: str, max_steps: int
     ) -> ActiveStream:
         session = self.get_session(session_id)
-        channel = StreamTranscriptCompletion()
+        channel = TranscriptStream()
         queue = channel.subscribe()
         try:
             self.scheduler.start(
-                session, question, channel=channel, max_steps=max_steps,
+                session,
+                question,
+                channel=channel,
+                max_steps=max_steps,
                 shadow_repo=self.shadow_repo,
             )
         except RuntimeError:
@@ -179,7 +182,6 @@ class Project:
         is_running = scheduler.is_running_session(session_id)
         return {
             "transcripts": session.get_transcripts(),
-            "buffered": channel.get_buffered() if (is_running and channel) else {},
             "running": is_running,
         }
 

@@ -64,14 +64,17 @@ async def stream_events(sid: str, project: Project = Depends(get_project)):
 
         q = channel.subscribe()
         try:
-            for tid, text in channel.get_buffered().items():
-                yield sse_line(
-                    {
-                        "event": "chunk",
-                        "transcript_id": tid,
-                        "text": text,
-                    }
-                )
+            for tid, sub_streams in channel.get_buffered().items():
+                for ss in sub_streams:
+                    yield sse_line(
+                        {
+                            "event": "chunk",
+                            "transcript_id": tid,
+                            "id": ss["id"],
+                            "kind": ss["kind"],
+                            "text": ss["text"],
+                        }
+                    )
             for line in yield_transcripts_as_flush(session):
                 yield line
             while True:

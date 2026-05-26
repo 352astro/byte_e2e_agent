@@ -3,6 +3,9 @@ should produce correctly paired transcripts and SSE repair events.
 
 Requires: pytest, pytest-asyncio
   pip install pytest pytest-asyncio
+
+Set LLM_API_KEY (and optionally LLM_MODEL_ID / LLM_BASE_URL) in .env
+to enable the real-LLM integration test.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ from agent.scheduler import Scheduler
 from agent.session import Session
 from agent.tools.shell import Shell
 from agent.tools.toolset import ToolSet
-from agent.transcript import StreamTranscriptCompletion, Transcript
+from agent.transcript import Transcript, TranscriptStream
 
 # ── Number of tool_calls the mock LLM will return ──────
 NUM_TOOL_CALLS = 10
@@ -139,7 +142,7 @@ async def test_interrupt_repairs_unpaired_tool_calls():
             )
 
     # ── SSE subscriber ──────────────────────────────────
-    channel = StreamTranscriptCompletion()
+    channel = TranscriptStream()
     q = channel.subscribe()
     sse_events: list = []
 
@@ -359,3 +362,129 @@ async def test_repair_transcripts_fills_unpaired():
     assert new.kind == "tool_result"
     assert new.message["tool_call_id"] == "tc_2"
     assert "interrupted before" in new.message["result"]
+
+
+# ============================================================
+# Real-LLM integration test
+# ============================================================
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_real_llm_transcript_stream_integrity():
+    """Use the real LLM to call Shell and verify TranscriptStream output.
+
+    The prompt explicitly instructs the model to call Shell with
+    'echo hello'.  We then check that:
+      - the assistant transcript contains a well-formed tool_call
+      - the message fields (role, tool_calls[0].id, function.name,
+        function.arguments) are populated
+      - SSE chunk events carry matching kind / id / text
+      - flush payload sub_streams cover every chunk that was sent
+    """
+    import os
+
+    if not os.getenv("LLM_API_KEY"):
+        pytest.skip("LLM_API_KEY not configured")
+
+    from agent.llm import HelloAgentsLLM
+
+    llm = HelloAgentsLLM()
+    toolset = ToolSet([Shell])
+
+    mock_sandbox = _build_mock_sandbox(
+        signal_test=asyncio.Event(),
+        signal_continue=asyncio.Event(),
+        tool_count=[0],
+        release_after=999,  # never block
+    )
+
+    with patch("agent.session._save_transcript_sync", MagicMock()):
+        with patch("agent.session._rewrite_messages_file", MagicMock()):
+            session = Session(
+                llm_client=llm,
+                toolset=toolset,
+                sandbox=mock_sandbox,
+                session_id="test-real-llm",
+            )
+
+    channel = TranscriptStream()
+    q = channel.subscribe()
+    sse_events: list = []
+
+    async def _drain():
+        while True:
+            ev = await q.get()
+            if ev is None:
+                return
+            sse_events.append(ev)
+
+    drainer = asyncio.create_task(_drain())
+
+    scheduler = Scheduler()
+    scheduler.start(
+        session,
+        'Call the Shell tool with command "echo hello" and timeout 5000.',
+        channel=channel,
+        max_steps=2,
+    )
+
+    # Wait for completion
+    task = scheduler._loop_task
+    if task is not None:
+        try:
+            await asyncio.wait_for(task, timeout=30.0)
+        except Exception:
+            pass
+
+    channel.close()
+    await drainer
+
+    # ── Assertions ──────────────────────────────────
+    transcripts: list[Transcript] = session._transcripts
+
+    # 1. Should have at least user_question + assistant + tool_result
+    kinds = [t.kind for t in transcripts]
+    assert "user_question" in kinds
+    assert "assistant" in kinds
+    assert "tool_result" in kinds
+
+    # 2. Assistant transcript has proper tool_calls
+    assistant = next(t for t in transcripts if t.kind == "assistant")
+    msg = assistant.message
+    assert msg.get("role") == "assistant"
+    tcs = msg.get("tool_calls")
+    assert isinstance(tcs, list) and len(tcs) >= 1
+    tc0 = tcs[0]
+    assert tc0["type"] == "function"
+    assert tc0["id"] != ""
+    assert tc0["function"]["name"] == "Shell"
+    assert "echo" in tc0["function"]["arguments"]
+
+    # 3. Tool result is paired
+    result = next(t for t in transcripts if t.kind == "tool_result")
+    assert result.message.get("tool_call_id") == tc0["id"]
+    assert result.message.get("tool_name") == "Shell"
+
+    # 4. SSE flush events carry complete sub_streams
+    flush_events = [e for e in sse_events if e.name == "flush"]
+    assistant_flush = next(
+        e for e in flush_events if e.payload.get("kind") == "assistant"
+    )
+    flush_msg = assistant_flush.payload.get("message", {})
+    assert flush_msg.get("role") == "assistant"
+    assert flush_msg.get("tool_calls") == tcs
+
+    # 5. Chunk events cover all sub_stream kinds seen in flush
+    chunk_kinds = {
+        e.payload["kind"]
+        for e in sse_events
+        if e.name == "chunk" and e.payload.get("transcript_id") == assistant.id
+    }
+    flush_ss_kinds = {s["kind"] for s in assistant_flush.payload.get("sub_streams", [])}
+    # Every chunk kind should appear in flush sub_streams
+    for ck in chunk_kinds:
+        assert ck in flush_ss_kinds, f"Chunk kind '{ck}' missing from flush sub_streams"
+
+    # 6. get_buffered is empty after flush
+    assert channel.get_buffered() == {}

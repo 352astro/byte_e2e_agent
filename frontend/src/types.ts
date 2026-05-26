@@ -9,7 +9,6 @@ export interface Transcript {
 
 export interface RecoverResponse {
     transcripts: Transcript[];
-    buffered: Record<string, string>;
     running: boolean;
 }
 
@@ -82,7 +81,6 @@ export interface CacheEntry {
 }
 
 export type SessionCache = Record<string, CacheEntry>;
-
 
 // ── Shadow commit ────────────────────────────────────────
 

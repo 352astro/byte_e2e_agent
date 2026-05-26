@@ -1,16 +1,14 @@
 """Scheduler — 单例执行调度器。
 
 一个 Project 只有一个 Scheduler，一次只运行一个 Session。
-每次 start() 创建新的 StreamTranscriptCompletion（per-session 临时通道）。
+每次 start() 创建新的 TranscriptStream（per-session 临时通道）。
 Transcript 持久化存储在 Session 中。
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid as _uuid
-from dataclasses import dataclass, field
 
 from agent.errors import InterruptedError, ToolMismatchError, repair_transcripts
 from agent.metrics import LLMCallContext
@@ -21,7 +19,7 @@ from agent.tools.skill import skill_context_message
 from agent.tools.subtask import SubTask
 from agent.tools.task import task_context_message
 from agent.tools.toolset import ToolSet
-from agent.transcript import StreamTranscriptCompletion
+from agent.transcript import TranscriptStream
 
 # ── System prompt（只定义一次）─────────────────────────────
 
@@ -46,24 +44,14 @@ def _default_toolset() -> ToolSet:
 # ── Internal helpers ──────────────────────────────────────
 
 
-@dataclass
-class _LLMOutput:
-    content: str = ""
-    reasoning: str = ""
-    tool_calls: list[dict] = field(default_factory=list)
-    finish_reason: str | None = None
-
-
-async def _apply_repairs(
-    session: Session, channel: StreamTranscriptCompletion, *stages
-) -> None:
+async def _apply_repairs(session: Session, channel: TranscriptStream, *stages) -> None:
     """运行修复管线，将新增的 repair transcript 通过 SSE 推送并增量持久化。"""
     old = session._transcripts
     repaired = repair_transcripts(old, *stages)
     new = repaired[len(old) :]
     for rt in new:
         try:
-            flushed = await channel.flush(rt.id, rt.kind, rt.message)
+            flushed = await channel.flush(rt.id, rt.kind, base=rt.message)
             session.add_transcript(
                 flushed.kind, flushed.message, flushed.id, flushed.commit_sha
             )
@@ -80,7 +68,7 @@ class Scheduler:
     """Per-Project 执行调度器（单例）。
 
     一次只允许一个 Session 在运行。
-    StreamTranscriptCompletion 是 per-execution 的临时通道。
+    TranscriptStream 是 per-execution 的临时通道。
     """
 
     def __init__(self) -> None:
@@ -88,14 +76,14 @@ class Scheduler:
         self._loop_task: asyncio.Task | None = None
         self._pending: dict[str, dict] = {}
         self._current_session: Session | None = None
-        self._current_channel: StreamTranscriptCompletion | None = None
+        self._current_channel: TranscriptStream | None = None
         self._shadow_repo: ShadowRepo | None = None
         self._interrupt_event: asyncio.Event | None = None
 
     # ── public ────────────────────────────────────────────
 
     @property
-    def channel(self) -> StreamTranscriptCompletion | None:
+    def channel(self) -> TranscriptStream | None:
         """当前运行中 session 的临时通道。"""
         return self._current_channel
 
@@ -127,7 +115,7 @@ class Scheduler:
         self,
         session: Session,
         question: str,
-        channel: StreamTranscriptCompletion | None = None,
+        channel: TranscriptStream | None = None,
         max_steps: int = 50,
         shadow_repo: ShadowRepo | None = None,
     ) -> str:
@@ -135,9 +123,7 @@ class Scheduler:
         if self._state != "idle":
             raise RuntimeError(f"Scheduler already running (state={self._state})")
         self._current_session = session
-        self._current_channel = (
-            channel if channel is not None else StreamTranscriptCompletion()
-        )
+        self._current_channel = channel if channel is not None else TranscriptStream()
         self._shadow_repo = shadow_repo
         self._interrupt_event = asyncio.Event()
         self._state = "running"
@@ -202,7 +188,9 @@ class Scheduler:
 
             # ── 2. save user question transcript ─────────
             user_msg = {"role": "user", "content": question}
-            t = await channel.flush(user_id, "user_question", user_msg, commit_sha="")
+            t = await channel.flush(
+                user_id, "user_question", base=user_msg, commit_sha=""
+            )
             session.add_transcript(t.kind, t.message, t.id, commit_sha="")
 
             for _ in range(max_steps):
@@ -223,7 +211,7 @@ class Scheduler:
 
                 # ── 模型调用（流式）────────────────────
                 assistant_id = _uuid.uuid4().hex
-                output = await self._model_call(
+                finish_reason = await self._model_call(
                     session,
                     channel,
                     messages,
@@ -231,21 +219,16 @@ class Scheduler:
                     transcript_id=assistant_id,
                 )
 
-                # ── 构建并保存 assistant transcript ───
-                assistant_msg: dict = {
-                    "role": "assistant",
-                    "content": output.content or None,
-                }
-                if output.tool_calls:
-                    assistant_msg["tool_calls"] = output.tool_calls
-                if output.reasoning:
-                    assistant_msg["reasoning_content"] = output.reasoning
-                t = await channel.flush(assistant_id, "assistant", assistant_msg)
+                # ── peek message（flush 前读取 tool_calls）──
+                pre_msg = channel.message
+                has_tool_calls = bool(pre_msg and pre_msg.get("tool_calls"))
 
+                # ── flush（message 由 TranscriptStream 内部构建）──
+                t = await channel.flush(assistant_id, "assistant")
                 session.add_transcript(t.kind, t.message, t.id)
 
                 # ── finish_reason == "stop" → 结束 ────
-                if output.finish_reason == "stop":
+                if finish_reason == "stop":
                     if self._shadow_repo is not None:
                         try:
                             sha = self._shadow_repo.snapshot(
@@ -255,10 +238,9 @@ class Scheduler:
                             t = await channel.flush(
                                 aid,
                                 "commit_attachment",
-                                {"target_tid": user_id, "commit_sha": sha},
+                                base={"target_tid": user_id, "commit_sha": sha},
                             )
                             session.add_transcript(t.kind, t.message, t.id)
-                            # Also set commit_sha on the user_question transcript in memory (reverse: most recent first)
                             for ut in reversed(session._transcripts):
                                 if ut.id == user_id and ut.kind == "user_question":
                                     ut.commit_sha = sha
@@ -268,16 +250,16 @@ class Scheduler:
                     return
 
                 # ── 无 tool_calls → 错误 ──────────────
-                if not output.tool_calls:
+                if not has_tool_calls:
                     err_id = _uuid.uuid4().hex
                     err_msg = {"message": "LLM returned no tool_calls and no content."}
-                    t = await channel.flush(err_id, "error", err_msg)
+                    t = await channel.flush(err_id, "error", base=err_msg)
 
                     session.add_transcript(t.kind, t.message, t.id)
                     return
 
                 # ── 执行每个 tool_call ─────────────────
-                for tc in output.tool_calls:
+                for tc in t.message.get("tool_calls", []):
                     if self._interrupt_event and self._interrupt_event.is_set():
                         raise InterruptedError("Interrupted between tools")
                     await self._execute_one_tool(tc, session, channel)
@@ -292,7 +274,7 @@ class Scheduler:
                     t = await channel.flush(
                         aid,
                         "commit_attachment",
-                        {"target_tid": user_id, "commit_sha": sha},
+                        base={"target_tid": user_id, "commit_sha": sha},
                     )
                     session.add_transcript(t.kind, t.message, t.id)
                     for ut in reversed(session._transcripts):
@@ -309,7 +291,7 @@ class Scheduler:
                 err_msg = {
                     "message": "A tool call / result mismatch was detected. The conversation has been repaired. Please continue."
                 }
-                t = await channel.flush(err_id, "error", err_msg)
+                t = await channel.flush(err_id, "error", base=err_msg)
                 session.add_transcript(t.kind, t.message, t.id)
             except Exception:
                 pass
@@ -320,7 +302,7 @@ class Scheduler:
                 err_msg = {
                     "message": "The user interrupted the agent before it could finish. Summarize what you have done so far and ask how to proceed."
                 }
-                t = await channel.flush(err_id, "error", err_msg)
+                t = await channel.flush(err_id, "error", base=err_msg)
                 session.add_transcript(t.kind, t.message, t.id)
             except Exception:
                 pass
@@ -332,7 +314,7 @@ class Scheduler:
                 await _apply_repairs(session, channel)
                 err_id = _uuid.uuid4().hex
                 err_msg = {"message": str(exc)}
-                t = await channel.flush(err_id, "error", err_msg)
+                t = await channel.flush(err_id, "error", base=err_msg)
                 session.add_transcript(t.kind, t.message, t.id)
             except Exception:
                 pass
@@ -350,17 +332,18 @@ class Scheduler:
     async def _model_call(
         self,
         session: Session,
-        channel: StreamTranscriptCompletion,
+        channel: TranscriptStream,
         messages: list[dict],
         tools: list[dict],
         transcript_id: str,
-    ) -> _LLMOutput:
-        """流式调用 LLM，chunk 进入 channel（使用单一 transcript_id）。
+    ) -> str | None:
+        """流式调用 LLM，chunk 进入 channel。
 
-        只负责流式输出累积，不保存 transcript 也不 flush。
-        调用者负责用同一 transcript_id 执行 add_transcript + flush。
+        message 由 TranscriptStream 在 chunk() 内部构建，
+        调用者通过 channel.message 读取当前状态。
+        返回 finish_reason（"stop" / "tool_calls" / None）。
         """
-        output = _LLMOutput()
+        finish_reason: str | None = None
 
         async for ev in session.llm_client.think_stream(
             messages=messages,
@@ -374,16 +357,19 @@ class Scheduler:
             if self._interrupt_event and self._interrupt_event.is_set():
                 raise InterruptedError("Interrupted during LLM call")
             if ev["kind"] == "reasoning":
-                output.reasoning += ev["token"]
                 await channel.chunk(transcript_id, "thinking", ev["token"])
             elif ev["kind"] == "content":
-                output.content += ev["token"]
                 await channel.chunk(transcript_id, "response", ev["token"])
             elif ev["kind"] == "tool_call_chunk":
                 tc = ev["tool_call"]
                 idx: int = tc.get("index", 0)
-                while len(output.tool_calls) <= idx:
-                    output.tool_calls.append(
+                tool_id = f"{transcript_id}/tc/{idx}"
+
+                # 确保 transcript 已初始化，直接管理 tool_calls 结构
+                msg = channel.ensure_open(transcript_id)
+                calls = msg.setdefault("tool_calls", [])
+                while len(calls) <= idx:
+                    calls.append(
                         {
                             "id": "",
                             "type": "function",
@@ -391,20 +377,18 @@ class Scheduler:
                         }
                     )
                 if tc.get("id"):
-                    output.tool_calls[idx]["id"] = tc["id"]
+                    calls[idx]["id"] = tc["id"]
+
                 fn = tc.get("function", {})
-                tool_id = f"{transcript_id}/tc/{idx}"
                 if fn.get("name"):
-                    output.tool_calls[idx]["function"]["name"] += fn["name"]
-                    # 每次收到 name 增量都推送完整累积名称
+                    # 发送 delta，TranscriptStream 内部累积
                     await channel.chunk(
                         transcript_id,
                         "tool_name",
-                        output.tool_calls[idx]["function"]["name"],
+                        fn["name"],
                         chunk_id=tool_id,
                     )
                 if fn.get("arguments"):
-                    output.tool_calls[idx]["function"]["arguments"] += fn["arguments"]
                     await channel.chunk(
                         transcript_id,
                         "tool_arguments",
@@ -412,20 +396,19 @@ class Scheduler:
                         chunk_id=tool_id,
                     )
             elif ev["kind"] == "finish_reason":
-                output.finish_reason = ev["finish_reason"]
+                finish_reason = ev["finish_reason"]
 
         # Detect tool mismatch errors from the LLM
+        msg = channel.message
+        content = msg.get("content", "") if msg else ""
         if (
-            output.content
-            and "tool" in output.content.lower()
-            and (
-                "mismatch" in output.content.lower()
-                or "not found" in output.content.lower()
-            )
+            content
+            and "tool" in content.lower()
+            and ("mismatch" in content.lower() or "not found" in content.lower())
         ):
-            raise ToolMismatchError(output.content.strip())
+            raise ToolMismatchError(content.strip())
 
-        return output
+        return finish_reason
 
     # ============================================================
     # tool execution
@@ -435,7 +418,7 @@ class Scheduler:
         self,
         tc: dict,
         session: Session,
-        channel: StreamTranscriptCompletion,
+        channel: TranscriptStream,
     ) -> None:
         func_name: str = tc["function"]["name"]
         func_args: str = tc["function"]["arguments"]
@@ -455,7 +438,7 @@ class Scheduler:
                 "arguments": func_args,
                 "result": result,
             }
-            t = await channel.flush(result_id, "tool_result", result_msg)
+            t = await channel.flush(result_id, "tool_result", base=result_msg)
 
             session.add_transcript(t.kind, t.message, t.id)
             return
@@ -486,7 +469,7 @@ class Scheduler:
                 "arguments": func_args,
                 "result": result_str,
             }
-            t = await channel.flush(result_id, "tool_result", result_msg)
+            t = await channel.flush(result_id, "tool_result", base=result_msg)
 
             session.add_transcript(t.kind, t.message, t.id)
             return
@@ -503,7 +486,7 @@ class Scheduler:
                 "arguments": func_args,
                 "result": result_str,
             }
-            t = await channel.flush(result_id, "tool_result", result_msg)
+            t = await channel.flush(result_id, "tool_result", base=result_msg)
 
             session.add_transcript(t.kind, t.message, t.id)
             return
@@ -521,7 +504,7 @@ class Scheduler:
             "arguments": func_args,
             "result": result_str,
         }
-        t = await channel.flush(result_id, "tool_result", result_msg)
+        t = await channel.flush(result_id, "tool_result", base=result_msg)
 
         session.add_transcript(t.kind, t.message, t.id)
 
@@ -532,7 +515,7 @@ class Scheduler:
     async def _run_subtask(
         self,
         parent_session: Session,
-        channel: StreamTranscriptCompletion,
+        channel: TranscriptStream,
         prompt: str,
         max_steps: int,
     ) -> str:
@@ -558,7 +541,10 @@ class Scheduler:
         for _ in range(max_steps):
             if self._interrupt_event and self._interrupt_event.is_set():
                 break
-            output = _LLMOutput()
+
+            content = ""
+            tool_calls: list[dict] = []
+            finish_reason: str | None = None
 
             async for ev in parent_session.llm_client.think_stream(
                 messages=subtask_messages,
@@ -572,7 +558,7 @@ class Scheduler:
                 if self._interrupt_event and self._interrupt_event.is_set():
                     break
                 if ev["kind"] == "content":
-                    output.content += ev["token"]
+                    content += ev["token"]
                     await channel.chunk(
                         subtask_stream_id,
                         "response",
@@ -582,8 +568,8 @@ class Scheduler:
                 elif ev["kind"] == "tool_call_chunk":
                     tc = ev["tool_call"]
                     idx: int = tc.get("index", 0)
-                    while len(output.tool_calls) <= idx:
-                        output.tool_calls.append(
+                    while len(tool_calls) <= idx:
+                        tool_calls.append(
                             {
                                 "id": "",
                                 "type": "function",
@@ -591,37 +577,35 @@ class Scheduler:
                             }
                         )
                     if tc.get("id"):
-                        output.tool_calls[idx]["id"] = tc["id"]
+                        tool_calls[idx]["id"] = tc["id"]
                     fn = tc.get("function", {})
                     if fn.get("name"):
-                        output.tool_calls[idx]["function"]["name"] += fn["name"]
+                        tool_calls[idx]["function"]["name"] += fn["name"]
                     if fn.get("arguments"):
-                        output.tool_calls[idx]["function"]["arguments"] += fn[
-                            "arguments"
-                        ]
+                        tool_calls[idx]["function"]["arguments"] += fn["arguments"]
                 elif ev["kind"] == "finish_reason":
-                    output.finish_reason = ev["finish_reason"]
+                    finish_reason = ev["finish_reason"]
 
-            if output.content:
-                last_answer = output.content
+            if content:
+                last_answer = content
 
-            if output.finish_reason == "stop":
+            if finish_reason == "stop":
                 break
 
-            if not output.tool_calls:
+            if not tool_calls:
                 break
 
             # 添加 assistant 消息到子任务上下文
             subtask_messages.append(
                 {
                     "role": "assistant",
-                    "content": output.content or None,
-                    "tool_calls": output.tool_calls,
+                    "content": content or None,
+                    "tool_calls": tool_calls,
                 }
             )
 
             # 执行工具
-            for tc in output.tool_calls:
+            for tc in tool_calls:
                 if self._interrupt_event and self._interrupt_event.is_set():
                     break
                 func_name = tc["function"]["name"]
