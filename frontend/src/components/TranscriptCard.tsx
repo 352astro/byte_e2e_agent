@@ -3,7 +3,7 @@ import Markdown from "./Markdown";
 import Icon from "./Icon";
 import CollapsibleCard from "./CollapsibleCard";
 import ToolResult from "./ToolResult";
-import { ShellCard, WriteReadCard, DefaultToolCard } from "./ToolCards";
+import { renderToolCard } from "./ToolCards";
 import { useFocusedId } from "../hooks/FocusContext";
 import { TranscriptKind, ChunkKind } from "../constants";
 import type { DisplayTranscript, SubStream } from "../types";
@@ -334,54 +334,17 @@ export default function TranscriptCard({
             {!hideToolCards &&
                 Array.from(toolCards.entries()).map(([id, g]) => {
                     const collapsed = collapsedCards.has(id);
-                    if (g.name === "Shell") {
-                        return (
-                            <ShellCard
-                                key={id}
-                                cardId={id}
-                                args={g.args}
-                                active={g.active}
-                                collapsed={collapsed}
-                                onToggle={toggleCard}
-                            />
-                        );
-                    }
-                    if (g.name === "Write") {
-                        return (
-                            <WriteReadCard
-                                key={id}
-                                cardId={id}
-                                args={g.args}
-                                variant="Write"
-                                active={g.active}
-                                collapsed={collapsed}
-                                onToggle={toggleCard}
-                            />
-                        );
-                    }
-                    if (g.name === "Read") {
-                        return (
-                            <WriteReadCard
-                                key={id}
-                                cardId={id}
-                                args={g.args}
-                                variant="Read"
-                                active={g.active}
-                                collapsed={collapsed}
-                                onToggle={toggleCard}
-                            />
-                        );
-                    }
                     return (
-                        <DefaultToolCard
-                            key={id}
-                            cardId={id}
-                            toolName={g.name}
-                            args={g.args}
-                            active={g.active}
-                            collapsed={collapsed}
-                            onToggle={toggleCard}
-                        />
+                        <span key={id}>
+                            {renderToolCard({
+                                id,
+                                toolName: g.name,
+                                args: g.args,
+                                active: g.active,
+                                collapsed,
+                                onToggle: toggleCard,
+                            })}
+                        </span>
                     );
                 })}
         </div>

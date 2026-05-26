@@ -11,15 +11,24 @@ import CollapsibleCard from "./CollapsibleCard";
 import HighlightCode from "./HighlightCode";
 import FileContent from "./FileContent";
 import Markdown from "./Markdown";
-import { extractArg } from "../utils";
+import { extractArg, extractToolMeta } from "../utils";
 import { useCollapsible } from "../hooks/useCollapsible";
 
 // ── Shared helpers ─────────────────────────────────────
 
+/**
+ * Extract short metadata + long streaming value from partial-JSON args.
+ *
+ * Before: used regex fallback (`extractArg`) which could fail on partial JSON.
+ * Now:   uses prefix JSON.parse via `extractToolMeta` — the backend places
+ *        short fields (timeout_ms, path) before the long key (command, content),
+ *        so metadata is parseable from the very first chunk.
+ */
 function shellMeta(args: string) {
-    const timeoutMs = extractArg(args, "timeout_ms");
+    const { meta, rest } = extractToolMeta(args, "Shell");
+    const timeoutMs = meta.timeout_ms != null ? String(meta.timeout_ms) : null;
     return {
-        command: extractArg(args, "command") || args,
+        command: rest || (meta.command as string) || args,
         timeout: timeoutMs
             ? String(Math.round(Number(timeoutMs) / 1000))
             : null,
@@ -27,9 +36,10 @@ function shellMeta(args: string) {
 }
 
 function fileMeta(args: string) {
+    const { meta, rest } = extractToolMeta(args, "Write");
     return {
-        path: extractArg(args, "path") || "",
-        content: extractArg(args, "content") || "",
+        path: (meta.path as string) || "",
+        content: rest || (meta.content as string) || "",
     };
 }
 
@@ -144,7 +154,8 @@ interface WriteReadCardProps {
     active?: boolean;
     defaultCollapsed?: boolean;
     focusId?: string;
-    /** File content to display in the body (omitted = no body). */
+    /** File content to display in the body.  When omitted and the card is
+     *  active (streaming), the long field from args is used as body. */
     bodyContent?: string;
     /** External collapsed control (when parent manages a Set of IDs). */
     collapsed?: boolean;
@@ -167,8 +178,14 @@ export function WriteReadCard({
         controlledCollapsed,
         onToggleControlled,
     );
-    const { path: filePath } = fileMeta(args);
-    const hasBody = bodyContent !== undefined;
+    const { path: filePath, content: streamingContent } = fileMeta(args);
+
+    // During streaming without explicit bodyContent, use the streaming
+    // long value extracted from args by splitPartialJson.
+    const displayContent =
+        bodyContent ?? (active ? streamingContent || undefined : undefined);
+    const hasBody = displayContent !== undefined;
+
     const cardClass =
         variant === "Write" ? "tool-card--write" : "tool-card--read";
     const headerClass =
@@ -196,7 +213,7 @@ export function WriteReadCard({
         >
             {hasBody && (
                 <FileContent
-                    content={bodyContent}
+                    content={displayContent}
                     filePath={filePath}
                     className={bodyClass}
                 />
@@ -363,4 +380,96 @@ export function ToolResultCard({
             </div>
         </CollapsibleCard>
     );
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Unified dispatch — single source of truth for
+//  tool-name → component mapping.
+// ═══════════════════════════════════════════════════════════
+
+export interface ToolCardDatum {
+    id: string;
+    toolName: string;
+    args: string;
+    active?: boolean;
+    /** External collapsed control (TranscriptCard manages a Set). */
+    collapsed?: boolean;
+    onToggle?: (id: string) => void;
+    /** Internal collapsed control (ToolPairCard self-manages). */
+    defaultCollapsed?: boolean;
+    resultContent?: string;
+    bodyContent?: string;
+    focusId?: string;
+}
+
+/**
+ * Single dispatch — both TranscriptCard and ToolPairCard route through here.
+ *
+ * Collapse mode is determined by which prop the caller provides:
+ *   `collapsed` / `onToggle` → external control (TranscriptCard)
+ *   `defaultCollapsed`       → internal self-management (ToolPairCard)
+ */
+export function renderToolCard(d: ToolCardDatum) {
+    const external = d.collapsed !== undefined;
+    const collapsed = external ? d.collapsed : undefined;
+    const onToggle = external ? d.onToggle : undefined;
+    const defaultCollapsed = external ? false : (d.defaultCollapsed ?? false);
+
+    switch (d.toolName) {
+        case "Shell":
+            return (
+                <ShellCard
+                    cardId={d.id}
+                    args={d.args}
+                    active={d.active}
+                    collapsed={collapsed}
+                    onToggle={onToggle}
+                    defaultCollapsed={defaultCollapsed}
+                    focusId={d.focusId}
+                    resultContent={d.resultContent}
+                />
+            );
+        case "Write":
+            return (
+                <WriteReadCard
+                    cardId={d.id}
+                    args={d.args}
+                    variant="Write"
+                    active={d.active}
+                    collapsed={collapsed}
+                    onToggle={onToggle}
+                    defaultCollapsed={defaultCollapsed}
+                    focusId={d.focusId}
+                    bodyContent={d.bodyContent}
+                />
+            );
+        case "Read":
+            return (
+                <WriteReadCard
+                    cardId={d.id}
+                    args={d.args}
+                    variant="Read"
+                    active={d.active}
+                    collapsed={collapsed}
+                    onToggle={onToggle}
+                    defaultCollapsed={defaultCollapsed}
+                    focusId={d.focusId}
+                    bodyContent={d.resultContent ?? d.bodyContent}
+                />
+            );
+        default:
+            return (
+                <DefaultToolCard
+                    cardId={d.id}
+                    toolName={d.toolName}
+                    args={d.args}
+                    active={d.active}
+                    collapsed={collapsed}
+                    onToggle={onToggle}
+                    defaultCollapsed={defaultCollapsed}
+                    focusId={d.focusId}
+                    resultContent={d.resultContent}
+                />
+            );
+    }
 }
