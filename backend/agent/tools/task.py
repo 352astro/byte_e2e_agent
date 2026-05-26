@@ -25,6 +25,65 @@ def task_context_message(sandbox) -> dict:
     return {"role": "system", "content": content}
 
 
+async def reconstruct_tasks(sandbox, transcripts: list) -> None:
+    """Reconstruct task list by replaying TaskRewrite / TaskUpdate from transcripts.
+
+    Call after transcript truncation (checkout) to restore task state consistency.
+    Algorithm:
+      1. Scan transcripts backwards for the last successful TaskRewrite.
+      2. Execute that TaskRewrite as the base state (or start empty if none).
+      3. Replay all TaskUpdate calls after that point (or from the beginning).
+    """
+    # Step 1: find last TaskRewrite (scan backwards)
+    rewrite_index = -1
+    for i in range(len(transcripts) - 1, -1, -1):
+        t = transcripts[i]
+        if t.kind == "assistant":
+            for tc in t.message.get("tool_calls", []):
+                if tc.get("function", {}).get("name") == "TaskRewrite":
+                    rewrite_index = i
+                    break
+        if rewrite_index >= 0:
+            break
+
+    # Step 2: execute the base TaskRewrite (or start empty)
+    if rewrite_index >= 0:
+        base_t = transcripts[rewrite_index]
+        applied = False
+        for tc in base_t.message.get("tool_calls", []):
+            fn = tc.get("function", {})
+            if fn.get("name") == "TaskRewrite":
+                try:
+                    args = json.loads(fn.get("arguments", "{}"))
+                    tool = TaskRewrite(
+                        tasks=[Task(**td) for td in args.get("tasks", [])]
+                    )
+                    await tool.execute(sandbox=sandbox)
+                    applied = True
+                except Exception:
+                    pass
+                break
+        if not applied:
+            await _save_tasks(sandbox, [])
+    else:
+        await _save_tasks(sandbox, [])
+
+    # Step 3: replay TaskUpdate calls from after the rewrite point
+    start = rewrite_index + 1 if rewrite_index >= 0 else 0
+    for i in range(start, len(transcripts)):
+        t = transcripts[i]
+        if t.kind == "assistant":
+            for tc in t.message.get("tool_calls", []):
+                fn = tc.get("function", {})
+                if fn.get("name") == "TaskUpdate":
+                    try:
+                        args = json.loads(fn.get("arguments", "{}"))
+                        tool = TaskUpdate(**args)
+                        await tool.execute(sandbox=sandbox)
+                    except Exception:
+                        pass
+
+
 class Task(BaseModel):
     id: str = Field(..., description="Unique task id.")
     name: str = Field(..., description="Short stable task name.")

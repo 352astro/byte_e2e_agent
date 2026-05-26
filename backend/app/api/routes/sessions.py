@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from agent.tools.task import reconstruct_tasks
 from app.dependencies import get_project
 from app.services.project import Project
 
@@ -116,6 +117,8 @@ async def checkout_commit(
     removed = session.truncate_transcripts_by_tid(
         req.truncate_tid or "", keep=req.keep_tid
     )
+    await reconstruct_tasks(session._sandbox, session._transcripts)
+
     # Both regret and restore use set_head: HEAD → checkout sha,
     # dropping everything after it. The difference is which sha:
     #   regret → parent sha (keep parent, drop this and later)
