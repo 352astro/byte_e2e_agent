@@ -15,7 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from agent.llm import HelloAgentsLLM
-from agent.sandbox import SandBox
+from agent.sandbox import Sandbox
 from agent.tools.toolset import ToolSet
 from agent.transcript import Transcript, TranscriptKind
 from app.core.config import TMP_DIR
@@ -47,12 +47,12 @@ class Session:
         self,
         llm_client: HelloAgentsLLM,
         toolset: ToolSet | None = None,
-        sandbox: SandBox | None = None,
+        sandbox: Sandbox | None = None,
         session_id: str | None = None,
     ) -> None:
         self.llm_client = llm_client
         self._toolset = toolset or _default_toolset()
-        self._sandbox = sandbox or SandBox()
+        self._sandbox = sandbox or Sandbox()
         self.session_id = session_id or self._sandbox.session_id
         self._transcripts: list[Transcript] = []  # 已完成 transcript（唯一真相源）
         self._messages: list[dict] = []  # LLM 调用消息缓存
@@ -212,7 +212,7 @@ def load_session(
     session_id: str,
     llm_client: HelloAgentsLLM,
     toolset: ToolSet | None = None,
-    sandbox: SandBox | None = None,
+    sandbox: Sandbox | None = None,
 ) -> Session:
     """从持久化 transcripts 重建 Session，并同步 LLM 消息缓存。"""
     session = Session(

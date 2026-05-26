@@ -36,7 +36,7 @@ byte_e2e_agent/
 │       ├── tools/             # 工具系统（Shell/Read/Write/Edit/Search/…）
 │       │   ├── toolset.py     # OpenAI tools schema 动态生成
 │       │   ├── task.py        # 任务列表上下文与任务更新工具
-│       │   ├── subtask.py     # 子任务工具
+│       │   ├── subagent.py    # 子智能体工具
 │       │   └── skill.py       # Skill 扫描与加载工具
 │       ├── skills/            # Skill 特化能力模块
 │       │   └── git_commit_skill/

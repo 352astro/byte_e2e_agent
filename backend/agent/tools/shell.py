@@ -28,15 +28,15 @@ def get_platform_hint() -> str:
 class Shell(BaseTool):
     """在持久 shell 中执行单行命令。"""
 
-    command: str = Field(
-        ...,
-        description="Single-line shell command.",
-    )
     timeout_ms: int = Field(
         default=30000,
         ge=1000,
         le=120000,
         description="Timeout in milliseconds.",
+    )
+    command: str = Field(
+        ...,
+        description="Single-line shell command.",
     )
 
     async def execute(self, sandbox=None) -> str:

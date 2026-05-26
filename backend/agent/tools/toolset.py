@@ -9,7 +9,7 @@ ToolSet — 动态工具集，为 OpenAI 原生 function calling 服务。
     ts = ToolSet([Shell, Read, Write, ...])
     ts.openai_tools            # → list[dict] 传给 API
     ts.parse(name, arguments)  # → BaseTool 实例
-    ts.without(SubTask)        # → 新 ToolSet
+    ts.without(SubAgent)        # → 新 ToolSet
 """
 
 from __future__ import annotations

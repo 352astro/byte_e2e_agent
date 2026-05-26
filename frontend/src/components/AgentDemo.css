@@ -12,6 +12,7 @@
     overflow-y: auto;
     overflow-x: visible;
     padding: 24px 32px 0;
+    scroll-behavior: smooth;
 }
 
 .agent-scroll-center {

@@ -15,7 +15,7 @@ from typing import Any
 
 from agent.llm import HelloAgentsLLM
 from agent.metrics import SQLiteLLMMetricsStore
-from agent.sandbox import SandBox
+from agent.sandbox import Sandbox
 from agent.scheduler import Scheduler
 from agent.session import Session, clear, get_history, load_session
 from agent.shadow_repo import ShadowRepo
@@ -220,7 +220,7 @@ class Project:
         return self._scheduler
 
     def _build_session(self, session_id: str) -> Session:
-        sandbox = SandBox(self._workspace, session_id=session_id)
+        sandbox = Sandbox(self._workspace, session_id=session_id)
         return load_session(self._workspace, session_id, self.llm, sandbox=sandbox)
 
     def _session_dir(self, session_id: str) -> Path:

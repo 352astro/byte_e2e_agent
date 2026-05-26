@@ -228,17 +228,16 @@ class TranscriptStream:
             self._active = SubStream(id=cid, kind=kind, text=text)
 
         # ── 广播 ─────────────────────────────────
-        await self._broadcast(
-            StreamEvent(
-                "chunk",
-                {
-                    "transcript_id": transcript_id,
-                    "id": cid,
-                    "kind": kind,
-                    "text": text,
-                },
-            )
+        ev = StreamEvent(
+            "chunk",
+            {
+                "transcript_id": transcript_id,
+                "id": cid,
+                "kind": kind,
+                "text": text,
+            },
         )
+        await self._broadcast(ev)
 
     async def flush(
         self,

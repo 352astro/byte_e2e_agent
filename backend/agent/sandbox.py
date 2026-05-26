@@ -5,9 +5,7 @@
 - 持久终端管理（PersistentTerminal）
 - 路径越界审查（safe_resolve_path）
 - 危险指令拦截（check_command_safety）
-- 可执行工具的分流执行（Shell / Read / Write / Edit / Search / LoadSkill）
-
-不处理 Plan / SubTask —— 这些由 react 循环直接拦截。
+- 可执行工具的分流执行（Shell / Read / Write / Edit / Search / LoadSkill)
 """
 
 from __future__ import annotations
@@ -20,10 +18,12 @@ from agent.terminal import PersistentTerminal, TerminalResult
 from agent.utils.safety import check_command_safety, safe_resolve_path
 
 
-class SandBox:
+class Sandbox:
     """每个 agent 实例独立的执行环境。"""
 
-    def __init__(self, workspace: str | Path = ".", session_id: str | None = None) -> None:
+    def __init__(
+        self, workspace: str | Path = ".", session_id: str | None = None
+    ) -> None:
         self._workspace = os.path.abspath(str(workspace))
         self._session_id = session_id
         self._terminal: PersistentTerminal | None = None
@@ -81,7 +81,9 @@ class SandBox:
         return "\n".join(parts) if parts else "(no output)"
 
     async def stream_shell(
-        self, command: str, timeout_ms: int = 30000,
+        self,
+        command: str,
+        timeout_ms: int = 30000,
         interrupt_event: asyncio.Event | None = None,
     ):
         """流式执行 Shell 命令，yield 输出块。
@@ -114,10 +116,13 @@ class SandBox:
         async def _read_task() -> None:
             def _run() -> None:
                 try:
-                    for chunk in self.terminal.read_stream(marker, start_time, timeout_ms):
+                    for chunk in self.terminal.read_stream(
+                        marker, start_time, timeout_ms
+                    ):
                         loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
                 finally:
                     loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
+
             await loop.run_in_executor(None, _run)
 
         read_task = asyncio.create_task(_read_task())
@@ -133,8 +138,8 @@ class SandBox:
             await interrupt_event.wait()
             trigger.set()
 
-        asyncio.create_task(_timeout_task())
-        asyncio.create_task(_user_intr_task())
+        timeout_task = asyncio.create_task(_timeout_task())
+        intr_wait_task = asyncio.create_task(_user_intr_task())
 
         # 4. Background task: on trigger, SIGINT, signal done
         async def _interrupt_task() -> None:
@@ -142,9 +147,7 @@ class SandBox:
             self.terminal.interrupt()
             interrupted.set()
 
-        asyncio.create_task(_interrupt_task())
-
-        asyncio.create_task(_interrupt_task())
+        signal_task = asyncio.create_task(_interrupt_task())
 
         try:
             while not interrupted.is_set():
@@ -174,9 +177,16 @@ class SandBox:
                 except asyncio.QueueEmpty:
                     break
         finally:
-            if not read_task.done():
-                read_task.cancel()
-            await asyncio.gather(read_task, return_exceptions=True)
+            for t in (read_task, timeout_task, intr_wait_task, signal_task):
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(
+                read_task,
+                timeout_task,
+                intr_wait_task,
+                signal_task,
+                return_exceptions=True,
+            )
 
     # ── Read ──────────────────────────────────────────
 

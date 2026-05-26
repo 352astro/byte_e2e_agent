@@ -209,43 +209,52 @@ export default function AgentDemo({
     const MAX_ROWS = 10;
 
     // ── Auto-scroll ──────────────────────────────
+    // Our auto-scroll always moves DOWN (scrollTop increases).
+    // Any UPWARD movement must be external — no need to guess “who”.
     const atBottomRef = useRef(true);
-    const scrollingRef = useRef(false);
+    const prevScrollTopRef = useRef(0);
+    const lastScrollRef = useRef(0);
 
-    const scrollToBottom = useCallback(() => {
-        scrollingRef.current = true;
+    const scrollToBottom = useCallback((forceSmooth = false) => {
         const el = scrollRef.current;
-        if (el) {
-            el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
-        }
-        setTimeout(() => {
-            scrollingRef.current = false;
-        }, 100);
+        if (!el) return;
+        const now = performance.now();
+        const useSmooth = forceSmooth || now - lastScrollRef.current > 100;
+        lastScrollRef.current = now;
+        el.scrollTo({
+            top: el.scrollHeight,
+            behavior: useSmooth ? "smooth" : "auto",
+        });
     }, []);
 
     const handleScroll = useCallback(() => {
-        if (scrollingRef.current) return;
         const el = scrollRef.current;
         if (!el) return;
-        const threshold = 8;
+        const goingUp = el.scrollTop < prevScrollTopRef.current;
+        prevScrollTopRef.current = el.scrollTop;
+
         const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-        if (distFromBottom > threshold) {
-            atBottomRef.current = false;
-        }
+
         if (distFromBottom <= 4) {
             atBottomRef.current = true;
+        } else if (goingUp) {
+            // Only an upward scroll detaches — smooth-animation
+            // intermediate frames move down, so they never trigger this.
+            atBottomRef.current = false;
         }
     }, []);
 
+    // Streaming content growth → debounced smooth
     useEffect(() => {
         if (atBottomRef.current) {
             scrollToBottom();
         }
     }, [transcripts, scrollToBottom]);
 
+    // Session switch → always smooth (infrequent event)
     useEffect(() => {
         atBottomRef.current = true;
-        scrollToBottom();
+        scrollToBottom(true);
     }, [sessionId, scrollToBottom]);
 
     // ── Tool pairing ─────────────────────────────
@@ -393,7 +402,14 @@ export default function AgentDemo({
                 setCheckingOut(null);
             }
         },
-        [sessionId, checkingOut, running, truncateTranscripts, reloadTranscripts, handleRun],
+        [
+            sessionId,
+            checkingOut,
+            running,
+            truncateTranscripts,
+            reloadTranscripts,
+            handleRun,
+        ],
     );
 
     // Notify commit graph after a chat run completes
