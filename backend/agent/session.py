@@ -93,16 +93,30 @@ class Session:
     def get_transcripts(self) -> list[dict]:
         """返回所有已完成 transcript 的序列化形式。"""
         return [
-            {"id": t.id, "kind": t.kind, "message": t.message, "commit_sha": t.commit_sha}
+            {
+                "id": t.id,
+                "kind": t.kind,
+                "message": t.message,
+                "commit_sha": t.commit_sha,
+            }
             for t in self._transcripts
         ]
 
-    def replace_transcripts(self, transcripts: list[Transcript]) -> None:
-        """替换 transcript 列表，并同步重建 LLM 消息缓存。"""
+    def replace_transcripts(
+        self, transcripts: list[Transcript], persist: bool = False
+    ) -> None:
+        """替换 transcript 列表，并同步重建 LLM 消息缓存。
+
+        若 persist=True，同步落盘。
+        """
         self._transcripts = transcripts
         self._messages = _build_llm_messages(
             self._transcripts, self._transcript_to_message
         )
+        if persist:
+            _rewrite_messages_file(
+                self._sandbox.workspace, self.session_id, transcripts
+            )
 
     def truncate_transcripts_by_tid(self, tid: str, keep: bool = False) -> int:
         """Truncate transcripts by transcript id.
@@ -124,9 +138,7 @@ class Session:
         removed_count = len(self._transcripts) - cutoff
         self._transcripts = kept
         self._messages = _build_llm_messages(kept, self._transcript_to_message)
-        _rewrite_messages_file(
-            self._sandbox.workspace, self.session_id, kept
-        )
+        _rewrite_messages_file(self._sandbox.workspace, self.session_id, kept)
         return removed_count
 
     def truncate_transcripts_from(self, commit_sha: str) -> int:
@@ -211,12 +223,13 @@ def load_session(
 
     raw = _load_transcripts(messages_path)
     cleaned = _merge_commit_attachments(_normalize_transcript_order(raw))
-    session.replace_transcripts(cleaned)
-    # Persist the cleaned list (commit_attachment entries discarded)
-    _rewrite_messages_file(workspace, session_id, cleaned)
+    session.replace_transcripts(cleaned, persist=True)
     # Repair any unpaired tool_calls from interrupted sessions
-    from agent.interrupt import repair_unpaired_tools
-    repair_unpaired_tools(session)
+    from agent.errors import repair_transcripts
+
+    repaired = repair_transcripts(session._transcripts)
+    if len(repaired) > len(cleaned):
+        session.replace_transcripts(repaired, persist=True)
     return session
 
 
@@ -379,8 +392,7 @@ def _has_open_tool_call(transcripts: list[Transcript], tool_call_id: str) -> boo
         if transcript.kind != "assistant":
             continue
         call_ids = {
-            tc.get("id", "")
-            for tc in transcript.message.get("tool_calls", []) or []
+            tc.get("id", "") for tc in transcript.message.get("tool_calls", []) or []
         }
         return tool_call_id in call_ids and tool_call_id not in answered
     return False

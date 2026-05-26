@@ -12,6 +12,7 @@ import json
 import uuid as _uuid
 from dataclasses import dataclass, field
 
+from agent.errors import InterruptedError, ToolMismatchError, repair_transcripts
 from agent.metrics import LLMCallContext
 from agent.session import Session
 from agent.shadow_repo import ShadowRepo
@@ -51,6 +52,23 @@ class _LLMOutput:
     reasoning: str = ""
     tool_calls: list[dict] = field(default_factory=list)
     finish_reason: str | None = None
+
+
+async def _apply_repairs(
+    session: Session, channel: StreamTranscriptCompletion, *stages
+) -> None:
+    """运行修复管线，将新增的 repair transcript 通过 SSE 推送并增量持久化。"""
+    old = session._transcripts
+    repaired = repair_transcripts(old, *stages)
+    new = repaired[len(old) :]
+    for rt in new:
+        try:
+            flushed = await channel.flush(rt.id, rt.kind, rt.message)
+            session.add_transcript(
+                flushed.kind, flushed.message, flushed.id, flushed.commit_sha
+            )
+        except Exception:
+            pass
 
 
 # ============================================================
@@ -127,7 +145,6 @@ class Scheduler:
             self._query_loop(question, max_steps),
             name="sched",
         )
-        self._loop_task.add_done_callback(self._on_done)
         return session.session_id
 
     def resolve(self, transcript_id: str, response: dict) -> None:
@@ -185,9 +202,7 @@ class Scheduler:
 
             # ── 2. save user question transcript ─────────
             user_msg = {"role": "user", "content": question}
-            t = await channel.flush(
-                user_id, "user_question", user_msg, commit_sha=""
-            )
+            t = await channel.flush(user_id, "user_question", user_msg, commit_sha="")
             session.add_transcript(t.kind, t.message, t.id, commit_sha="")
 
             for _ in range(max_steps):
@@ -238,7 +253,8 @@ class Scheduler:
                             )
                             aid = _uuid.uuid4().hex
                             t = await channel.flush(
-                                aid, "commit_attachment",
+                                aid,
+                                "commit_attachment",
                                 {"target_tid": user_id, "commit_sha": sha},
                             )
                             session.add_transcript(t.kind, t.message, t.id)
@@ -274,7 +290,8 @@ class Scheduler:
                     )
                     aid = _uuid.uuid4().hex
                     t = await channel.flush(
-                        aid, "commit_attachment",
+                        aid,
+                        "commit_attachment",
                         {"target_tid": user_id, "commit_sha": sha},
                     )
                     session.add_transcript(t.kind, t.message, t.id)
@@ -287,7 +304,7 @@ class Scheduler:
 
         except ToolMismatchError:
             try:
-                await repair_unpaired_tools_async(session, channel)
+                await _apply_repairs(session, channel)
                 err_id = _uuid.uuid4().hex
                 err_msg = {
                     "message": "A tool call / result mismatch was detected. The conversation has been repaired. Please continue."
@@ -298,8 +315,7 @@ class Scheduler:
                 pass
         except InterruptedError:
             try:
-                # Fill unpaired tool_calls with error results
-                await repair_unpaired_tools_async(session, channel)
+                await _apply_repairs(session, channel)
                 err_id = _uuid.uuid4().hex
                 err_msg = {
                     "message": "The user interrupted the agent before it could finish. Summarize what you have done so far and ask how to proceed."
@@ -313,10 +329,10 @@ class Scheduler:
 
             traceback.print_exc()
             try:
+                await _apply_repairs(session, channel)
                 err_id = _uuid.uuid4().hex
                 err_msg = {"message": str(exc)}
                 t = await channel.flush(err_id, "error", err_msg)
-
                 session.add_transcript(t.kind, t.message, t.id)
             except Exception:
                 pass
@@ -399,7 +415,14 @@ class Scheduler:
                 output.finish_reason = ev["finish_reason"]
 
         # Detect tool mismatch errors from the LLM
-        if output.content and "tool" in output.content.lower() and ("mismatch" in output.content.lower() or "not found" in output.content.lower()):
+        if (
+            output.content
+            and "tool" in output.content.lower()
+            and (
+                "mismatch" in output.content.lower()
+                or "not found" in output.content.lower()
+            )
+        ):
             raise ToolMismatchError(output.content.strip())
 
         return output
@@ -661,13 +684,3 @@ class Scheduler:
     # ============================================================
     # internal
     # ============================================================
-
-    def _on_done(self, task: asyncio.Task) -> None:
-        """query_loop 完成回调（成功或异常）。"""
-        self._state = "idle"
-        self._loop_task = None
-        exc = task.exception()
-        if exc:
-            import traceback
-
-            traceback.print_exception(type(exc), exc, exc.__traceback__)
