@@ -42,7 +42,6 @@ function extractMermaidRaw(md: string): {
 } {
     const diagrams = new Map<string, string>();
     let idx = 0;
-
     const text = md.replace(
         /```mermaid\n([\s\S]*?)```/g,
         (_, source: string) => {
@@ -52,43 +51,62 @@ function extractMermaidRaw(md: string): {
             return key;
         },
     );
-
     return { text, diagrams };
 }
 
-// ── LaTeX rendering (synchronous) ──────────────────────
+// ── Pre-marked LaTeX extraction ───────────────────────
 
-/** Shared regex guard: match code blocks so they pass through untouched. */
-const CODE_GUARD = /<pre[^>]*>[\s\S]*?<\/pre>|<code[^>]*>[\s\S]*?<\/code>/;
+/**
+ * Extract `$$...$$` and `$...$` blocks *before* marked.parse() so that
+ * Markdown syntax (\\, _, etc.) inside math blocks is never corrupted.
+ *
+ * Block math (`$$`) is extracted first so its `$$` delimiter isn't
+ * stolen by the inline `$` pattern.
+ */
+function extractMathRaw(md: string): {
+    text: string;
+    blocks: Map<string, { source: string; displayMode: boolean }>;
+} {
+    const blocks = new Map<string, { source: string; displayMode: boolean }>();
+    let idx = 0;
 
-/** Build a single-pass KaTeX replacer for a given math pattern + display mode. */
-function katexReplace(
-    mathPattern: RegExp,
-    displayMode: boolean,
-): (html: string) => string {
-    const re = new RegExp(CODE_GUARD.source + "|" + mathPattern.source, "g");
-    return (html) =>
-        html.replace(re, (match, ...args) => {
-            if (match.startsWith("<")) return match; // code block
-            const math = args[0] as string | undefined;
-            if (!math) return match;
-            try {
-                return katex.renderToString(math, {
-                    displayMode,
-                    throwOnError: false,
-                });
-            } catch {
-                return match;
-            }
-        });
+    // Phase 1: block math $$...$$
+    let text = md.replace(/\$\$([\s\S]+?)\$\$/g, (_, source: string) => {
+        const key = `<!--MATH_RAW_${idx}-->`;
+        blocks.set(key, { source: source.trim(), displayMode: true });
+        idx++;
+        return key;
+    });
+
+    // Phase 2: inline math $...$
+    // Inline math: must not span lines (GitHub) nor cross table cells (|).
+    text = text.replace(/\$([^$\n]+?)\$/g, (match: string, source: string) => {
+        if (source.includes("|")) return match;
+        const key = `<!--MATH_RAW_${idx}-->`;
+        blocks.set(key, { source: source.trim(), displayMode: false });
+        idx++;
+        return key;
+    });
+
+    return { text, blocks };
 }
 
-const replaceBlockMath = katexReplace(/\$\$([\s\S]+?)\$\$/, true);
-const replaceInlineMath = katexReplace(/\$([^$]+?)\$/, false);
-
-/** Block first — otherwise inline `$` would steal the opening `$$`. */
-function renderMath(html: string): string {
-    return replaceInlineMath(replaceBlockMath(html));
+/** Render a single math block (inline or display) with KaTeX. */
+function renderKatex(source: string, displayMode: boolean): string {
+    try {
+        return katex.renderToString(source, {
+            displayMode,
+            throwOnError: true,
+        });
+    } catch {
+        // On failure return the raw source wrapped as a code block
+        const escaped = source
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+        const wrapper = displayMode ? "div" : "span";
+        return `<${wrapper} class="katex-error-fallback"><code>${escaped}</code></${wrapper}>`;
+    }
 }
 
 // ── Public component ──────────────────────────────────
@@ -103,18 +121,43 @@ export default function Markdown({ text }: MarkdownProps) {
     const mountedRef = useRef(true);
     const [html, setHtml] = useState("");
 
-    const { baseHtml, diagrams } = useMemo(() => {
-        if (!text) return { baseHtml: "", diagrams: new Map<string, string>() };
+    const { baseHtml, diagrams, mathBlocks } = useMemo(() => {
+        if (!text)
+            return {
+                baseHtml: "",
+                diagrams: new Map<string, string>(),
+                mathBlocks: new Map<
+                    string,
+                    { source: string; displayMode: boolean }
+                >(),
+            };
 
         const plain = decodeHtmlEntities(text);
-        const { text: md, diagrams } = extractMermaidRaw(plain);
+
+        // 1. Extract mermaid
+        const { text: afterMermaid, diagrams } = extractMermaidRaw(plain);
+
+        // 2. Extract LaTeX (before marked, so Markdown syntax inside math is safe)
+        const { text: md, blocks: mathBlocks } = extractMathRaw(afterMermaid);
+
+        // 3. Markdown → HTML (only on the cleaned text)
         const raw = marked.parse(md, {
             highlight: markedHighlight,
         }) as string;
 
-        return { baseHtml: renderMath(raw), diagrams };
+        // 4. Render KaTeX into the HTML synchronously
+        let out = raw;
+        for (const [key, block] of mathBlocks) {
+            out = out.replace(
+                key,
+                renderKatex(block.source, block.displayMode),
+            );
+        }
+
+        return { baseHtml: out, diagrams, mathBlocks };
     }, [text]);
 
+    // Mermaid is async, handled in a separate phase
     useEffect(() => {
         mountedRef.current = true;
 
