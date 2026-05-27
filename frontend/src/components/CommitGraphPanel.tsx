@@ -347,8 +347,7 @@ const CommitGraphPanel = forwardRef<CommitGraphHandle, CommitGraphPanelProps>(
                                                     )}
                                                 />
                                             )}
-                                            {hasNext && (
-                                                <LockableButton
+                                            <LockableButton
                                                     icon={
                                                         <Icon
                                                             name="flag"
@@ -377,7 +376,6 @@ const CommitGraphPanel = forwardRef<CommitGraphHandle, CommitGraphPanelProps>(
                                                             ),
                                                     )}
                                                 />
-                                            )}
                                             {hasParent && hasUserTid && (
                                                 <LockableButton
                                                     icon={

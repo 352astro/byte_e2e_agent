@@ -500,11 +500,15 @@ export default function AgentDemo({
                                                                         ? () => applyTruncate({ commitSha: parent.sha, removeSha: commitSha, truncateTid: truncateTid, keepTid: false })
                                                                         : () => applyTruncate({ truncateTid: t.id, keepTid: false })
                                                                 }
-                                                                onRestore={
-                                                                    next
-                                                                        ? () => applyTruncate({ commitSha: commitSha, removeSha: next.sha, truncateTid: nextUserQId(t.id), keepTid: false })
-                                                                        : () => applyTruncate({ truncateTid: t.id, keepTid: true })
-                                                                }
+                                                                onRestore={() => {
+                                                                        const tid = nextUserQId(t.id);
+                                                                        applyTruncate({
+                                                                            commitSha: commitSha,
+                                                                            removeSha: next ? next.sha : undefined,
+                                                                            truncateTid: tid,
+                                                                            keepTid: false,
+                                                                        });
+                                                                    }}
                                                                 onReplay={
                                                                     parent
                                                                         ? () => applyTruncate({ commitSha: parent.sha, removeSha: commitSha, truncateTid: truncateTid, keepTid: false, sendContent: content })
