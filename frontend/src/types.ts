@@ -92,6 +92,31 @@ export interface CommitInfo {
     transcript_id: string | null;
 }
 
+/** Computed availability of regret / restore / replay for a commit. */
+export interface CommitActions {
+    parent: CommitInfo | null;
+    current: CommitInfo | null;
+    next: CommitInfo | null;
+    /** Non-null when the commit has a usable transcript_id (not __init__). */
+    tid: string | undefined;
+}
+
+export function getCommitActions(
+    commits: CommitInfo[],
+    sha: string,
+): CommitActions {
+    const idx = commits.findIndex((c) => c.sha === sha);
+    const current = idx >= 0 ? commits[idx] : null;
+    const parent = idx > 0 ? commits[idx - 1] : null;
+    const next = idx >= 0 && idx < commits.length - 1 ? commits[idx + 1] : null;
+    const tid =
+        current?.transcript_id &&
+        current.transcript_id !== "__init__"
+            ? current.transcript_id
+            : undefined;
+    return { parent, current, next, tid };
+}
+
 export interface CommitDetail extends CommitInfo {
     files: string[];
 }

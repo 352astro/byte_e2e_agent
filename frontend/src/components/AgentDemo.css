@@ -1213,3 +1213,32 @@
 .commit-action--confirm {
     color: #c00 !important;
 }
+
+/* ── User bubble edit mode ─────────────────────── */
+
+.user-bubble--editing {
+    cursor: default;
+}
+
+.user-bubble-edit {
+    width: 100%;
+    padding: 0;
+    font: inherit;
+    font-size: 0.95rem;
+    line-height: 1.55;
+    color: #1a1a1a;
+    background: transparent;
+    border: none;
+    outline: none;
+    resize: none;
+    overflow: hidden;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: system-ui, sans-serif;
+}
+
+.user-bubble-edit-hint {
+    font-size: 0.65rem;
+    color: #ccc;
+    margin-top: 4px;
+}

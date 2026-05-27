@@ -5,8 +5,10 @@ import LockableButton from "./LockableButton";
 import Icon from "./Icon";
 import TranscriptCard from "./TranscriptCard";
 import ToolPairCard from "./ToolPairCard";
+import AgentInput from "./AgentInput";
+import EditableUserBubble from "./EditableUserBubble";
 import { pairToolCalls } from "../hooks/pairTools";
-import type { SessionCache, CommitInfo } from "../types";
+import { getCommitActions, type SessionCache, type CommitInfo } from "../types";
 import CommitGraphPanel, { CommitGraphHandle } from "./CommitGraphPanel";
 import "./AgentDemo.css";
 
@@ -109,8 +111,6 @@ export default function AgentDemo({
     const scrollRef = useRef<HTMLDivElement>(null);
 
     const {
-        question,
-        setQuestion,
         running,
         interrupting,
         transcripts,
@@ -119,6 +119,7 @@ export default function AgentDemo({
         reloadTranscripts,
         truncateTranscripts,
         handleInterrupt,
+        resetRunning,
         scrollToTranscript,
     } = useAgentStream({
         sessionId,
@@ -204,13 +205,9 @@ export default function AgentDemo({
         );
     }, []);
 
-    const composingRef = useRef(false);
-    const [rows, setRows] = useState(1);
-    const MAX_ROWS = 10;
-
     // ── Auto-scroll ──────────────────────────────
     // Our auto-scroll always moves DOWN (scrollTop increases).
-    // Any UPWARD movement must be external — no need to guess “who”.
+    // Any UPWARD movement must be external — no need to guess "who".
     const atBottomRef = useRef(true);
     const prevScrollTopRef = useRef(0);
     const lastScrollRef = useRef(0);
@@ -299,6 +296,7 @@ export default function AgentDemo({
         ) => {
             if (!sessionId || checkingOut) return;
             setCheckingOut(checkoutSha);
+            resetRunning();
             try {
                 const res = await fetch(`/api/session/${sessionId}/checkout`, {
                     method: "POST",
@@ -326,7 +324,7 @@ export default function AgentDemo({
                 setCheckingOut(null);
             }
         },
-        [sessionId, checkingOut, truncateTranscripts, reloadTranscripts],
+        [sessionId, checkingOut, resetRunning, truncateTranscripts, reloadTranscripts],
     );
 
     const handleCheckoutKeep = useCallback(
@@ -337,6 +335,7 @@ export default function AgentDemo({
         ) => {
             if (!sessionId || checkingOut) return;
             setCheckingOut(checkoutSha);
+            resetRunning();
             try {
                 const res = await fetch(`/api/session/${sessionId}/checkout`, {
                     method: "POST",
@@ -360,7 +359,7 @@ export default function AgentDemo({
                 setCheckingOut(null);
             }
         },
-        [sessionId, checkingOut, truncateTranscripts, reloadTranscripts],
+        [sessionId, checkingOut, resetRunning, truncateTranscripts, reloadTranscripts],
     );
 
     const handleReplay = useCallback(
@@ -372,6 +371,7 @@ export default function AgentDemo({
         ) => {
             if (!sessionId || checkingOut || running) return;
             setCheckingOut(checkoutSha);
+            resetRunning();
             try {
                 const res = await fetch(`/api/session/${sessionId}/checkout`, {
                     method: "POST",
@@ -394,7 +394,7 @@ export default function AgentDemo({
 
                 if (userContent) {
                     prefillRef.current = userContent;
-                    handleRun();
+                    handleRun("");
                 }
             } catch (err) {
                 console.error("Replay failed", err);
@@ -412,10 +412,6 @@ export default function AgentDemo({
         ],
     );
 
-    // Notify commit graph after a chat run completes
-    // commit_attachment SSE handles new commits via append();
-    // no need to bump graphVersion on chat completion.
-
     // Sync transcript content to commit graph messages
     useEffect(() => {
         for (const t of transcripts) {
@@ -428,26 +424,172 @@ export default function AgentDemo({
         }
     }, [transcripts]);
 
-    // ── Input handlers ───────────────────────────
+    // ── Send handler ─────────────────────────────
 
-    const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (e.key === "Enter") {
-            if (e.ctrlKey || e.metaKey || e.shiftKey) return;
-            if (composingRef.current) return;
-            e.preventDefault();
-            if (prefillContent.trim()) {
-                prefillRef.current = prefillContent.trim();
-                setPrefillContent("");
+    const handleSend = useCallback(
+        async (question: string) => {
+            if (running && !interrupting) {
+                await handleInterrupt();
             }
-            handleRun();
-        }
-    };
+            handleRun(question);
+        },
+        [running, interrupting, handleInterrupt, handleRun],
+    );
 
-    const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-        setQuestion(e.target.value);
-        const lines = e.target.value.split("\n").length;
-        setRows(Math.min(Math.max(lines, 1), MAX_ROWS));
-    };
+    const handleEditSubmit = useCallback(
+        async (tid: string, content: string) => {
+            if (!sessionId) return;
+
+            if (running && !interrupting) {
+                await handleInterrupt();
+            }
+            resetRunning();
+
+            const t = transcripts.find((item) => item.id === tid);
+            if (!t?.commitSha) {
+                // No commit — transcript-only replay (with persist)
+                try {
+                    await fetch(`/api/session/${sessionId}/checkout`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            truncate_tid: tid,
+                            keep_tid: false,
+                        }),
+                    });
+                } catch {}
+                truncateTranscripts(tid);
+                handleRun(content);
+                return;
+            }
+
+            const commitIdx = commits.findIndex(
+                (c) => c.sha === t.commitSha,
+            );
+            const parent = commitIdx > 0 ? commits[commitIdx - 1] : null;
+            if (!parent) {
+                // No parent commit — transcript-only replay (with persist)
+                try {
+                    await fetch(`/api/session/${sessionId}/checkout`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            truncate_tid: tid,
+                            keep_tid: false,
+                        }),
+                    });
+                } catch {}
+                truncateTranscripts(tid);
+                handleRun(content);
+                return;
+            }
+
+            setCheckingOut(parent.sha);
+
+            try {
+                const res = await fetch(
+                    `/api/session/${sessionId}/checkout`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            commit_sha: parent.sha,
+                            truncate_tid: tid,
+                            keep_tid: false,
+                        }),
+                    },
+                );
+                if (!res.ok)
+                    throw new Error(`Server returned ${res.status}`);
+
+                truncateTranscripts(tid);
+                handleRemoveFrom(t.commitSha!);
+                handleRun(content);
+            } catch (err) {
+                console.error("Edit-submit failed", err);
+            } finally {
+                setCheckingOut(null);
+            }
+        },
+        [sessionId, running, interrupting, handleInterrupt, resetRunning, transcripts, commits, truncateTranscripts, handleRemoveFrom, handleRun],
+    );
+
+    // ── Transcript-only actions (no commit required) ──
+
+    const handleTranscriptRegret = useCallback(
+        async (tid: string) => {
+            if (!sessionId) return;
+            if (running && !interrupting) {
+                await handleInterrupt();
+            }
+            resetRunning();
+            try {
+                await fetch(`/api/session/${sessionId}/checkout`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        truncate_tid: tid,
+                        keep_tid: false,
+                    }),
+                });
+            } catch {}
+            truncateTranscripts(tid);
+        },
+        [sessionId, running, interrupting, handleInterrupt, resetRunning, truncateTranscripts],
+    );
+
+    const handleTranscriptRestore = useCallback(
+        async (tid: string) => {
+            if (!sessionId) return;
+            if (running && !interrupting) {
+                await handleInterrupt();
+            }
+            const idx = transcripts.findIndex((t2) => t2.id === tid);
+            if (idx < 0) return;
+            const nextTid =
+                idx + 1 < transcripts.length
+                    ? transcripts[idx + 1].id
+                    : undefined;
+            resetRunning();
+            try {
+                await fetch(`/api/session/${sessionId}/checkout`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        truncate_tid: nextTid || "",
+                        keep_tid: true,
+                    }),
+                });
+            } catch {}
+            if (nextTid) {
+                truncateTranscripts(nextTid);
+            }
+        },
+        [sessionId, running, interrupting, handleInterrupt, resetRunning, transcripts, truncateTranscripts],
+    );
+
+    const handleTranscriptReplay = useCallback(
+        async (tid: string, content: string) => {
+            if (!sessionId) return;
+            if (running && !interrupting) {
+                await handleInterrupt();
+            }
+            resetRunning();
+            try {
+                await fetch(`/api/session/${sessionId}/checkout`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        truncate_tid: tid,
+                        keep_tid: false,
+                    }),
+                });
+            } catch {}
+            truncateTranscripts(tid);
+            handleRun(content);
+        },
+        [sessionId, running, interrupting, handleInterrupt, resetRunning, truncateTranscripts, handleRun],
+    );
 
     return (
         <div className="agent-demo">
@@ -502,6 +644,9 @@ export default function AgentDemo({
                                     );
                                 }
                                 if (t.kind === "user_question") {
+                                    const content = String(
+                                        (t.message as Record<string, unknown>).content || "",
+                                    );
                                     const commitSha = t.commitSha;
                                     const shortSha = commitSha
                                         ? commitSha.slice(0, 7)
@@ -512,71 +657,48 @@ export default function AgentDemo({
                                             className="user-bubble-wrapper"
                                             data-transcript-id={t.id}
                                         >
-                                            <TranscriptCard transcript={t} />
-                                            {shortSha &&
-                                                commitSha &&
-                                                (() => {
-                                                    const idx =
-                                                        commits.findIndex(
-                                                            (c) =>
-                                                                c.sha ===
-                                                                commitSha,
+                                            <EditableUserBubble
+                                                content={content}
+                                                onEditSubmit={(c) =>
+                                                    handleEditSubmit(t.id, c)
+                                                }
+                                            />
+                                            {(() => {
+                                                    if (commitSha) {
+                                                        const { parent, next, tid } = getCommitActions(commits, commitSha);
+                                                        const shortSha = commitSha.slice(0, 7);
+                                                        // tid may be undefined (transcript_id is __init__);
+                                                        // fall back to the transcript's own id for truncation.
+                                                        const truncateTid = tid || t.id;
+                                                        return (
+                                                            <CommitBadge
+                                                                shortSha={shortSha}
+                                                                locked={locked}
+                                                                onRegret={
+                                                                    parent
+                                                                        ? () => handleCheckout(parent.sha, truncateTid, commitSha)
+                                                                        : () => handleTranscriptRegret(t.id)
+                                                                }
+                                                                onRestore={
+                                                                    next
+                                                                        ? () => handleCheckoutKeep(commitSha, next.transcript_id || undefined, next.sha)
+                                                                        : () => handleTranscriptRestore(t.id)
+                                                                }
+                                                                onReplay={
+                                                                    parent
+                                                                        ? () => handleReplay(parent.sha, truncateTid, truncateTid, commitSha)
+                                                                        : () => handleTranscriptReplay(t.id, content)
+                                                                }
+                                                            />
                                                         );
-                                                    const c =
-                                                        idx >= 0
-                                                            ? commits[idx]
-                                                            : null;
-                                                    const parent =
-                                                        idx > 0
-                                                            ? commits[idx - 1]
-                                                            : null;
-                                                    const next =
-                                                        idx >= 0 &&
-                                                        idx < commits.length - 1
-                                                            ? commits[idx + 1]
-                                                            : null;
-                                                    const tid =
-                                                        c?.transcript_id &&
-                                                        c.transcript_id !==
-                                                            "__init__"
-                                                            ? c.transcript_id
-                                                            : undefined;
+                                                    }
                                                     return (
                                                         <CommitBadge
-                                                            shortSha={shortSha}
+                                                            shortSha=""
                                                             locked={locked}
-                                                            onRegret={
-                                                                parent
-                                                                    ? () =>
-                                                                          handleCheckout(
-                                                                              parent.sha,
-                                                                              tid,
-                                                                              commitSha,
-                                                                          )
-                                                                    : undefined
-                                                            }
-                                                            onRestore={
-                                                                next
-                                                                    ? () =>
-                                                                          handleCheckoutKeep(
-                                                                              commitSha,
-                                                                              next.transcript_id ||
-                                                                                  undefined,
-                                                                              next.sha,
-                                                                          )
-                                                                    : undefined
-                                                            }
-                                                            onReplay={
-                                                                parent && tid
-                                                                    ? () =>
-                                                                          handleReplay(
-                                                                              parent.sha,
-                                                                              tid,
-                                                                              tid,
-                                                                              commitSha,
-                                                                          )
-                                                                    : undefined
-                                                            }
+                                                            onRegret={() => handleTranscriptRegret(t.id)}
+                                                            onRestore={() => handleTranscriptRestore(t.id)}
+                                                            onReplay={() => handleTranscriptReplay(t.id, content)}
                                                         />
                                                     );
                                                 })()}
@@ -599,87 +721,16 @@ export default function AgentDemo({
                 </div>
             </div>
 
-            <div
-                className={`agent-prefill${prefillContent.trim() ? " agent-prefill--open" : ""}`}
-            >
-                <div className="agent-prefill-inner">
-                    <textarea
-                        className="agent-prefill-textarea"
-                        placeholder="(prefix)"
-                        value={prefillContent}
-                        onChange={(e) => setPrefillContent(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (
-                                e.key === "Enter" &&
-                                !e.ctrlKey &&
-                                !e.metaKey &&
-                                !e.shiftKey
-                            ) {
-                                e.preventDefault();
-                                if (prefillContent.trim()) {
-                                    prefillRef.current = prefillContent.trim();
-                                    setPrefillContent("");
-                                    handleRun();
-                                }
-                            }
-                        }}
-                        rows={1}
-                    />
-                    <button
-                        className="agent-prefill-close"
-                        onClick={() => setPrefillContent("")}
-                    >
-                        ×
-                    </button>
-                </div>
-            </div>
-            <div className="agent-input-bar">
-                <div className="agent-input-bar-inner">
-                    <textarea
-                        className="agent-textarea"
-                        placeholder="Ask the agent something… (Enter to send, Ctrl/Shift+Enter for newline)"
-                        value={question}
-                        onChange={handleChange}
-                        onKeyDown={onKeyDown}
-                        onCompositionStart={() => {
-                            composingRef.current = true;
-                        }}
-                        onCompositionEnd={() => {
-                            composingRef.current = false;
-                        }}
-                        rows={rows}
-                    />
-                    <button
-                        className={
-                            interrupting
-                                ? "agent-send-btn agent-send-btn--stopping"
-                                : running
-                                  ? "agent-send-btn agent-send-btn--stop"
-                                  : "agent-send-btn"
-                        }
-                        onClick={() => {
-                            if (running && !interrupting) {
-                                handleInterrupt();
-                                return;
-                            }
-                            if (prefillContent.trim()) {
-                                prefillRef.current = prefillContent.trim();
-                                setPrefillContent("");
-                            } else {
-                            }
-                            handleRun();
-                        }}
-                        disabled={
-                            interrupting ||
-                            (!running &&
-                                !question.trim() &&
-                                !prefillContent.trim())
-                        }
-                    >
-                        {interrupting ? "Stopping…" : running ? "Stop" : "Send"}
-                    </button>
-                </div>
-            </div>
+            <AgentInput
+                running={running}
+                interrupting={interrupting}
+                prefillRef={prefillRef}
+                prefillContent={prefillContent}
+                onPrefillChange={setPrefillContent}
+                onSend={handleSend}
+                onInterrupt={handleInterrupt}
+            />
+
             <CommitGraphPanel
                 ref={graphRef}
                 commits={commits}

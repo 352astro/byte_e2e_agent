@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api")
 
 
 class CheckoutRequest(BaseModel):
-    commit_sha: str
+    commit_sha: str | None = None
     keep: bool = False
     truncate_tid: str | None = None
     keep_tid: bool = False
@@ -100,12 +100,13 @@ async def checkout_commit(
         session = project.get_session(sid)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
-    try:
-        project.shadow_repo.restore(req.commit_sha)
-    except KeyError:
-        raise HTTPException(
-            status_code=404, detail=f"Commit not found: {req.commit_sha}"
-        )
+    if req.commit_sha:
+        try:
+            project.shadow_repo.restore(req.commit_sha)
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail=f"Commit not found: {req.commit_sha}"
+            )
     # Capture user question text (for restore prefill)
     user_content = ""
     if req.truncate_tid:
@@ -123,10 +124,11 @@ async def checkout_commit(
     # dropping everything after it. The difference is which sha:
     #   regret → parent sha (keep parent, drop this and later)
     #   restore → self sha  (keep self,  drop later only)
-    try:
-        project.shadow_repo.set_head(sid, req.commit_sha)
-    except Exception:
-        pass
+    if req.commit_sha:
+        try:
+            project.shadow_repo.set_head(sid, req.commit_sha)
+        except Exception:
+            pass
     return {
         "ok": True,
         "commit_sha": req.commit_sha,

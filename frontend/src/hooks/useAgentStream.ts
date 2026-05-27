@@ -18,15 +18,15 @@ interface UseAgentStreamOptions {
 }
 
 interface UseAgentStreamReturn {
-    question: string;
-    setQuestion: (q: string) => void;
     running: boolean;
     transcripts: DisplayTranscript[];
-    handleRun: () => Promise<void>;
+    /** Start a chat run with the given question (caller owns the input state). */
+    handleRun: (question: string) => Promise<void>;
     prefillRef: React.MutableRefObject<string>;
     reloadTranscripts: () => void;
     truncateTranscripts: (truncateTid: string) => void;
     handleInterrupt: () => Promise<void>;
+    resetRunning: () => void;
     interrupting: boolean;
     scrollToTranscript: (id: string) => void;
 }
@@ -39,8 +39,11 @@ export default function useAgentStream({
     scrollContainerRef,
     onCommit,
 }: UseAgentStreamOptions): UseAgentStreamReturn {
-    const [question, setQuestion] = useState("");
-    const [running, setRunning] = useState(false);
+    const [running, _setRunning] = useState(false);
+    const setRunning = (v: boolean) => {
+        runningRef.current = v;
+        _setRunning(v);
+    };
     const [transcripts, setTranscripts] = useState<DisplayTranscript[]>([]);
     const [interrupting, setInterrupting] = useState(false);
     const [currentSid, setCurrentSid] = useState<string | null>(sessionId);
@@ -50,6 +53,7 @@ export default function useAgentStream({
     const lastIdRef = useRef<string | null>(null);
     const fetchForRef = useRef<string | null>(null);
     const streamingSidRef = useRef<string | null>(null);
+    const runningRef = useRef(false);
     const prefillRef = useRef<string>("");
 
     // ── reload ─────────────────────────────────────
@@ -93,14 +97,6 @@ export default function useAgentStream({
                 const idx = prev.findIndex((t) => t.id === truncateTid);
                 if (idx < 0) return prev;
                 const kept = prev.slice(0, idx);
-                const lastAssistant = [...kept]
-                    .reverse()
-                    .find((t) => t.kind === "assistant" && t.message.content);
-                const ans = lastAssistant
-                    ? String(lastAssistant.message.content || "")
-                    : null;
-                setRunning(false);
-                setInterrupting(false);
                 lastIdRef.current = kept.length
                     ? kept[kept.length - 1].id
                     : null;
@@ -125,8 +121,6 @@ export default function useAgentStream({
         }
 
         if (!sessionId) {
-            // If a stream is being set up (lazy session creation in flight),
-            // do NOT clear currentSid — the next render will have the real sessionId.
             if (streamingSidRef.current) {
                 return;
             }
@@ -158,7 +152,6 @@ export default function useAgentStream({
                 ? cached.transcripts[cached.transcripts.length - 1].id
                 : null;
             setCurrentSid(sessionId);
-            // Verify running state with backend (cache may be stale)
             fetch(`/api/session/${sessionId}/status`)
                 .then((r) => r.json())
                 .then((data: { running: boolean }) => {
@@ -207,6 +200,12 @@ export default function useAgentStream({
     const handleInterrupt = useCallback(async () => {
         if (interrupting) return;
         setInterrupting(true);
+        // Abort the current SSE stream so it stops competing with the next one
+        if (abortRef.current) {
+            abortRef.current.abort();
+            abortRef.current = null;
+        }
+        streamingSidRef.current = null;
         try {
             await fetch("/api/interrupt", { method: "POST" });
         } catch {}
@@ -289,7 +288,6 @@ export default function useAgentStream({
             } else if (ev.event === "flush") {
                 const msg = ev.message || {};
 
-                // commit_attachment: update transcript + notify graph directly
                 if (ev.kind === "commit_attachment") {
                     const targetTid = (msg as Record<string, unknown>)
                         .target_tid as string | undefined;
@@ -315,8 +313,6 @@ export default function useAgentStream({
                 ) {
                 }
 
-                // 后端 StreamChannel 内部 Transcript 已等效拼接，
-                // flush 直接携带完整 sub_streams，无需前端重建
                 const ss: SubStream[] = (ev.sub_streams || []).map((s) => ({
                     id: s.id,
                     kind: s.kind,
@@ -341,14 +337,10 @@ export default function useAgentStream({
     );
 
     // ── auto-reconnect live stream after refresh ────
-    //
-    // /stream 本身就会回放 buffered + completed + 实时，
-    // 不需要事先调 /recover，避免同一份 buffered 被传输两次。
 
     useEffect(() => {
         if (!sessionId) return;
         if (!running) return;
-        // Don't double-connect if handleRun already owns the stream
         if (streamingSidRef.current === sessionId) return;
 
         streamingSidRef.current = sessionId;
@@ -388,9 +380,9 @@ export default function useAgentStream({
                 if (err instanceof DOMException && err.name === "AbortError")
                     return;
             } finally {
-                if (streamingSidRef.current === sessionId) {
-                    streamingSidRef.current = null;
-                }
+                // Only touch state if this stream hasn't been superseded
+                if (streamingSidRef.current !== sessionId) return;
+                streamingSidRef.current = null;
                 setRunning(false);
             }
         })();
@@ -400,123 +392,138 @@ export default function useAgentStream({
 
     // ── run ──────────────────────────────────────────
 
-    const handleRun = useCallback(async () => {
-        const prefill = prefillRef.current.trim();
-        if (prefill) {
-            prefillRef.current = "";
-        }
-        const q = (prefill ? prefill + "\n" + question : question).trim();
-        if (!q || running) return;
+    const handleRun = useCallback(
+        async (question: string) => {
+            const prefill = prefillRef.current.trim();
+            if (prefill) {
+                prefillRef.current = "";
+            }
+            const q = (prefill ? prefill + "\n" + question : question).trim();
+            if (!q || runningRef.current) return;
 
-        setRunning(true);
-        setInterrupting(false);
-        setQuestion("");
+            setRunning(true);
+            setInterrupting(false);
 
-        let sid = currentSid;
-        if (!sid && pendingNew) {
-            try {
-                const res = await fetch("/api/session", { method: "POST" });
-                if (!res.ok) throw new Error(`Server returned ${res.status}`);
-                const data: { session_id: string } = await res.json();
-                sid = data.session_id;
-                setCurrentSid(sid);
-                lazyCreatedRef.current = sid;
-                streamingSidRef.current = sid;
-                if (onSessionCreated) onSessionCreated(sid);
-            } catch (err) {
+            let sid = currentSid;
+            if (!sid && pendingNew) {
+                try {
+                    const res = await fetch("/api/session", { method: "POST" });
+                    if (!res.ok)
+                        throw new Error(`Server returned ${res.status}`);
+                    const data: { session_id: string } = await res.json();
+                    sid = data.session_id;
+                    setCurrentSid(sid);
+                    lazyCreatedRef.current = sid;
+                    streamingSidRef.current = sid;
+                    if (onSessionCreated) onSessionCreated(sid);
+                } catch (err) {
+                    setRunning(false);
+                    return;
+                }
+            }
+            if (!sid) {
                 setRunning(false);
                 return;
             }
-        }
-        if (!sid) {
-            setRunning(false);
-            return;
-        }
 
-        streamingSidRef.current = sid;
-
-        const controller = new AbortController();
-        abortRef.current = controller;
-        try {
-            const streamRes = await fetch(`/api/session/${sid}/chat`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question: q, max_steps: 50 }),
-                signal: AbortSignal.any([
-                    controller.signal,
-                    AbortSignal.timeout(300_000),
-                ]),
-            });
-            if (!streamRes.ok) {
-                throw new Error(
-                    streamRes.status === 409
-                        ? "Session is already running"
-                        : `Server returned ${streamRes.status}`,
-                );
+            // Abort any previous stream still lingering
+            if (abortRef.current) {
+                abortRef.current.abort();
+                abortRef.current = null;
             }
+            streamingSidRef.current = sid;
 
-            const reader = streamRes.body!.getReader();
-            const decoder = new TextDecoder();
-            let buffer = "";
+            const controller = new AbortController();
+            abortRef.current = controller;
+            try {
+                const streamRes = await fetch(`/api/session/${sid}/chat`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ question: q, max_steps: 50 }),
+                    signal: AbortSignal.any([
+                        controller.signal,
+                        AbortSignal.timeout(300_000),
+                    ]),
+                });
+                if (!streamRes.ok) {
+                    throw new Error(
+                        streamRes.status === 409
+                            ? "Session is already running"
+                            : `Server returned ${streamRes.status}`,
+                    );
+                }
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
+                const reader = streamRes.body!.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
 
-                buffer += decoder.decode(value, { stream: true });
-                const parts = buffer.split("\n\n");
-                buffer = parts.pop()!;
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
 
-                for (const part of parts) {
-                    const line = part.trim();
-                    if (!line.startsWith("data: ")) continue;
-                    try {
-                        const event = JSON.parse(line.slice(6)) as StreamEvent;
-                        dispatchStreamEvent(event);
-                    } catch {
-                        // ignore malformed JSON
+                    buffer += decoder.decode(value, { stream: true });
+                    const parts = buffer.split("\n\n");
+                    buffer = parts.pop()!;
+
+                    for (const part of parts) {
+                        const line = part.trim();
+                        if (!line.startsWith("data: ")) continue;
+                        try {
+                            const event = JSON.parse(
+                                line.slice(6),
+                            ) as StreamEvent;
+                            dispatchStreamEvent(event);
+                        } catch {
+                            // ignore malformed JSON
+                        }
                     }
                 }
-            }
-        } catch (err) {
-            if (err instanceof DOMException && err.name === "AbortError")
-                return;
-        } finally {
-            if (abortRef.current === controller) abortRef.current = null;
-            streamingSidRef.current = null;
-            lazyCreatedRef.current = null;
-            // 向后端确认 session 是否仍在运行，避免 running 状态永不停止
-            if (sid) {
-                try {
-                    const res = await fetch(`/api/session/${sid}/status`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (!data.running) {
+            } catch (err) {
+                if (err instanceof DOMException && err.name === "AbortError")
+                    return;
+            } finally {
+                // Only clean up if this stream is still the current one.
+                // If the controller was replaced by an interrupt or a new run,
+                // the old stream's finally must not touch shared state.
+                if (abortRef.current !== controller) return;
+                abortRef.current = null;
+                streamingSidRef.current = null;
+                lazyCreatedRef.current = null;
+                if (sid) {
+                    try {
+                        const res = await fetch(`/api/session/${sid}/status`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            if (!data.running) {
+                                setRunning(false);
+                            }
+                        } else {
                             setRunning(false);
                         }
-                    } else {
+                    } catch {
                         setRunning(false);
                     }
-                } catch {
+                } else {
                     setRunning(false);
                 }
-            } else {
-                setRunning(false);
             }
-        }
-    }, [
-        question,
-        running,
-        dispatchStreamEvent,
-        upsertTranscript,
-        currentSid,
-        pendingNew,
-        onSessionCreated,
-    ]);
+        },
+        [
+            running,
+            dispatchStreamEvent,
+            upsertTranscript,
+            currentSid,
+            pendingNew,
+            onSessionCreated,
+        ],
+    );
+
+    const resetRunning = useCallback(() => {
+        setRunning(false);
+        setInterrupting(false);
+    }, []);
 
     return {
-        question,
-        setQuestion,
         running,
         interrupting,
         transcripts,
@@ -525,6 +532,7 @@ export default function useAgentStream({
         reloadTranscripts,
         truncateTranscripts,
         handleInterrupt,
+        resetRunning,
         scrollToTranscript,
     };
 }
