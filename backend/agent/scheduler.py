@@ -22,6 +22,7 @@ from agent.tools.subagent import SubAgent
 from agent.tools.task import task_context_message
 from agent.tools.toolset import ToolSet
 from agent.transcript import TranscriptStream
+from app.core.config import TMP_DIR
 
 # ── System prompt（只定义一次）─────────────────────────────
 
@@ -406,6 +407,16 @@ class Scheduler:
                     {
                         "role": "system",
                         "content": f"## Platform\n{get_platform_hint()}",
+                    },
+                    {
+                        "role": "system",
+                        "content": (
+                            f"## System Directory\n"
+                            f"The `{TMP_DIR}/` directory at the workspace root is managed by "
+                            f"the system for session state, task lists, and internal storage. "
+                            f"Do NOT read, edit, create, or delete files under `{TMP_DIR}/` — "
+                            f"it is not user code."
+                        ),
                     },
                     skill_context_message(),
                     task_context_message(session._sandbox),
