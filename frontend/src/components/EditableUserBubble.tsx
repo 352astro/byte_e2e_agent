@@ -84,7 +84,7 @@ export default function EditableUserBubble({
         }}
         readOnly={!editing}
         rows={1}
-        cols={Math.max(1, ...value.split("\n").map(l => l.length)) + 2}
+        cols={Math.max(1, ...value.split("\n").map(l => l.length)) + 6}
       />
     </div>
   );

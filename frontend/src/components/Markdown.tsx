@@ -92,6 +92,27 @@ function extractMathRaw(md: string): {
 }
 
 /** Render a single math block (inline or display) with KaTeX. */
+
+/** Wrap <pre> blocks with a copy-button container. */
+function addCopyButtons(html: string): string {
+    return html.replace(
+        /<pre([^>]*)>([\s\S]*?)<\/pre>/g,
+        (_, attrs: string, content: string) => {
+            // Extract text from inside <code> if present
+            let code = content
+                .replace(/<\/?[^>]+(>|$)/g, '')  // strip HTML tags
+                .replace(/&amp;/g, '&')
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/&quot;/g, '"');
+            const escapedCode = code
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;');
+            return `<div class="code-block-wrapper"><button class="copy-btn" onclick="var t=this;navigator.clipboard.writeText(this.dataset.code).then(function(){t.innerHTML='<svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#4caf50\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M20 6L9 17l-5-5\"/></svg>';setTimeout(function(){t.innerHTML='<svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"9\" y=\"9\" width=\"13\" height=\"13\" rx=\"2\" ry=\"2\"/><path d=\"M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1\"/></svg>'},1500)})" data-code="${escapedCode}"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"9\" y=\"9\" width=\"13\" height=\"13\" rx=\"2\" ry=\"2\"/><path d=\"M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1\"/></svg></button><pre${attrs}>${content}</pre></div>`;
+        },
+    );
+}
+
 function renderKatex(source: string, displayMode: boolean): string {
     try {
         return katex.renderToString(source, {
@@ -145,8 +166,10 @@ export default function Markdown({ text }: MarkdownProps) {
             highlight: markedHighlight,
         }) as string;
 
-        // 4. Render KaTeX into the HTML synchronously
-        let out = raw;
+        // 4. Add copy buttons to code blocks
+        let out = addCopyButtons(raw);
+
+        // 5. Render KaTeX into the HTML synchronously
         for (const [key, block] of mathBlocks) {
             out = out.replace(
                 key,
@@ -173,6 +196,10 @@ export default function Markdown({ text }: MarkdownProps) {
                 const id = `mermaid-${mermaidIdCounter++}`;
                 try {
                     const { svg } = await mermaid.render(id, source);
+                    // Mermaid returns an error SVG on parse failure — detect it
+                    if (svg.includes("Syntax error") || svg.includes("mermaid version")) {
+                        throw new Error("mermaid parse error");
+                    }
                     return { placeholder, html: svg };
                 } catch {
                     const escaped = source
@@ -183,6 +210,8 @@ export default function Markdown({ text }: MarkdownProps) {
                         placeholder,
                         html: `<pre class="mermaid-error"><code>${escaped}</code></pre>`,
                     };
+                } finally {
+                    container.remove();
                 }
             }),
         ).then((results) => {

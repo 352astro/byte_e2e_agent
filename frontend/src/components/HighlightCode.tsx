@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { highlightCode } from "../hooks/highlight";
+import CopyButton from "./CopyButton";
 
 interface HighlightCodeProps {
   code: string;
@@ -12,14 +13,14 @@ export default function HighlightCode({
   language,
   className = "",
 }: HighlightCodeProps) {
-  const html = useMemo(
-    () => highlightCode(code, language),
-    [code, language],
-  );
+  const html = useMemo(() => highlightCode(code, language), [code, language]);
 
   return (
-    <pre className={className}>
-      <code dangerouslySetInnerHTML={{ __html: html }} />
-    </pre>
+    <div className="code-block-wrapper">
+      <CopyButton text={code} />
+      <pre className={className}>
+        <code dangerouslySetInnerHTML={{ __html: html }} />
+      </pre>
+    </div>
   );
 }

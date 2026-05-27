@@ -306,7 +306,7 @@
 .tool-card.thinking-block {
     margin: 0 0 8px 0;
     border-radius: 6px;
-    overflow: hidden;
+
 }
 
 .tool-card.thinking-block--done {
@@ -1072,11 +1072,9 @@
 .user-bubble-wrapper {
     position: relative;
     align-self: flex-end;
+    max-width: 90%;
 }
 
-.user-bubble-wrapper .user-bubble {
-    width: 100%;
-}
 
 
 .commit-badge {
@@ -1235,7 +1233,7 @@
 }
 
 .user-bubble-edit {
-    width: 100%;
+    max-width: 100%;
     padding: 0;
     box-sizing: border-box;
     margin: 0;
@@ -1250,6 +1248,7 @@
     overflow: hidden;
     white-space: pre-wrap;
     word-break: break-word;
+    white-space: pre-wrap;
     font-family: system-ui, sans-serif;
     caret-color: transparent;
 }
@@ -1275,4 +1274,47 @@
 .tool-status-err {
     color: #e53935;
     flex-shrink: 0;
+}
+
+/* ── Copy button ──────────────────────────────── */
+
+.code-block-wrapper {
+    position: relative;
+}
+
+.copy-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    mix-blend-mode: difference;
+    color: #fff;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--anim-fast);
+    z-index: 1;
+}
+
+.copy-btn:hover {
+    opacity: 1;
+}
+.copy-btn:hover svg {
+    stroke-width: 3;
+}
+
+.code-block-wrapper:hover .copy-btn,
+.code-block-wrapper:focus-within .copy-btn {
+    opacity: 1;
+}
+
+/* Constrain mermaid SVGs to container */
+.md-content svg[id^="mermaid-"] {
+    max-width: 100%;
+    height: auto;
 }
