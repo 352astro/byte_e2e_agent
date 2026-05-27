@@ -288,130 +288,6 @@ export default function AgentDemo({
     // ── Commit checkout ──────────────────────────
     const [checkingOut, setCheckingOut] = useState<string | null>(null);
     const [prefillContent, setPrefillContent] = useState("");
-    const handleCheckout = useCallback(
-        async (
-            checkoutSha: string,
-            truncateTid?: string,
-            removeSha?: string,
-        ) => {
-            if (!sessionId || checkingOut) return;
-            setCheckingOut(checkoutSha);
-            resetRunning();
-            try {
-                const res = await fetch(`/api/session/${sessionId}/checkout`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        commit_sha: checkoutSha,
-                        truncate_tid: truncateTid,
-                        keep_tid: false,
-                    }),
-                });
-                if (!res.ok) throw new Error(`Server returned ${res.status}`);
-                const data = await res.json();
-                if (data.user_content) {
-                    setPrefillContent(data.user_content);
-                }
-                if (truncateTid) {
-                    truncateTranscripts(truncateTid);
-                } else {
-                    await reloadTranscripts();
-                }
-                if (removeSha) handleRemoveFrom(removeSha);
-            } catch (err) {
-                console.error("Checkout failed", err);
-            } finally {
-                setCheckingOut(null);
-            }
-        },
-        [sessionId, checkingOut, resetRunning, truncateTranscripts, reloadTranscripts],
-    );
-
-    const handleCheckoutKeep = useCallback(
-        async (
-            checkoutSha: string,
-            truncateTid?: string,
-            removeSha?: string,
-        ) => {
-            if (!sessionId || checkingOut) return;
-            setCheckingOut(checkoutSha);
-            resetRunning();
-            try {
-                const res = await fetch(`/api/session/${sessionId}/checkout`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        commit_sha: checkoutSha,
-                        truncate_tid: truncateTid,
-                        keep_tid: false,
-                    }),
-                });
-                if (!res.ok) throw new Error(`Server returned ${res.status}`);
-                if (truncateTid) {
-                    truncateTranscripts(truncateTid);
-                } else {
-                    await reloadTranscripts();
-                }
-                if (removeSha) handleRemoveFrom(removeSha);
-            } catch (err) {
-                console.error("Checkout failed", err);
-            } finally {
-                setCheckingOut(null);
-            }
-        },
-        [sessionId, checkingOut, resetRunning, truncateTranscripts, reloadTranscripts],
-    );
-
-    const handleReplay = useCallback(
-        async (
-            checkoutSha: string,
-            transcriptId?: string,
-            truncateTid?: string,
-            removeSha?: string,
-        ) => {
-            if (!sessionId || checkingOut || running) return;
-            setCheckingOut(checkoutSha);
-            resetRunning();
-            try {
-                const res = await fetch(`/api/session/${sessionId}/checkout`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        commit_sha: checkoutSha,
-                        truncate_tid: truncateTid,
-                        keep_tid: false,
-                    }),
-                });
-                if (!res.ok) throw new Error(`Server returned ${res.status}`);
-                const data = await res.json();
-                const userContent: string | undefined = data.user_content;
-                if (truncateTid) {
-                    truncateTranscripts(truncateTid);
-                } else {
-                    await reloadTranscripts();
-                }
-                if (removeSha) handleRemoveFrom(removeSha);
-
-                if (userContent) {
-                    prefillRef.current = userContent;
-                    handleRun("");
-                }
-            } catch (err) {
-                console.error("Replay failed", err);
-            } finally {
-                setCheckingOut(null);
-            }
-        },
-        [
-            sessionId,
-            checkingOut,
-            running,
-            truncateTranscripts,
-            reloadTranscripts,
-            handleRun,
-        ],
-    );
-
     // Sync transcript content to commit graph messages
     useEffect(() => {
         for (const t of transcripts) {
@@ -436,159 +312,104 @@ export default function AgentDemo({
         [running, interrupting, handleInterrupt, handleRun],
     );
 
-    const handleEditSubmit = useCallback(
-        async (tid: string, content: string) => {
-            if (!sessionId) return;
+    // ── Unified truncate ──────────────────────────
+    // Mirrors backend POST /checkout: orthogonal commit_sha, truncate_tid, keep_tid.
 
+    interface TruncateOpts {
+        commitSha?: string;
+        removeSha?: string;
+        truncateTid: string;
+        keepTid: boolean;
+        sendContent?: string;
+    }
+
+
+    /**
+     * Find the next user_question transcript after tid.
+     * Returns its id, or empty string if none (nothing to truncate).
+     */
+    const nextUserQId = (tid: string): string => {
+        const idx = transcripts.findIndex((x) => x.id === tid);
+        if (idx < 0) return "";
+        for (let i = idx + 1; i < transcripts.length; i++) {
+            if (transcripts[i].kind === "user_question") return transcripts[i].id;
+        }
+        return "";
+    };
+
+    const applyTruncate = useCallback(
+        async (opts: TruncateOpts) => {
+            if (!sessionId) return;
             if (running && !interrupting) {
                 await handleInterrupt();
             }
             resetRunning();
-
-            const t = transcripts.find((item) => item.id === tid);
-            if (!t?.commitSha) {
-                // No commit — transcript-only replay (with persist)
-                try {
-                    await fetch(`/api/session/${sessionId}/checkout`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            truncate_tid: tid,
-                            keep_tid: false,
-                        }),
-                    });
-                } catch {}
-                truncateTranscripts(tid);
-                handleRun(content);
-                return;
-            }
-
-            const commitIdx = commits.findIndex(
-                (c) => c.sha === t.commitSha,
-            );
-            const parent = commitIdx > 0 ? commits[commitIdx - 1] : null;
-            if (!parent) {
-                // No parent commit — transcript-only replay (with persist)
-                try {
-                    await fetch(`/api/session/${sessionId}/checkout`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            truncate_tid: tid,
-                            keep_tid: false,
-                        }),
-                    });
-                } catch {}
-                truncateTranscripts(tid);
-                handleRun(content);
-                return;
-            }
-
-            setCheckingOut(parent.sha);
+            if (opts.commitSha) setCheckingOut(opts.commitSha);
 
             try {
-                const res = await fetch(
+                await fetch(
                     `/api/session/${sessionId}/checkout`,
                     {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
-                            commit_sha: parent.sha,
-                            truncate_tid: tid,
-                            keep_tid: false,
+                            commit_sha: opts.commitSha || undefined,
+                            truncate_tid: opts.truncateTid,
+                            keep_tid: opts.keepTid,
                         }),
                     },
                 );
-                if (!res.ok)
-                    throw new Error(`Server returned ${res.status}`);
+            } catch {}
 
-                truncateTranscripts(tid);
-                handleRemoveFrom(t.commitSha!);
-                handleRun(content);
-            } catch (err) {
-                console.error("Edit-submit failed", err);
-            } finally {
-                setCheckingOut(null);
-            }
+            truncateTranscripts(opts.truncateTid, opts.keepTid);
+            if (opts.removeSha) handleRemoveFrom(opts.removeSha);
+            if (opts.sendContent) handleRun(opts.sendContent);
+
+            if (opts.commitSha) setCheckingOut(null);
         },
-        [sessionId, running, interrupting, handleInterrupt, resetRunning, transcripts, commits, truncateTranscripts, handleRemoveFrom, handleRun],
+        [sessionId, running, interrupting, handleInterrupt, resetRunning, truncateTranscripts, handleRemoveFrom, handleRun],
     );
 
-    // ── Transcript-only actions (no commit required) ──
-
-    const handleTranscriptRegret = useCallback(
-        async (tid: string) => {
-            if (!sessionId) return;
-            if (running && !interrupting) {
-                await handleInterrupt();
-            }
-            resetRunning();
-            try {
-                await fetch(`/api/session/${sessionId}/checkout`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        truncate_tid: tid,
-                        keep_tid: false,
-                    }),
-                });
-            } catch {}
-            truncateTranscripts(tid);
+    const handleEditSubmit = useCallback(
+        (tid: string, content: string) => {
+            const t = transcripts.find((item) => item.id === tid);
+            const { parent } = t?.commitSha
+                ? getCommitActions(commits, t.commitSha)
+                : { parent: null };
+            applyTruncate({
+                commitSha: parent?.sha,
+                removeSha: t?.commitSha,
+                truncateTid: tid,
+                keepTid: false,
+                sendContent: content,
+            });
         },
-        [sessionId, running, interrupting, handleInterrupt, resetRunning, truncateTranscripts],
+        [transcripts, commits, applyTruncate],
     );
 
-    const handleTranscriptRestore = useCallback(
-        async (tid: string) => {
-            if (!sessionId) return;
-            if (running && !interrupting) {
-                await handleInterrupt();
-            }
-            const idx = transcripts.findIndex((t2) => t2.id === tid);
-            if (idx < 0) return;
-            const nextTid =
-                idx + 1 < transcripts.length
-                    ? transcripts[idx + 1].id
-                    : undefined;
-            resetRunning();
-            try {
-                await fetch(`/api/session/${sessionId}/checkout`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        truncate_tid: nextTid || "",
-                        keep_tid: true,
-                    }),
-                });
-            } catch {}
-            if (nextTid) {
-                truncateTranscripts(nextTid);
-            }
+    // ── Deprecated handlers (kept for CommitGraphPanel) ──
+
+    const handleCheckout = useCallback(
+        async (checkoutSha: string, truncateTid?: string, removeSha?: string) => {
+            applyTruncate({ commitSha: checkoutSha, removeSha, truncateTid: truncateTid || "", keepTid: false });
         },
-        [sessionId, running, interrupting, handleInterrupt, resetRunning, transcripts, truncateTranscripts],
+        [applyTruncate],
     );
 
-    const handleTranscriptReplay = useCallback(
-        async (tid: string, content: string) => {
-            if (!sessionId) return;
-            if (running && !interrupting) {
-                await handleInterrupt();
-            }
-            resetRunning();
-            try {
-                await fetch(`/api/session/${sessionId}/checkout`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        truncate_tid: tid,
-                        keep_tid: false,
-                    }),
-                });
-            } catch {}
-            truncateTranscripts(tid);
-            handleRun(content);
+    const handleCheckoutKeep = useCallback(
+        async (checkoutSha: string, truncateTid?: string, removeSha?: string, keepTid = false) => {
+            applyTruncate({ commitSha: checkoutSha, removeSha, truncateTid: truncateTid || "", keepTid });
         },
-        [sessionId, running, interrupting, handleInterrupt, resetRunning, truncateTranscripts, handleRun],
+        [applyTruncate],
+    );
+
+    const handleReplay = useCallback(
+        async (checkoutSha: string, transcriptId?: string, truncateTid?: string, removeSha?: string) => {
+            const t = transcriptId ? transcripts.find((x) => x.id === transcriptId) : undefined;
+            const content = t ? String((t.message as Record<string, unknown>).content || "") : "";
+            applyTruncate({ commitSha: checkoutSha, removeSha, truncateTid: truncateTid || "", keepTid: false, sendContent: content });
+        },
+        [transcripts, applyTruncate],
     );
 
     return (
@@ -676,18 +497,18 @@ export default function AgentDemo({
                                                                 locked={locked}
                                                                 onRegret={
                                                                     parent
-                                                                        ? () => handleCheckout(parent.sha, truncateTid, commitSha)
-                                                                        : () => handleTranscriptRegret(t.id)
+                                                                        ? () => applyTruncate({ commitSha: parent.sha, removeSha: commitSha, truncateTid: truncateTid, keepTid: false })
+                                                                        : () => applyTruncate({ truncateTid: t.id, keepTid: false })
                                                                 }
                                                                 onRestore={
                                                                     next
-                                                                        ? () => handleCheckoutKeep(commitSha, next.transcript_id || undefined, next.sha)
-                                                                        : () => handleTranscriptRestore(t.id)
+                                                                        ? () => applyTruncate({ commitSha: commitSha, removeSha: next.sha, truncateTid: nextUserQId(t.id), keepTid: false })
+                                                                        : () => applyTruncate({ truncateTid: t.id, keepTid: true })
                                                                 }
                                                                 onReplay={
                                                                     parent
-                                                                        ? () => handleReplay(parent.sha, truncateTid, truncateTid, commitSha)
-                                                                        : () => handleTranscriptReplay(t.id, content)
+                                                                        ? () => applyTruncate({ commitSha: parent.sha, removeSha: commitSha, truncateTid: truncateTid, keepTid: false, sendContent: content })
+                                                                        : () => applyTruncate({ truncateTid: t.id, keepTid: false, sendContent: content })
                                                                 }
                                                             />
                                                         );
@@ -696,9 +517,9 @@ export default function AgentDemo({
                                                         <CommitBadge
                                                             shortSha=""
                                                             locked={locked}
-                                                            onRegret={() => handleTranscriptRegret(t.id)}
-                                                            onRestore={() => handleTranscriptRestore(t.id)}
-                                                            onReplay={() => handleTranscriptReplay(t.id, content)}
+                                                            onRegret={() => applyTruncate({ truncateTid: t.id, keepTid: false })}
+                                                            onRestore={() => applyTruncate({ truncateTid: nextUserQId(t.id), keepTid: false })}
+                                                            onReplay={() => applyTruncate({ truncateTid: t.id, keepTid: false, sendContent: content })}
                                                         />
                                                     );
                                                 })()}

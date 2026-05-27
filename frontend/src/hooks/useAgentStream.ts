@@ -24,7 +24,7 @@ interface UseAgentStreamReturn {
     handleRun: (question: string) => Promise<void>;
     prefillRef: React.MutableRefObject<string>;
     reloadTranscripts: () => void;
-    truncateTranscripts: (truncateTid: string) => void;
+    truncateTranscripts: (truncateTid: string, keep?: boolean) => void;
     handleInterrupt: () => Promise<void>;
     resetRunning: () => void;
     interrupting: boolean;
@@ -91,12 +91,16 @@ export default function useAgentStream({
     }, [sessionId, cache]);
 
     const truncateTranscripts = useCallback(
-        (truncateTid: string) => {
+        (truncateTid: string, keep = false) => {
             if (!sessionId || !truncateTid) return;
             setTranscripts((prev) => {
                 const idx = prev.findIndex((t) => t.id === truncateTid);
                 if (idx < 0) return prev;
-                const kept = prev.slice(0, idx);
+                // keep=true: keep tid and before (restore)
+                // keep=false: remove tid and after (regret/replay)
+                const cutoff = keep ? idx + 1 : idx;
+                if (cutoff >= prev.length) return prev;
+                const kept = prev.slice(0, cutoff);
                 lastIdRef.current = kept.length
                     ? kept[kept.length - 1].id
                     : null;
