@@ -207,6 +207,9 @@ class Scheduler:
         assert session is not None and channel is not None
 
         try:
+            # ── 0. reset terminal（每 turn 独立 shell 环境）──
+            session._sandbox.reset_terminal()
+
             # ── 1. snapshot: first turn → before; every turn → after LLM ─
             is_first = (
                 self._shadow_repo is not None

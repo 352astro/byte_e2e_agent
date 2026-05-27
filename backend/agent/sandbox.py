@@ -48,10 +48,14 @@ class Sandbox:
 
     # ── 生命周期 ──────────────────────────────────────
 
-    async def shutdown(self) -> None:
+    def reset_terminal(self) -> None:
+        """Stop 当前 terminal，下次访问时自动重建。"""
         if self._terminal is not None:
             self._terminal.stop()
             self._terminal = None
+
+    async def shutdown(self) -> None:
+        self.reset_terminal()
 
     # ── 路径审查 ──────────────────────────────────────
 
