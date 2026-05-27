@@ -68,7 +68,6 @@ interface ShellCardProps {
     args: string;
     active?: boolean;
     defaultCollapsed?: boolean;
-    standalone?: boolean;
     focusId?: string;
     resultContent?: string;
     collapsed?: boolean;
@@ -84,7 +83,6 @@ export function ShellCard({
     args,
     active = false,
     defaultCollapsed = false,
-    standalone = false,
     focusId,
     resultContent,
     collapsed: controlledCollapsed,
@@ -109,9 +107,8 @@ export function ShellCard({
                 onToggle={toggle}
                 cardClassName="tool-card--shell"
                 headerClassName="shell-call-bar"
-                standalone={standalone && !command}
                 title={
-                    standalone ? undefined : (
+                    (
                         <>
                             <Icon
                                 name="tool"
@@ -141,7 +138,6 @@ export function ShellCard({
                     collapsed={collapsed}
                     onToggle={toggle}
                     cardClassName="tool-card--shell"
-                    standalone
                 >
                     <HighlightCode
                         code={resultContent}
@@ -334,7 +330,6 @@ export function ToolResultCard({
                 collapsed={collapsed}
                 onToggle={toggle}
                 cardClassName="tool-card--shell"
-                standalone
             >
                 <HighlightCode
                     code={result}
