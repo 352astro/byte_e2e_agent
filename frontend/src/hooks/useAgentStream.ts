@@ -211,7 +211,10 @@ export default function useAgentStream({
         } catch {}
         setInterrupting(false);
         setRunning(false);
-    }, [interrupting]);
+        // Reload transcripts: tool_results generated after SSE abort
+        // would otherwise never reach the frontend.
+        reloadTranscripts();
+    }, [interrupting, reloadTranscripts]);
 
     // ── helpers ──────────────────────────────────────
 
