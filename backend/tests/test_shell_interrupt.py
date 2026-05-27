@@ -42,23 +42,24 @@ async def _run(sb: Sandbox, command: str, timeout_ms: int = 800) -> str:
 
 @pytest.mark.asyncio
 async def test_normal_execution():
-    """基本：正常命令输出正确。"""
+    """基本：正常命令输出正确，不含超时/中断提示。"""
     sb = Sandbox()
     try:
         out = await _collect_stream(sb, "echo hello", timeout_ms=500)
         assert "hello" in out
+        assert "timed out" not in out.lower()
+        assert "interrupted" not in out.lower()
     finally:
         await sb.shutdown()
 
 
 @pytest.mark.asyncio
 async def test_timeout_then_terminal_recovers():
-    """超时后流式输出为空，但 stream_shell 同步了 terminal，
-    后续命令正常执行。"""
+    """超时后 stream_shell yield 超时提示，terminal 自动恢复。"""
     sb = Sandbox()
     try:
         out = await _collect_stream(sb, "sleep 3", timeout_ms=500)
-        assert out == "" or "exit code" in out.lower()
+        assert "timed out" in out.lower(), f"Expected timeout message, got: {out!r}"
 
         out2 = await _run(sb, "echo recovered", timeout_ms=500)
         assert "recovered" in out2, (

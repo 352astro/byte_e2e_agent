@@ -680,15 +680,7 @@ class Scheduler:
                     result_id, "tool_result", chunk_text, chunk_id=result_id
                 )
             exit_code = sandbox.terminal._last_exit_code
-            if exit_code == -1:
-                # marker 未找到 → 超时或中断
-                await channel.chunk(
-                    result_id,
-                    "tool_result",
-                    "\n[Command timed out or was interrupted]",
-                    chunk_id=result_id,
-                )
-            elif exit_code != 0:
+            if exit_code not in (0, -1):
                 await channel.chunk(
                     result_id,
                     "tool_result",

@@ -125,9 +125,12 @@ class Sandbox:
 
         # 3. Fuse timeout + user interrupt into a single trigger
         trigger = asyncio.Event()
+        timed_out = False
 
         async def _timeout_task() -> None:
+            nonlocal timed_out
             await asyncio.sleep(timeout_ms / 1000.0)
+            timed_out = True
             trigger.set()
 
         async def _user_intr_task() -> None:
@@ -163,17 +166,23 @@ class Sandbox:
                     yield chunk
                 else:
                     chunk_future.cancel()
-            # Interrupted: drain remaining chunks
-            while True:
-                try:
-                    chunk = chunk_queue.get_nowait()
-                    if chunk is None:
+            if interrupted.is_set():
+                # Interrupted: drain remaining chunks
+                while True:
+                    try:
+                        chunk = chunk_queue.get_nowait()
+                        if chunk is None:
+                            break
+                        yield chunk
+                    except asyncio.QueueEmpty:
                         break
-                    yield chunk
-                except asyncio.QueueEmpty:
-                    break
-            # Interrupt 后 terminal 可能脏，直接重建
-            self.reset_terminal()
+                # 区分超时 / 用户中断，注入明确提示
+                if timed_out:
+                    yield f"\n[Command timed out after {timeout_ms}ms]"
+                else:
+                    yield "\n[Command was interrupted by user]"
+                # 中断后 terminal 可能脏，直接重建
+                self.reset_terminal()
         finally:
             for t in (read_task, timeout_task, intr_wait_task, signal_task):
                 if not t.done():
