@@ -1,7 +1,7 @@
 """
 沙箱 — 多会话隔离容器。
 
-每个 ReActAgent 实例持有一个 SandBox，负责：
+每个 Session 持有一个 Sandbox，负责：
 - 持久终端管理（PersistentTerminal）
 - 路径越界审查（safe_resolve_path）
 - 危险指令拦截（check_command_safety）
@@ -87,25 +87,17 @@ class Sandbox:
     async def stream_shell(
         self,
         command: str,
-        timeout_ms: int = 30000,
-        interrupt_event: asyncio.Event | None = None,
+        timeout_ms: int,
+        interrupt_event: asyncio.Event,
     ):
         """流式执行 Shell 命令，yield 输出块。
 
-        无 interrupt_event 时走同步路径（零线程开销）。
-        有 interrupt_event 时在后台线程运行终端 I/O，保持 event loop
-        空闲以响应中断。
+        在后台线程运行终端 I/O，保持 event loop 空闲以响应中断。
         """
         try:
             check_command_safety(command)
         except ValueError as exc:
             yield f"Error: {exc}"
-            return
-
-        # ── 无中断需求：同步路径，零额外开销 ──────────
-        if interrupt_event is None:
-            for chunk in self.terminal.run_stream(command, timeout_ms):
-                yield chunk
             return
 
         # ── 可中断路径：terminal 在 background task，外层 asyncio.wait 竞速 ──
@@ -180,6 +172,8 @@ class Sandbox:
                     yield chunk
                 except asyncio.QueueEmpty:
                     break
+            # Interrupt 后 terminal 可能脏，直接重建
+            self.reset_terminal()
         finally:
             for t in (read_task, timeout_task, intr_wait_task, signal_task):
                 if not t.done():

@@ -1,4 +1,4 @@
-"""Shell 工具 — 委托 SandBox 执行。"""
+"""Shell 工具 — 委托 Sandbox 执行。"""
 
 import sys
 

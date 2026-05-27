@@ -1,4 +1,4 @@
-# 2026-05-22 — SandBox 多会话隔离 + 全异步重构
+# 2026-05-22 — Sandbox 多会话隔离 + 全异步重构
 
 ## 动机
 
@@ -13,7 +13,7 @@
 
 | 文件 | 说明 |
 |------|------|
-| `agent/sandbox.py` | `SandBox` 类 — 终端管理、路径审查、危险指令拦截、工具执行分流 |
+| `agent/sandbox.py` | `Sandbox` 类 — 终端管理、路径审查、危险指令拦截、工具执行分流 |
 
 ### 删除
 
@@ -35,14 +35,14 @@
 | `agent/tools/edit.py` | 委托 `sandbox.edit_file()`，保留 `_fuzzy_replace` 等 helper |
 | `agent/tools/search.py` | `execute()` → async |
 | `agent/tools/skill.py` | `execute()` → async |
-| `agent/react.py` | `run()` / `run_stream()` → async；持有 SandBox 实例；工具分流逻辑内联 |
-| `main.py` | SSE endpoint → async generator；创建 SandBox 传入 agent |
+| `agent/react.py` | `run()` / `run_stream()` → async；持有 Sandbox 实例；工具分流逻辑内联 |
+| `main.py` | SSE endpoint → async generator；创建 Sandbox 传入 agent |
 | `cli.py` | `asyncio.run(async_main())` 包装 |
 
 ### 不变
 
 - `finish.py`、`plan.py`、`subtask.py` — 无 execute()，由 react 直接处理
-- `_safety.py`、`_json.py`、`plan_manager.py`、`toolset.py` — 被 SandBox 或 react 调用
+- `_safety.py`、`_json.py`、`plan_manager.py`、`toolset.py` — 被 Sandbox 或 react 调用
 - 前端 — 零改动
 
 ## 架构对比
@@ -56,10 +56,10 @@ Bash.execute() → terminal     Shell.execute(sandbox) → sandbox.run_shell()
 Read.execute() → workspace    Read.execute(sandbox) → sandbox.read_file()
 ```
 
-## SandBox API
+## Sandbox API
 
 ```python
-sb = SandBox("/path/to/workspace")
+sb = Sandbox("/path/to/workspace")
 
 # 属性
 sb.workspace          # str

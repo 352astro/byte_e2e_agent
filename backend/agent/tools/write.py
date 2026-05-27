@@ -1,5 +1,4 @@
-"""Write 工具 — 委托 SandBox 写入文件。"""
-
+"""Write 工具 — 委托 Sandbox 写入文件。"""
 
 from pydantic import Field
 
@@ -7,7 +6,6 @@ from agent.tools.base import BaseTool
 
 
 class Write(BaseTool):
-
     path: str = Field(
         ...,
         description="File path to write (relative to workspace).",

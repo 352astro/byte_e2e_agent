@@ -43,7 +43,7 @@
 |------|------|
 | `agent/tools/finish.py` | `finish_reason == "stop"` 完全替代 |
 | `agent/utils/_json.py` | json-repair / safe_validate_json 无调用方 |
-| `agent/tools/workspace.py` | 全局单例被 SandBox 取代 |
+| `agent/tools/workspace.py` | 全局单例被 Sandbox 取代 |
 | `explore_tool_calls.py` | 临时探索脚本 |
 | `explore_pydantic_tool_schema.py` | 临时探索脚本 |
 

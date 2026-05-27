@@ -1,5 +1,4 @@
-"""Edit 工具 — 委托 SandBox 执行查找替换。"""
-
+"""Edit 工具 — 委托 Sandbox 执行查找替换。"""
 
 from pydantic import BaseModel, Field
 
@@ -12,7 +11,6 @@ class EditOp(BaseModel):
 
 
 class Edit(BaseTool):
-
     path: str = Field(..., description="File path to edit (relative to workspace).")
     edits: list[EditOp] = Field(..., description="Ordered find-and-replace ops.")
 
@@ -21,7 +19,7 @@ class Edit(BaseTool):
         return await sandbox.edit_file(self.path, ops)
 
 
-# ── Helpers (used by SandBox) ──────────────────────────────
+# ── Helpers (used by Sandbox) ──────────────────────────────
 
 
 def _fuzzy_replace(content: str, old_text: str, new_text: str) -> "tuple[str, bool]":

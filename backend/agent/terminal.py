@@ -151,7 +151,9 @@ class PersistentTerminal:
         self._last_exit_code = -1
         return marker, time.monotonic()
 
-    def read_stream(self, marker: str, start_time: float, timeout_ms: int = 30000) -> Iterator[str]:
+    def read_stream(
+        self, marker: str, start_time: float, timeout_ms: int = 30000
+    ) -> Iterator[str]:
         """Read command output until the marker is found or timeout.
 
         Must be called after write_command(); the command is already running.
@@ -254,17 +256,16 @@ class PersistentTerminal:
             pass
 
     def _recover_after_timeout(self) -> None:
-        """Interrupt the stuck process and drain residual output.
+        """Interrupt the stuck process, drain output, sync terminal.
 
-        Unix: sends SIGINT to the entire process group (bash + its children).
-              The TTY layer translates this into a clean ^C for the foreground
-              job — no byte pollution in stdin.
+        After SIGINT bash outputs a fresh prompt.  We drain passive output
+        first, then write a sync marker and read until it appears — this
+        consumes the prompt so the next command's marker detection is clean.
         """
         if not self.alive:
             return
         try:
             if sys.platform == "win32":
-                # Fallback: write \x03 (less reliable, but only option on Windows)
                 self._write_stdin("\x03")
                 time.sleep(0.3)
             else:
@@ -272,7 +273,6 @@ class PersistentTerminal:
                 pgid = os.getpgid(self._proc.pid)
                 os.killpg(pgid, signal.SIGINT)
                 time.sleep(0.3)
-                # Drain anything that the signal triggered
                 self._drain_startup()
         except Exception:
             pass

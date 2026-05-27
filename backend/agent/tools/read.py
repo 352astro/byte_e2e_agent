@@ -1,5 +1,4 @@
-"""Read 工具 — 委托 SandBox 读取文件。"""
-
+"""Read 工具 — 委托 Sandbox 读取文件。"""
 
 from pydantic import Field
 
@@ -7,7 +6,6 @@ from agent.tools.base import BaseTool
 
 
 class Read(BaseTool):
-
     path: str = Field(
         ...,
         description="File path to read (relative to workspace).",

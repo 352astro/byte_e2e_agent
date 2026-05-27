@@ -15,7 +15,7 @@
 - `turns` — LLM 对话上下文（`list[dict]`，OpenAI 消息格式）
 - `turns_history` — 结构化 Turn 快照（`list[dict]`，供前端 history API）
 
-恢复时按原样重建 `ReActAgent` 实例（新 `SandBox`，共享 `HelloAgentsLLM`）。
+恢复时按原样重建 `ReActAgent` 实例（新 `Sandbox`，共享 `HelloAgentsLLM`）。
 
 ## 触发时机
 
@@ -41,7 +41,7 @@
 ## 局限性（过渡方案固有）
 
 - 仅在流正常结束（含客户端断开）和正常关机时存盘；`kill -9` / 崩溃无保护
-- 恢复后的 session 使用全新 `SandBox`（终端 `cd` 状态丢失，但这是 agent 设计上的无状态预期）
+- 恢复后的 session 使用全新 `Sandbox`（终端 `cd` 状态丢失，但这是 agent 设计上的无状态预期）
 - 无版本兼容：若 Turn 结构变更，旧持久化文件加载将失败（静默跳过）
 - 无并发保护：多 worker 场景下同一文件可能被覆盖
-- 旧 session 的文件系统副作用（SandBox 中创建的文件）不会随持久化恢复
+- 旧 session 的文件系统副作用（Sandbox 中创建的文件）不会随持久化恢复

@@ -642,8 +642,8 @@ class Scheduler:
     async def _execute_one_tool(
         self,
         tc: dict,
-        sandbox: object,
-        toolset: object,
+        sandbox: Sandbox,
+        toolset: ToolSet,
         channel: TranscriptStream,
     ) -> None:
         """执行单个 tool_call，结果全部通过 chunk 写入 channel。
@@ -680,7 +680,15 @@ class Scheduler:
                     result_id, "tool_result", chunk_text, chunk_id=result_id
                 )
             exit_code = sandbox.terminal._last_exit_code
-            if exit_code != 0:
+            if exit_code == -1:
+                # marker 未找到 → 超时或中断
+                await channel.chunk(
+                    result_id,
+                    "tool_result",
+                    "\n[Command timed out or was interrupted]",
+                    chunk_id=result_id,
+                )
+            elif exit_code != 0:
                 await channel.chunk(
                     result_id,
                     "tool_result",
