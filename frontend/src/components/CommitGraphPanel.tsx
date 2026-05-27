@@ -327,7 +327,7 @@ const CommitGraphPanel = forwardRef<CommitGraphHandle, CommitGraphPanelProps>(
                                                 <LockableButton
                                                     icon={
                                                         <Icon
-                                                            name="restore"
+                                                            name="undo"
                                                             size={11}
                                                         />
                                                     }
@@ -351,7 +351,7 @@ const CommitGraphPanel = forwardRef<CommitGraphHandle, CommitGraphPanelProps>(
                                                 <LockableButton
                                                     icon={
                                                         <Icon
-                                                            name="restore"
+                                                            name="flag"
                                                             size={11}
                                                         />
                                                     }

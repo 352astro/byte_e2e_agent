@@ -68,7 +68,7 @@ function CommitBadge({
             <span className="commit-short-id">{shortSha}</span>
             {onRegret && (
                 <LockableButton
-                    icon={<Icon name="restore" size={12} />}
+                    icon={<Icon name="undo" size={12} />}
                     label="regret"
                     confirming={confirming === "regret"}
                     locked={locked}
@@ -78,7 +78,7 @@ function CommitBadge({
             )}
             {onRestore && (
                 <LockableButton
-                    icon={<Icon name="restore" size={12} />}
+                    icon={<Icon name="flag" size={12} />}
                     label="restore"
                     confirming={confirming === "restore"}
                     locked={locked}

@@ -16,14 +16,6 @@ import { useCollapsible } from "../hooks/useCollapsible";
 
 // ── Shared helpers ─────────────────────────────────────
 
-/**
- * Extract short metadata + long streaming value from partial-JSON args.
- *
- * Before: used regex fallback (`extractArg`) which could fail on partial JSON.
- * Now:   uses prefix JSON.parse via `extractToolMeta` — the backend places
- *        short fields (timeout_ms, path) before the long key (command, content),
- *        so metadata is parseable from the very first chunk.
- */
 function shellMeta(args: string) {
     const { meta, rest } = extractToolMeta(args, "Shell");
     const timeoutMs = meta.timeout_ms != null ? String(meta.timeout_ms) : null;
@@ -43,23 +35,48 @@ function fileMeta(args: string) {
     };
 }
 
+/**
+ * Build the right-side status indicator: spinner (running), red X (error),
+ * green check (completed), plus dim timeout text when applicable.
+ */
+function buildHeaderRight(
+    active: boolean,
+    timeout: string | null,
+    hasResult: boolean,
+): React.ReactNode {
+    // unpaired → spinner (backend will eventually pair it)
+    // paired   → check (success) or error (when backend provides flag)
+    const showSpinner = active || !hasResult;
+    return (
+        <>
+            {timeout && (
+                <span className="shell-call-timeout">{timeout}s</span>
+            )}
+            {showSpinner ? (
+                <span className="shell-call-spinner" />
+            ) : (
+                <Icon name="check" size={12} className="tool-status-ok" />
+            )}
+        </>
+    );
+}
+
 // ── Shell ──────────────────────────────────────────────
 
 interface ShellCardProps {
     cardId: string;
     args: string;
-    /** When true the card is still streaming — show spinner & timeout. */
     active?: boolean;
-    /** Auto-collapse when this flips to true (e.g. streaming finished). */
     defaultCollapsed?: boolean;
-    /** Omit the "Run Command" header (used by standalone result cards). */
     standalone?: boolean;
     focusId?: string;
-    /** When provided a second card is rendered below the call showing the result. */
     resultContent?: string;
-    /** External collapsed control (when parent manages a Set of IDs). */
     collapsed?: boolean;
     onToggle?: (id: string) => void;
+    /** Left extension — rendered after the main label. */
+    subtitle?: React.ReactNode;
+    /** Right extension — spinner, timeout, etc. */
+    headerRight?: React.ReactNode;
 }
 
 export function ShellCard({
@@ -72,6 +89,8 @@ export function ShellCard({
     resultContent,
     collapsed: controlledCollapsed,
     onToggle: onToggleControlled,
+    subtitle,
+    headerRight,
 }: ShellCardProps) {
     const [collapsed, toggle] = useCollapsible(
         defaultCollapsed,
@@ -102,21 +121,11 @@ export function ShellCard({
                             <span className="shell-call-label">
                                 Run Command
                             </span>
+                            {subtitle}
                         </>
                     )
                 }
-                headerRight={
-                    !hasResult && active ? (
-                        <>
-                            {timeout && (
-                                <span className="shell-call-timeout">
-                                    {timeout}s
-                                </span>
-                            )}
-                            <span className="shell-call-spinner" />
-                        </>
-                    ) : undefined
-                }
+                headerRight={headerRight}
             >
                 <HighlightCode
                     code={command || "\u2026"}
@@ -154,12 +163,13 @@ interface WriteReadCardProps {
     active?: boolean;
     defaultCollapsed?: boolean;
     focusId?: string;
-    /** File content to display in the body.  When omitted and the card is
-     *  active (streaming), the long field from args is used as body. */
     bodyContent?: string;
-    /** External collapsed control (when parent manages a Set of IDs). */
     collapsed?: boolean;
     onToggle?: (id: string) => void;
+    /** Left extension — rendered after the variant label. */
+    subtitle?: React.ReactNode;
+    /** Right extension — spinner, timeout, etc. */
+    headerRight?: React.ReactNode;
 }
 
 export function WriteReadCard({
@@ -172,6 +182,8 @@ export function WriteReadCard({
     bodyContent,
     collapsed: controlledCollapsed,
     onToggle: onToggleControlled,
+    subtitle,
+    headerRight,
 }: WriteReadCardProps) {
     const [collapsed, toggle] = useCollapsible(
         defaultCollapsed,
@@ -180,8 +192,6 @@ export function WriteReadCard({
     );
     const { path: filePath, content: streamingContent } = fileMeta(args);
 
-    // During streaming without explicit bodyContent, use the streaming
-    // long value extracted from args by splitPartialJson.
     const displayContent =
         bodyContent ?? (active ? streamingContent || undefined : undefined);
     const hasBody = displayContent !== undefined;
@@ -205,11 +215,10 @@ export function WriteReadCard({
                 <>
                     <Icon name="write" size={13} className="write-call-icon" />
                     <span className="write-call-label">{variant}</span>
-                    {filePath && (
-                        <span className="write-call-path">{filePath}</span>
-                    )}
+                    {subtitle}
                 </>
             }
+            headerRight={headerRight}
         >
             {hasBody && (
                 <FileContent
@@ -231,11 +240,13 @@ interface DefaultToolCardProps {
     active?: boolean;
     defaultCollapsed?: boolean;
     focusId?: string;
-    /** When provided a second card is rendered below showing the result. */
     resultContent?: string;
-    /** External collapsed control (when parent manages a Set of IDs). */
     collapsed?: boolean;
     onToggle?: (id: string) => void;
+    /** Left extension — rendered after the tool name. */
+    subtitle?: React.ReactNode;
+    /** Right extension — spinner, timeout, etc. */
+    headerRight?: React.ReactNode;
 }
 
 export function DefaultToolCard({
@@ -248,6 +259,8 @@ export function DefaultToolCard({
     resultContent,
     collapsed: controlledCollapsed,
     onToggle: onToggleControlled,
+    subtitle,
+    headerRight,
 }: DefaultToolCardProps) {
     const [collapsed, toggle] = useCollapsible(
         defaultCollapsed,
@@ -269,8 +282,10 @@ export function DefaultToolCard({
                         <span className="tool-label">
                             {toolName || "\u2026"}
                         </span>
+                        {subtitle}
                     </>
                 }
+                headerRight={headerRight}
             >
                 <div className="tool-code-block">
                     <pre>
@@ -312,7 +327,6 @@ export function ToolResultCard({
 }: ToolResultCardProps) {
     const [collapsed, toggle] = useCollapsible(false);
 
-    // Shell — standalone, no header, terminal output
     if (toolName === "Shell") {
         return (
             <CollapsibleCard
@@ -331,7 +345,6 @@ export function ToolResultCard({
         );
     }
 
-    // Read — file content with language detection
     if (toolName === "Read") {
         const filePath = toolArgs?.path ? String(toolArgs.path) : "";
         return (
@@ -361,7 +374,6 @@ export function ToolResultCard({
         );
     }
 
-    // Write & everything else — Markdown body
     return (
         <CollapsibleCard
             id={`${toolName}-result`}
@@ -383,8 +395,7 @@ export function ToolResultCard({
 }
 
 // ═══════════════════════════════════════════════════════════
-//  Unified dispatch — single source of truth for
-//  tool-name → component mapping.
+//  Unified dispatch
 // ═══════════════════════════════════════════════════════════
 
 export interface ToolCardDatum {
@@ -392,28 +403,34 @@ export interface ToolCardDatum {
     toolName: string;
     args: string;
     active?: boolean;
-    /** External collapsed control (TranscriptCard manages a Set). */
     collapsed?: boolean;
     onToggle?: (id: string) => void;
-    /** Internal collapsed control (ToolPairCard self-manages). */
     defaultCollapsed?: boolean;
     resultContent?: string;
     bodyContent?: string;
     focusId?: string;
 }
 
-/**
- * Single dispatch — both TranscriptCard and ToolPairCard route through here.
- *
- * Collapse mode is determined by which prop the caller provides:
- *   `collapsed` / `onToggle` → external control (TranscriptCard)
- *   `defaultCollapsed`       → internal self-management (ToolPairCard)
- */
 export function renderToolCard(d: ToolCardDatum) {
     const external = d.collapsed !== undefined;
     const collapsed = external ? d.collapsed : undefined;
     const onToggle = external ? d.onToggle : undefined;
     const defaultCollapsed = external ? false : (d.defaultCollapsed ?? false);
+
+    // ── Compute subtitle from early-extracted metadata ──
+    const { meta } = extractToolMeta(d.args, d.toolName);
+    let subtitle: React.ReactNode = undefined;
+    const filePath = meta.path as string | undefined;
+    if (filePath) {
+        subtitle = <span className="write-call-path">{filePath}</span>;
+    }
+
+    // ── Compute right-side: spinner + timeout ──
+    const timeoutMs = meta.timeout_ms != null ? String(meta.timeout_ms) : null;
+    const timeout = timeoutMs
+        ? String(Math.round(Number(timeoutMs) / 1000))
+        : null;
+    const headerRight = buildHeaderRight(d.active ?? false, timeout, d.resultContent !== undefined);
 
     switch (d.toolName) {
         case "Shell":
@@ -427,6 +444,8 @@ export function renderToolCard(d: ToolCardDatum) {
                     defaultCollapsed={defaultCollapsed}
                     focusId={d.focusId}
                     resultContent={d.resultContent}
+                    subtitle={subtitle}
+                    headerRight={headerRight}
                 />
             );
         case "Write":
@@ -441,6 +460,8 @@ export function renderToolCard(d: ToolCardDatum) {
                     defaultCollapsed={defaultCollapsed}
                     focusId={d.focusId}
                     bodyContent={d.bodyContent}
+                    subtitle={subtitle}
+                    headerRight={headerRight}
                 />
             );
         case "Read":
@@ -455,6 +476,8 @@ export function renderToolCard(d: ToolCardDatum) {
                     defaultCollapsed={defaultCollapsed}
                     focusId={d.focusId}
                     bodyContent={d.resultContent ?? d.bodyContent}
+                    subtitle={subtitle}
+                    headerRight={headerRight}
                 />
             );
         default:
@@ -469,6 +492,8 @@ export function renderToolCard(d: ToolCardDatum) {
                     defaultCollapsed={defaultCollapsed}
                     focusId={d.focusId}
                     resultContent={d.resultContent}
+                    subtitle={subtitle}
+                    headerRight={headerRight}
                 />
             );
     }

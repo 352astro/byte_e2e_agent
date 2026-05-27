@@ -379,6 +379,7 @@
     align-items: center;
     gap: 6px;
     padding: 3px 0;
+    padding-right: 2px;
     cursor: pointer;
     user-select: none;
 }
@@ -1241,4 +1242,16 @@
     font-size: 0.65rem;
     color: #ccc;
     margin-top: 4px;
+}
+
+/* ── Tool status icons (header right) ──────────── */
+
+.tool-status-ok {
+    color: #4caf50;
+    flex-shrink: 0;
+}
+
+.tool-status-err {
+    color: #e53935;
+    flex-shrink: 0;
 }
