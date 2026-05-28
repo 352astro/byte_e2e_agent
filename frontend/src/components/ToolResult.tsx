@@ -1,3 +1,4 @@
+import React from "react";
 import { ToolResultCard } from "./ToolCards";
 
 interface ToolResultProps {
@@ -6,7 +7,7 @@ interface ToolResultProps {
     toolArgs?: Record<string, unknown>;
 }
 
-export default function ToolResult({
+const ToolResult = React.memo(function ToolResult({
     toolName,
     result,
     toolArgs,
@@ -18,4 +19,7 @@ export default function ToolResult({
             toolArgs={toolArgs}
         />
     );
-}
+});
+
+export default ToolResult;
+

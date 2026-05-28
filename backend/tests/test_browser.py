@@ -70,7 +70,7 @@ class TestBrowserInspect:
         # Simulate scheduler with _run_subagent
         mock_scheduler = MagicMock()
 
-        async def _fake_run(sandbox, toolset, channel, prompt, max_steps):
+        async def _fake_run(sandbox, toolset, channel, prompt, max_steps, *, fork=False):
             # Verify the toolset doesn't contain BrowserInspect itself
             names = [t.function_name() for t in toolset.tools]
             assert "BrowserInspect" not in names

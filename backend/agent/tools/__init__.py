@@ -6,6 +6,7 @@ Tool / SubTool 等旧式声明已移除。
 """
 
 from agent.tools.base import BaseTool
+from agent.tools.browser import BrowserInspect
 from agent.tools.edit import Edit, EditOp
 from agent.tools.glob import Glob
 from agent.tools.grep import Grep
@@ -33,6 +34,7 @@ _ALL_TOOL_CLASSES: list[type[BaseTool]] = [
     Edit,
     LoadSkill,
     SubAgent,
+    BrowserInspect,
     TaskList,
     TaskRewrite,
     TaskUpdate,
@@ -46,6 +48,7 @@ def get_all_tool_classes() -> list[type[BaseTool]]:
 
 __all__ = [
     "BaseTool",
+    "BrowserInspect",
     "Edit",
     "EditOp",
     "Glob",

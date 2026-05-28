@@ -15,7 +15,7 @@ from agent.metrics import LLMCallContext
 from agent.sandbox import Sandbox
 from agent.session import Session
 from agent.shadow_repo import ShadowRepo
-from agent.tools import TaskList, TaskRewrite
+from agent.tools import BrowserInspect, TaskList, TaskRewrite
 from agent.tools.shell import get_platform_hint
 from agent.tools.skill import skill_context_message
 from agent.tools.subagent import SubAgent
@@ -698,27 +698,40 @@ class Scheduler:
         channel: TranscriptStream,
         prompt: str,
         max_steps: int,
+        *,
+        fork: bool = False,
     ) -> str:
         """在同一个 session 内运行子智能体。
 
         子智能体自备静默 TranscriptStream（无 subscriber），
         _model_call 和 _execute_one_tool 的流式输出被其吸收，
         不污染主 channel。消息由静默 channel.message 读取。
+        fork=True 时，子智能体继承父会话的全部历史消息。
         """
-        subagent_tools = toolset.without(SubAgent, TaskRewrite, TaskList).openai_tools
+        subagent_tools = toolset.without(
+            SubAgent, BrowserInspect, TaskRewrite, TaskList
+        ).openai_tools
         parent_session = self._current_session
         assert parent_session is not None
 
-        subagent_messages: list[dict] = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a sub-agent. Complete the assigned task "
-                    "and return a final answer."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ]
+        subagent_messages: list[dict] = []
+
+        if fork:
+            # 继承父会话全部历史
+            subagent_messages.extend(parent_session.get_messages())
+
+        subagent_messages.extend(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a sub-agent. Complete the assigned task "
+                        "and return a final answer."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ]
+        )
 
         last_answer = ""
 

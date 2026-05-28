@@ -1,3 +1,4 @@
+import React from "react";
 import { useState, useRef, useEffect } from "react";
 
 interface EditableUserBubbleProps {
@@ -5,7 +6,7 @@ interface EditableUserBubbleProps {
   onEditSubmit: (content: string) => void;
 }
 
-export default function EditableUserBubble({
+const EditableUserBubble = React.memo(function EditableUserBubble({
   content,
   onEditSubmit,
 }: EditableUserBubbleProps) {
@@ -88,4 +89,7 @@ export default function EditableUserBubble({
       />
     </div>
   );
-}
+});
+
+export default EditableUserBubble;
+

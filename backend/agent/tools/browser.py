@@ -11,7 +11,12 @@ from typing import Literal
 
 from pydantic import Field
 
-from agent.tools import BaseTool, Glob, Grep, Read, Shell, ToolSet
+from agent.tools.base import BaseTool
+from agent.tools.glob import Glob
+from agent.tools.grep import Grep
+from agent.tools.read import Read
+from agent.tools.shell import Shell
+from agent.tools.toolset import ToolSet
 
 # ── Playwright 单例 ─────────────────────────────────────
 
@@ -201,6 +206,14 @@ class BrowserInspect(BaseTool):
         le=20,
         description="Maximum reasoning steps for the inspector sub-agent.",
     )
+    fork: bool = Field(
+        default=True,
+        description=(
+            "If True, the sub-agent inherits the full parent conversation "
+            "history. Strongly recommended for browser inspection — the "
+            "sub-agent needs context about what code has been changed."
+        ),
+    )
 
     async def execute(
         self,
@@ -216,6 +229,9 @@ class BrowserInspect(BaseTool):
         if run is None:
             return "Error: BrowserInspect requires scheduler reference."
 
-        # Sub-agent gets browser tools + file reading tools (no Write/Edit)
         browser_toolset = ToolSet([BrowserOpen, BrowserAct, Read, Grep, Glob, Shell])
-        return await run(sandbox, browser_toolset, channel, self.prompt, self.max_steps)
+        return await run(
+            sandbox, browser_toolset, channel,
+            self.prompt, self.max_steps,
+            fork=self.fork,
+        )

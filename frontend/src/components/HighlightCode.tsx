@@ -1,3 +1,4 @@
+import React from "react";
 import { useMemo } from "react";
 import { highlightCode } from "../hooks/highlight";
 import CopyButton from "./CopyButton";
@@ -8,7 +9,7 @@ interface HighlightCodeProps {
   className?: string;
 }
 
-export default function HighlightCode({
+const HighlightCode = React.memo(function HighlightCode({
   code,
   language,
   className = "",
@@ -23,4 +24,7 @@ export default function HighlightCode({
       </pre>
     </div>
   );
-}
+});
+
+export default HighlightCode;
+

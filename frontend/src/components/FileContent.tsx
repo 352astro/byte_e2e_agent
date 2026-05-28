@@ -1,3 +1,4 @@
+import React from "react";
 import Markdown from "./Markdown";
 import HighlightCode from "./HighlightCode";
 
@@ -39,7 +40,7 @@ interface FileContentProps {
   className?: string;
 }
 
-export default function FileContent({
+const FileContent = React.memo(function FileContent({
   content,
   filePath = "",
   className = "",
@@ -66,6 +67,9 @@ export default function FileContent({
       <Markdown text={content} />
     </div>
   );
-}
+});
+
+export default FileContent;
+
 
 export { guessLanguage };

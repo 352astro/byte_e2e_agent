@@ -1,3 +1,4 @@
+import React from "react";
 import { useState, useCallback } from "react";
 import Markdown from "./Markdown";
 import Icon from "./Icon";
@@ -189,7 +190,7 @@ interface TranscriptCardProps {
     hideToolCards?: boolean;
 }
 
-export default function TranscriptCard({
+const TranscriptCard = React.memo(function TranscriptCard({
     transcript: t,
     hideToolCards = false,
 }: TranscriptCardProps) {
@@ -349,4 +350,7 @@ export default function TranscriptCard({
                 })}
         </div>
     );
-}
+});
+
+export default TranscriptCard;
+

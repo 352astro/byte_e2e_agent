@@ -1,3 +1,4 @@
+import React from "react";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { marked } from "marked";
 import katex from "katex";
@@ -138,7 +139,7 @@ interface MarkdownProps {
     text: string;
 }
 
-export default function Markdown({ text }: MarkdownProps) {
+const Markdown = React.memo(function Markdown({ text }: MarkdownProps) {
     const mountedRef = useRef(true);
     const [html, setHtml] = useState("");
 
@@ -236,4 +237,7 @@ export default function Markdown({ text }: MarkdownProps) {
             dangerouslySetInnerHTML={{ __html: html }}
         />
     );
-}
+});
+
+export default Markdown;
+

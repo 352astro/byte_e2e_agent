@@ -1,3 +1,4 @@
+import React from "react";
 import { renderToolCard } from "./ToolCards";
 import type { ToolPair } from "../types";
 
@@ -8,7 +9,7 @@ interface ToolPairCardProps {
     defaultCollapsed?: boolean;
 }
 
-export default function ToolPairCard({
+const ToolPairCard = React.memo(function ToolPairCard({
     pair,
     defaultCollapsed = false,
 }: ToolPairCardProps) {
@@ -39,4 +40,7 @@ export default function ToolPairCard({
         bodyContent,
         focusId: `${pair.callTranscriptId}/${pair.callIndex}`,
     });
-}
+});
+
+export default ToolPairCard;
+

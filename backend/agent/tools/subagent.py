@@ -18,6 +18,15 @@ class SubAgent(BaseTool):
         ...,
         description="Task description for the subagent — treated as its question",
     )
+    fork: bool = Field(
+        default=False,
+        description=(
+            "If True, the sub-agent inherits the full parent conversation "
+            "history (all messages) and appends its own.  "
+            "Useful when the sub-agent needs full context about what has "
+            "been done so far."
+        ),
+    )
 
     async def execute(
         self,
@@ -32,4 +41,11 @@ class SubAgent(BaseTool):
         run = getattr(scheduler, "_run_subagent", None)
         if run is None:
             return "Error: SubAgent requires scheduler reference."
-        return await run(sandbox, toolset, channel, self.prompt, self.max_steps)
+        return await run(
+            sandbox,
+            toolset,
+            channel,
+            self.prompt,
+            self.max_steps,
+            fork=self.fork,
+        )
