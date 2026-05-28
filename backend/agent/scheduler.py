@@ -701,6 +701,7 @@ class Scheduler:
         *,
         fork: bool = False,
         with_skills: list[str] | None = None,
+        system_extra: str | None = None,
     ) -> str:
         """在同一个 session 内运行子智能体。
 
@@ -710,6 +711,8 @@ class Scheduler:
         fork=True 时，子智能体继承父会话的全部历史消息。
         with_skills 指定要预加载的 skill 名称列表，其完整内容
         作为系统消息注入，子智能体无需自行调用 LoadSkill。
+        system_extra 可选的额外系统消息，在 skill 之后、user prompt
+        之前注入（BrowserInspect 用它来注入严格的行为约束）。
         """
         from agent.tools.skill import get_skill
 
@@ -722,8 +725,29 @@ class Scheduler:
         subagent_messages: list[dict] = []
 
         if fork:
-            # 继承父会话全部历史
-            subagent_messages.extend(parent_session.get_messages())
+            # 继承父会话全部历史，丢弃末尾未配对的 tool_call
+            from agent.session import drop_trailing_unpaired_tool_calls
+
+            subagent_messages.extend(
+                drop_trailing_unpaired_tool_calls(parent_session.get_messages())
+            )
+            # ── fork 澄清：前文仅供背景参考 ──────────
+            subagent_messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a sub-agent forked from a parent session. "
+                        "The conversation history above is provided for "
+                        "background context ONLY — those were the parent "
+                        "session's tasks, decisions, and reasoning. "
+                        "They are NOT your task. Your one and only task is "
+                        "the instruction in the user message below. Ignore "
+                        "any goals, conclusions, or plans from the history "
+                        "that conflict with your current instruction. "
+                        "Your instruction below is the sole authority."
+                    ),
+                }
+            )
 
         subagent_messages.append(
             {
@@ -751,6 +775,10 @@ class Scheduler:
                             ),
                         }
                     )
+
+        # ── 注入调用方额外系统消息 ────────────────────
+        if system_extra:
+            subagent_messages.append({"role": "system", "content": system_extra})
 
         subagent_messages.append({"role": "user", "content": prompt})
 

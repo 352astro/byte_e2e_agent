@@ -242,7 +242,7 @@ class BrowserInspect(BaseTool):
         if run is None:
             return "Error: BrowserInspect requires scheduler reference."
 
-        browser_toolset = ToolSet([BrowserOpen, BrowserAct, Read, Grep, Glob, Shell])
+        browser_toolset = ToolSet([BrowserOpen, BrowserAct])
         return await run(
             sandbox,
             browser_toolset,
@@ -250,4 +250,13 @@ class BrowserInspect(BaseTool):
             self.prompt,
             self.max_steps,
             fork=self.fork,
+            system_extra=(
+                "You are a browser inspection sub-agent. Your toolset "
+                "contains ONLY browser tools. When you receive an "
+                "instruction, DO NOT overthink. DO NOT analyze, plan, "
+                "or summarize. Do NOT output any text — immediately "
+                "call BrowserOpen to open the page. Your sole purpose "
+                "is: open the browser → perform actions → report "
+                "exactly what you see. Do nothing else."
+            ),
         )

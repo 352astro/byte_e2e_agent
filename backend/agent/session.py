@@ -511,6 +511,53 @@ def _safe_json_loads(value: str) -> dict:
 
 
 # ============================================================
+# Message cleanup utilities
+# ============================================================
+
+
+def drop_trailing_unpaired_tool_calls(messages: list[dict]) -> list[dict]:
+    """丢弃消息列表末尾未配对的 tool_call，返回清理后的副本。
+
+    从尾部反向扫描。如果最后的 assistant 消息有 tool_calls 但缺少
+    对应的 tool 结果（interrupt / 未执行完），则截断整个未完成的
+    对话轮次。用于 fork 子智能体前清理父会话的不完整尾巴。
+    """
+    if not messages:
+        return messages
+
+    satisfied: set[str] = set()
+    cutoff = len(messages)
+
+    for i in range(len(messages) - 1, -1, -1):
+        msg = messages[i]
+        role = msg.get("role", "")
+
+        if role == "tool":
+            tcid = msg.get("tool_call_id", "")
+            if tcid:
+                satisfied.add(tcid)
+            continue
+
+        if role == "assistant" and msg.get("tool_calls"):
+            tool_call_ids = {
+                tc.get("id", "") for tc in msg["tool_calls"] if tc.get("id")
+            }
+            if tool_call_ids and tool_call_ids.issubset(satisfied):
+                satisfied -= tool_call_ids
+                continue
+            else:
+                cutoff = i
+                satisfied = set()
+                continue
+
+        # user / assistant(无 tool_calls) → 自然边界，停止
+        cutoff = i + 1
+        break
+
+    return messages[:cutoff]
+
+
+# ============================================================
 # Filesystem helpers
 # ============================================================
 
