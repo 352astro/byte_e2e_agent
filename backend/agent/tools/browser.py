@@ -192,14 +192,6 @@ class BrowserInspect(BaseTool):
     It reports back findings, console errors, and DOM analysis.
     """
 
-    prompt: str = Field(
-        ...,
-        description=(
-            "Task for the browser inspector sub-agent.  Include the URL "
-            "to open and what to look for (e.g. 'Open http://localhost:5173, "
-            "check for console errors, verify the Send button exists')."
-        ),
-    )
     max_steps: int = Field(
         default=8,
         ge=1,
@@ -212,6 +204,27 @@ class BrowserInspect(BaseTool):
             "If True, the sub-agent inherits the full parent conversation "
             "history. Strongly recommended for browser inspection — the "
             "sub-agent needs context about what code has been changed."
+        ),
+    )
+    prompt: str = Field(
+        ...,
+        description=(
+            "Task for the browser inspector sub-agent. Include the URL "
+            "to open and what to look for (e.g. 'Open http://localhost:5173, "
+            "check for console errors, verify the Send button exists').\n"
+            "\n"
+            "CRITICAL when fork=False: the sub-agent starts with an EMPTY "
+            "context — it sees nothing from the parent conversation. You "
+            "MUST embed ALL relevant information into this prompt: what "
+            "code was changed, what the expected behavior is, which files "
+            "are involved, any known issues, and exactly what to inspect. "
+            "A vague prompt will cause the sub-agent to miss issues. Be "
+            "exhaustive.\n"
+            "\n"
+            "When fork=True (the default): the sub-agent inherits full "
+            "parent history, so the prompt can focus on the inspection "
+            "target — but still include any specifics the parent "
+            "conversation doesn't contain."
         ),
     )
 
@@ -231,7 +244,10 @@ class BrowserInspect(BaseTool):
 
         browser_toolset = ToolSet([BrowserOpen, BrowserAct, Read, Grep, Glob, Shell])
         return await run(
-            sandbox, browser_toolset, channel,
-            self.prompt, self.max_steps,
+            sandbox,
+            browser_toolset,
+            channel,
+            self.prompt,
+            self.max_steps,
             fork=self.fork,
         )

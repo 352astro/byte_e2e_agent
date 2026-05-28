@@ -14,10 +14,6 @@ class SubAgent(BaseTool):
         le=15,
         description="Maximum reasoning steps for the subagent",
     )
-    prompt: str = Field(
-        ...,
-        description="Task description for the subagent — treated as its question",
-    )
     fork: bool = Field(
         default=False,
         description=(
@@ -25,6 +21,33 @@ class SubAgent(BaseTool):
             "history (all messages) and appends its own.  "
             "Useful when the sub-agent needs full context about what has "
             "been done so far."
+        ),
+    )
+    with_skills: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Skill names to load and inject into the sub-agent's context "
+            "before it starts. Each skill's full content is inserted as a "
+            "system message, so the sub-agent follows its methodology "
+            "without needing to call LoadSkill itself."
+        ),
+    )
+    prompt: str = Field(
+        ...,
+        description=(
+            "Task description for the sub-agent — treated as its question.\n"
+            "\n"
+            "CRITICAL when fork=False (the default): the sub-agent starts "
+            "with an EMPTY context — it sees nothing from the parent "
+            "conversation. You MUST embed ALL relevant information into "
+            "this prompt: what has been done so far, current state, file "
+            "paths, error messages, decisions made, constraints, and "
+            "exactly what to do. A vague one-liner will cause the sub-agent "
+            "to fail. Be exhaustive.\n"
+            "\n"
+            "When fork=True: the sub-agent inherits full parent history, "
+            "so the prompt can be concise — but still cover anything the "
+            "parent conversation doesn't contain."
         ),
     )
 
@@ -48,4 +71,5 @@ class SubAgent(BaseTool):
             self.prompt,
             self.max_steps,
             fork=self.fork,
+            with_skills=self.with_skills,
         )

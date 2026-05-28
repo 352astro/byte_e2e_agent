@@ -700,6 +700,7 @@ class Scheduler:
         max_steps: int,
         *,
         fork: bool = False,
+        with_skills: list[str] | None = None,
     ) -> str:
         """在同一个 session 内运行子智能体。
 
@@ -707,7 +708,11 @@ class Scheduler:
         _model_call 和 _execute_one_tool 的流式输出被其吸收，
         不污染主 channel。消息由静默 channel.message 读取。
         fork=True 时，子智能体继承父会话的全部历史消息。
+        with_skills 指定要预加载的 skill 名称列表，其完整内容
+        作为系统消息注入，子智能体无需自行调用 LoadSkill。
         """
+        from agent.tools.skill import get_skill
+
         subagent_tools = toolset.without(
             SubAgent, BrowserInspect, TaskRewrite, TaskList
         ).openai_tools
@@ -720,18 +725,34 @@ class Scheduler:
             # 继承父会话全部历史
             subagent_messages.extend(parent_session.get_messages())
 
-        subagent_messages.extend(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a sub-agent. Complete the assigned task "
-                        "and return a final answer."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ]
+        subagent_messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "You are a sub-agent. Complete the assigned task "
+                    "and return a final answer."
+                ),
+            }
         )
+
+        # ── 注入预加载 skill ──────────────────────────
+        if with_skills:
+            for skill_name in with_skills:
+                skill = get_skill(skill_name)
+                if skill is not None:
+                    subagent_messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                f"[SKILL: {skill_name}]\n\n"
+                                f"The following skill methodology is pre-loaded "
+                                f"into your context. Follow it exactly.\n\n"
+                                f"{skill.read()}"
+                            ),
+                        }
+                    )
+
+        subagent_messages.append({"role": "user", "content": prompt})
 
         last_answer = ""
 

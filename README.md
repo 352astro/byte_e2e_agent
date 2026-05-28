@@ -40,7 +40,7 @@ byte_e2e_agent/
 │       │   └── skill.py       # Skill 扫描与加载工具
 │       ├── skills/            # Skill 特化能力模块
 │       │   └── git_commit_skill/
-│       │       └── Skill.md
+│       │       └── SKILL.md
 │       └── utils/
 │           ├── safety.py      # 路径与命令安全检查
 │           └── _term.py       # 终端文本样式工具
@@ -131,7 +131,7 @@ npm run dev
 - **FastAPI 应用层** — `app/` 承载路由、schema、配置、依赖注入和 Project service
 - **Agent 运行时** — `agent/` 承载 Scheduler、Session、Sandbox、ToolSet、Transcript
 - **ToolSet** — 运行时生成 OpenAI tools schema，支持嵌套 schema 内联和工具热插拔
-- **Skill 系统** — Markdown 特化能力模块：`agent/skills/<name>/Skill.md`
+- **Skill 系统** — Markdown 特化能力模块：`agent/skills/<name>/SKILL.md`
 - **TranscriptStream** — 统一管理 SSE `chunk` / `flush`，message 由 chunk 内部构建
 - **PersistentTerminal** — 跨平台持久 Shell（`cd` 状态保留），Shell 输出通过 SSE 流式推送
 - **角色化消息协议** — `system → user → assistant(tool_calls) → tool → …` 标准对话链
@@ -174,11 +174,11 @@ FROM llm_calls;
 
 ```bash
 mkdir -p backend/agent/skills/my_skill
-vim backend/agent/skills/my_skill/Skill.md
+vim backend/agent/skills/my_skill/SKILL.md
 # 下一次模型 step 会重新扫描并注入
 ```
 
-`Skill.md` 的第一段会作为摘要注入独立的 Skill context 系统消息；需要完整能力定义时，
+`SKILL.md` 的第一段会作为摘要注入独立的 Skill context 系统消息；需要完整能力定义时，
 Agent 通过 `LoadSkill` 读取完整内容。Skill context 会在每个模型 step 前刷新，因此支持热重载。
 
 ## 常用命令

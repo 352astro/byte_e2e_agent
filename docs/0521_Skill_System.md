@@ -12,14 +12,14 @@
 ```
 agent/skills/
 ├── git_commit_skill/
-│   └── Skill.md
+│   └── SKILL.md
 └── <future_skill>/
-    └── Skill.md
+    └── SKILL.md
 ```
 
-每个 Skill 是一个目录，内含唯一的 `Skill.md`。目录名即技能名。
+每个 Skill 是一个目录，内含唯一的 `SKILL.md`。目录名即技能名。
 
-`Skill.md` 推荐格式：
+`SKILL.md` 推荐格式：
 
 ```markdown
 # Human Readable Skill Name
@@ -35,7 +35,7 @@ One short paragraph describing when this skill is useful.
 ### 数据流
 
 ```
-skills/*/Skill.md
+skills/*/SKILL.md
   │
   ├─ scan_skills()          → 扫描目录，提取首段摘要
   │     └─ skill_context_message()  → 生成独立系统消息
@@ -65,7 +65,7 @@ When a skill matches the task, call LoadSkill with its name, read the full Skill
 - git_commit_skill: Use this skill when the user asks the agent to make a small...
 ```
 
-因此已有会话也能看到 `Skill.md` 的新增、删除和修改。
+因此已有会话也能看到 `SKILL.md` 的新增、删除和修改。
 
 ### LoadSkill 工具
 
@@ -73,7 +73,7 @@ When a skill matches the task, call LoadSkill with its name, read the full Skill
 {"name": "git_commit_skill"}
 ```
 
-返回 `Skill.md` 完整内容。
+返回 `SKILL.md` 完整内容。
 
 ## 相关文件
 
@@ -82,7 +82,7 @@ When a skill matches the task, call LoadSkill with its name, read the full Skill
 | `agent/tools/skill.py` | 扫描 Skill、生成摘要、实现 `LoadSkill` |
 | `agent/tools/__init__.py` | 注册 `LoadSkill` |
 | `agent/react.py` | 每个模型 step 单独加载 Skill context 和 Task context |
-| `agent/skills/<name>/Skill.md` | 具体 Skill 内容 |
+| `agent/skills/<name>/SKILL.md` | 具体 Skill 内容 |
 
 ## 验证
 
@@ -99,7 +99,7 @@ curl -X POST localhost:8000/api/agent/stream \
 ## 扩展
 
 新增 Skill 只需：
-1. 在 `agent/skills/` 下创建 `<name>/Skill.md`
+1. 在 `agent/skills/` 下创建 `<name>/SKILL.md`
 2. 无需修改任何代码，下一次模型 step 会重新扫描并注入
 
 刻意不做：manifest、版本、权限、依赖、触发器。当前目标是让特化 agent 的行为更清楚，

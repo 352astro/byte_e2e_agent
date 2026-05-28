@@ -1,6 +1,6 @@
 """Skill 加载器。
 
-每个 Skill 是一个放在 ``agent/skills/<name>/Skill.md`` 的特化能力模块。
+每个 Skill 是一个放在 ``agent/skills/<name>/SKILL.md`` 的特化能力模块。
 Skill 上下文消息注入摘要；需要执行该能力时，模型再通过 LoadSkill 读取完整内容。
 """
 
@@ -14,7 +14,7 @@ from pydantic import Field
 from agent.tools.base import BaseTool
 
 SKILLS_ROOT = Path(__file__).resolve().parent.parent / "skills"
-SKILL_FILE = "Skill.md"
+SKILL_FILE = "SKILL.md"
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,7 @@ class SkillInfo:
 
 
 def scan_skills() -> list[SkillInfo]:
-    """扫描所有 ``skills/<name>/Skill.md`` 并返回摘要信息。"""
+    """扫描所有 ``skills/<name>/SKILL.md`` 并返回摘要信息。"""
     if not SKILLS_ROOT.is_dir():
         return []
 
@@ -116,7 +116,16 @@ class LoadSkill(BaseTool):
 
     name: str = Field(..., description="Skill 目录名。")
 
-    async def execute(self, *, sandbox=None, channel=None, interrupt_event=None, scheduler=None, toolset=None, result_id="") -> str:
+    async def execute(
+        self,
+        *,
+        sandbox=None,
+        channel=None,
+        interrupt_event=None,
+        scheduler=None,
+        toolset=None,
+        result_id="",
+    ) -> str:
         skill = get_skill(self.name)
         if skill is None:
             available = [s.name for s in scan_skills()]
