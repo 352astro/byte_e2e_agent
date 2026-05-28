@@ -1276,6 +1276,11 @@
     flex-shrink: 0;
 }
 
+/* Ensure <pre> can host absolutely-positioned copy button */
+.md-content pre {
+    position: relative;
+}
+
 /* ── Copy button ──────────────────────────────── */
 
 .code-block-wrapper {
@@ -1308,7 +1313,9 @@
     stroke-width: 3;
 }
 
+pre:hover .copy-btn,
 .code-block-wrapper:hover .copy-btn,
+pre:focus-within .copy-btn,
 .code-block-wrapper:focus-within .copy-btn {
     opacity: 1;
 }
