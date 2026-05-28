@@ -7,13 +7,19 @@ from pathlib import Path
 from pydantic import Field
 
 from agent.tools.base import BaseTool
+from app.core.config import TMP_DIR
 
 
 class Glob(BaseTool):
     """Find files matching a glob pattern and return sorted relative paths."""
 
     pattern: str = Field(
-        ..., description="Glob pattern (e.g. '**/*.py', 'src/**/*.ts')."
+        ...,
+        description=(
+            "Glob pattern (e.g. '**/*.py', 'src/**/*.ts'). "
+            "Hint: avoid scanning the " + TMP_DIR + "/ directory — it contains "
+            "session metadata and is not part of the user's codebase."
+        ),
     )
     max_results: int = Field(
         default=200,
@@ -22,7 +28,16 @@ class Glob(BaseTool):
         description="Maximum number of results to return.",
     )
 
-    async def execute(self, *, sandbox=None, channel=None, interrupt_event=None, scheduler=None, toolset=None, result_id="") -> str:
+    async def execute(
+        self,
+        *,
+        sandbox=None,
+        channel=None,
+        interrupt_event=None,
+        scheduler=None,
+        toolset=None,
+        result_id="",
+    ) -> str:
         try:
             workspace = Path(sandbox.resolve_path("."))
         except Exception:
