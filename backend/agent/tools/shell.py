@@ -39,5 +39,29 @@ class Shell(BaseTool):
         description="Single-line shell command.",
     )
 
-    async def execute(self, sandbox=None) -> str:
-        return await sandbox.run_shell(self.command, self.timeout_ms)
+    async def execute(
+        self,
+        *,
+        sandbox=None,
+        channel=None,
+        interrupt_event=None,
+        scheduler=None,
+        toolset=None,
+        result_id: str = "",
+    ) -> str:
+        """流式执行 Shell。结果已 chunk 到 channel，
+        返回空字符串表示调用方无需再 chunk。"""
+        rid = result_id
+        async for chunk_text in sandbox.stream_shell(
+            self.command,
+            self.timeout_ms,
+            interrupt_event=interrupt_event,
+        ):
+            if channel is not None:
+                await channel.chunk(rid, "tool_result", chunk_text, chunk_id=rid)
+        exit_code = sandbox.terminal._last_exit_code
+        if exit_code not in (0, -1) and channel is not None:
+            await channel.chunk(
+                rid, "tool_result", f"\n[exit code: {exit_code}]", chunk_id=rid
+            )
+        return ""

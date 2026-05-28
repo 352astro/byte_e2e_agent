@@ -646,10 +646,11 @@ class Scheduler:
         toolset: ToolSet,
         channel: TranscriptStream,
     ) -> None:
-        """执行单个 tool_call，结果全部通过 chunk 写入 channel。
+        """执行单个 tool_call。工具自行决定如何使用 sandbox / channel /
+        interrupt_event；结果由工具通过 channel.chunk() 或返回字符串写出。
 
-        message 由 TranscriptStream 在 chunk() 内部构建。
-        调用方从 channel.message 读取结果，自行 flush。
+        返回空字符串表示已自行 chunk（Shell/SubAgent），
+        非空字符串由本方法 chunk 到 channel。
         """
         func_name: str = tc["function"]["name"]
         func_args: str = tc["function"]["arguments"]
@@ -669,42 +670,22 @@ class Scheduler:
             )
             return
 
-        # ── Shell（流式输出）───────────────────────────
-        if func_name == "Shell":
-            async for chunk_text in sandbox.stream_shell(
-                action.command,
-                action.timeout_ms,
+        try:
+            result_str = await action.execute(
+                sandbox=sandbox,
+                channel=channel,
                 interrupt_event=self._interrupt_event,
-            ):
-                await channel.chunk(
-                    result_id, "tool_result", chunk_text, chunk_id=result_id
-                )
-            exit_code = sandbox.terminal._last_exit_code
-            if exit_code not in (0, -1):
-                await channel.chunk(
-                    result_id,
-                    "tool_result",
-                    f"\n[exit code: {exit_code}]",
-                    chunk_id=result_id,
-                )
-            return
-
-        # ── SubAgent（递归子智能体）───────────────────
-        if func_name == "SubAgent":
-            result_str = await self._run_subagent(
-                sandbox, toolset, channel, action.prompt, action.max_steps
+                scheduler=self,
+                toolset=toolset,
+                result_id=result_id,
             )
+        except Exception as exc:
+            result_str = f"Error: {exc}"
+
+        if result_str:
             await channel.chunk(
                 result_id, "tool_result", result_str, chunk_id=result_id
             )
-            return
-
-        # ── 其他工具 ───────────────────────────────────
-        try:
-            result_str = await action.execute(sandbox=sandbox)
-        except Exception as exc:
-            result_str = f"Error: {exc}"
-        await channel.chunk(result_id, "tool_result", result_str, chunk_id=result_id)
 
     # ============================================================
     # SubAgent

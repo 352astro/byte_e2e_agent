@@ -116,7 +116,7 @@ class LoadSkill(BaseTool):
 
     name: str = Field(..., description="Skill 目录名。")
 
-    async def execute(self, sandbox=None) -> str:
+    async def execute(self, *, sandbox=None, channel=None, interrupt_event=None, scheduler=None, toolset=None, result_id="") -> str:
         skill = get_skill(self.name)
         if skill is None:
             available = [s.name for s in scan_skills()]

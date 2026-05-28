@@ -1,9 +1,4 @@
-"""
-SubAgent 工具：启动子智能体执行独立任务。
-
-SubAgent 不走 execute()——由 Scheduler 循环拦截，
-使用受限工具集（无 SubAgent）启动一个新的子智能体。
-"""
+"""SubAgent 工具：启动子智能体执行独立任务。"""
 
 from pydantic import Field
 
@@ -11,11 +6,7 @@ from agent.tools.base import BaseTool
 
 
 class SubAgent(BaseTool):
-    """
-    以空上下文启动一个子智能体，使用受限工具集（禁止递归 SubAgent）。
-
-    子智能体完成后，其最终答案作为本工具的结果返回。
-    """
+    """Launch a sub-agent with a restricted toolset (no recursive SubAgent)."""
 
     max_steps: int = Field(
         default=5,
@@ -27,3 +18,18 @@ class SubAgent(BaseTool):
         ...,
         description="Task description for the subagent — treated as its question",
     )
+
+    async def execute(
+        self,
+        *,
+        sandbox=None,
+        channel=None,
+        interrupt_event=None,
+        scheduler=None,
+        toolset=None,
+        result_id: str = "",
+    ) -> str:
+        run = getattr(scheduler, "_run_subagent", None)
+        if run is None:
+            return "Error: SubAgent requires scheduler reference."
+        return await run(sandbox, toolset, channel, self.prompt, self.max_steps)

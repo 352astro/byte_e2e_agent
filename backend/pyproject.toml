@@ -18,3 +18,9 @@ dependencies = [
 members = [
     "double_pendulum_simulation",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "unit: fast unit tests without external dependencies",
+    "integration: tests that require real LLM or shell",
+]

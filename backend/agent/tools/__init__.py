@@ -7,8 +7,11 @@ Tool / SubTool 等旧式声明已移除。
 
 from agent.tools.base import BaseTool
 from agent.tools.edit import Edit, EditOp
+from agent.tools.glob import Glob
+from agent.tools.grep import Grep
+from agent.tools.pyrepl import PyRepl
 from agent.tools.read import Read
-from agent.tools.search import Search
+from agent.tools.search import WebFetch, WebSearch
 from agent.tools.shell import Shell
 from agent.tools.skill import LoadSkill
 from agent.tools.subagent import SubAgent
@@ -19,7 +22,11 @@ from agent.tools.write import Write
 # ── 默认工具注册表 ──────────────────────────────────────
 
 _ALL_TOOL_CLASSES: list[type[BaseTool]] = [
-    Search,
+    WebSearch,
+    WebFetch,
+    Grep,
+    Glob,
+    PyRepl,
     Shell,
     Read,
     Write,
@@ -41,9 +48,11 @@ __all__ = [
     "BaseTool",
     "Edit",
     "EditOp",
+    "Glob",
+    "Grep",
     "LoadSkill",
+    "PyRepl",
     "Read",
-    "Search",
     "Shell",
     "SubAgent",
     "Task",
@@ -51,6 +60,8 @@ __all__ = [
     "TaskRewrite",
     "TaskUpdate",
     "ToolSet",
+    "WebFetch",
+    "WebSearch",
     "Write",
     "get_all_tool_classes",
 ]

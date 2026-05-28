@@ -5,7 +5,7 @@
 - 持久终端管理（PersistentTerminal）
 - 路径越界审查（safe_resolve_path）
 - 危险指令拦截（check_command_safety）
-- 可执行工具的分流执行（Shell / Read / Write / Edit / Search / LoadSkill)
+- 可执行工具的分流执行（Shell / Read / Write / Edit / WebSearch / LoadSkill)
 """
 
 from __future__ import annotations

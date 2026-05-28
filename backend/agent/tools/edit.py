@@ -11,10 +11,12 @@ class EditOp(BaseModel):
 
 
 class Edit(BaseTool):
+    """Apply ordered find-and-replace edits to a file."""
+
     path: str = Field(..., description="File path to edit (relative to workspace).")
     edits: list[EditOp] = Field(..., description="Ordered find-and-replace ops.")
 
-    async def execute(self, sandbox=None) -> str:
+    async def execute(self, *, sandbox=None, channel=None, interrupt_event=None, scheduler=None, toolset=None, result_id="") -> str:
         ops = [{"old_text": e.old_text, "new_text": e.new_text} for e in self.edits]
         return await sandbox.edit_file(self.path, ops)
 

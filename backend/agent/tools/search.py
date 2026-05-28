@@ -1,6 +1,9 @@
-"""Search 工具 — SerpApi 网页搜索。"""
+"""WebSearch / WebFetch 工具。"""
+
+from __future__ import annotations
 
 import os
+from urllib.request import urlopen, Request
 
 import serpapi
 from pydantic import Field
@@ -8,12 +11,14 @@ from pydantic import Field
 from agent.tools.base import BaseTool
 
 
-class Search(BaseTool):
-    query: str = Field(..., description="Search query keywords")
+class WebSearch(BaseTool):
+    """Search the web via SerpApi and return top results."""
+
     gl: str = Field(default="cn", description="Country code")
     hl: str = Field(default="zh-cn", description="Language code")
+    query: str = Field(..., description="Search query keywords")
 
-    async def execute(self, sandbox=None) -> str:
+    async def execute(self, *, sandbox=None, channel=None, interrupt_event=None, scheduler=None, toolset=None, result_id="") -> str:
         try:
             api_key = os.getenv("SERPAPI_KEY")
             if not api_key:
@@ -46,3 +51,34 @@ class Search(BaseTool):
             return f"Sorry, no information found for '{self.query}'."
         except Exception as e:
             return f"Search error: {e}"
+
+
+class WebFetch(BaseTool):
+    """Fetch a URL and return its content as plain text."""
+
+    url: str = Field(..., description="Full URL to fetch (https://...)")
+    max_bytes: int = Field(
+        default=50_000,
+        ge=1000,
+        le=500_000,
+        description="Maximum bytes to read from the response body.",
+    )
+
+    async def execute(self, *, sandbox=None, channel=None, interrupt_event=None, scheduler=None, toolset=None, result_id="") -> str:
+        try:
+            req = Request(
+                self.url,
+                headers={"User-Agent": "ByteAgent/1.0"},
+            )
+            with urlopen(req, timeout=15) as resp:
+                content = resp.read(self.max_bytes)
+                text = content.decode("utf-8", errors="replace")
+                actual = len(content)
+                suffix = (
+                    f"\n\n[Truncated at {actual} bytes]"
+                    if actual >= self.max_bytes
+                    else ""
+                )
+                return text + suffix
+        except Exception as exc:
+            return f"Error fetching URL: {exc}"

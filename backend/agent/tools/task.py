@@ -104,7 +104,7 @@ class Task(BaseModel):
 class TaskList(BaseTool):
     """Read the current task list."""
 
-    async def execute(self, sandbox=None) -> str:
+    async def execute(self, *, sandbox=None, channel=None, interrupt_event=None, scheduler=None, toolset=None, result_id="") -> str:
         tasks = await _load_tasks(sandbox)
         return _dump({"tasks": _with_blocked(tasks)})
 
@@ -117,7 +117,7 @@ class TaskRewrite(BaseTool):
         description="The complete task list after rewrite.",
     )
 
-    async def execute(self, sandbox=None) -> str:
+    async def execute(self, *, sandbox=None, channel=None, interrupt_event=None, scheduler=None, toolset=None, result_id="") -> str:
         tasks = [task.model_dump() for task in self.tasks]
         error = _validate_tasks(tasks)
         if error:
@@ -138,7 +138,7 @@ class TaskUpdate(BaseTool):
         description="Task summary. Required when status is done; use empty string for pending.",
     )
 
-    async def execute(self, sandbox=None) -> str:
+    async def execute(self, *, sandbox=None, channel=None, interrupt_event=None, scheduler=None, toolset=None, result_id="") -> str:
         tasks = await _load_tasks(sandbox)
         index = _find_task_index(tasks, self.id)
         if index is None:
