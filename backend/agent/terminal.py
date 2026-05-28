@@ -3,6 +3,7 @@
 
 Linux / macOS  — PTY (os.openpty) + select + os.read
                 信号通过 os.killpg 精准送达前台进程组
+                内核沙箱：Linux Landlock / macOS Seatbelt
 Windows        — threading + queue (pipe)
 
 用法不变：run_stream() / run() / alive / start / stop。
@@ -16,6 +17,7 @@ import select
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass
@@ -23,6 +25,8 @@ from typing import AsyncIterator, Iterator
 
 if sys.platform != "win32":
     import termios
+
+from agent.utils import sysguard
 
 
 @dataclass
@@ -81,14 +85,29 @@ class PersistentTerminal:
         attrs[3] &= ~termios.ECHO  # local flags: clear ECHO
         termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
 
+        # ── macOS: wrap entire shell with sandbox-exec ──
+        shell_cmd = list(self._shell)
+        if sys.platform == "darwin" and sysguard.is_available():
+            profile = sysguard._build_seatbelt_profile(self._cwd)
+            tmpf = tempfile.NamedTemporaryFile(mode="w", suffix=".sb", delete=False)
+            tmpf.write(profile)
+            tmpf.close()
+            shell_cmd = ["sandbox-exec", "-f", tmpf.name, "--"] + shell_cmd
+
+        # ── Linux: Landlock in preexec_fn ──
+        def _preexec() -> None:
+            os.setsid()  # new session → own process group
+            if sys.platform == "linux":
+                sysguard.apply(self._cwd)
+
         self._proc = subprocess.Popen(
-            self._shell,
+            shell_cmd,
             stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,
             cwd=self._cwd,
             env=env,
-            preexec_fn=os.setsid,  # new session → own process group
+            preexec_fn=_preexec,
         )
         os.close(slave_fd)  # child inherited it, parent doesn't need it
         self._master_fd = master_fd
