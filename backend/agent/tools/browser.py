@@ -219,35 +219,6 @@ class BrowserInspect(BaseTool):
         ),
     )
 
-    async def execute(
-        self,
-        *,
-        sandbox=None,
-        channel=None,
-        interrupt_event=None,
-        toolset=None,
-        result_id: str = "",
-        llm_client=None,
-    ) -> str:
-        from agent.actions import run_subagent
-
-        browser_toolset = ToolSet([BrowserOpen, BrowserAct])
-        return await run_subagent(
-            sandbox,
-            browser_toolset,
-            channel,
-            self.prompt,
-            self.max_steps,
-            llm_client=llm_client,
-            session_id="",
-            interrupt_event=interrupt_event,
-            system_extra=(
-                "You are a browser inspection sub-agent. Your toolset "
-                "contains ONLY browser tools (BrowserOpen, BrowserAct). "
-                "Keep your reasoning extremely brief — one short sentence "
-                "at most — then call BrowserOpen to open the page. "
-                "After the page loads, inspect what was asked and report "
-                "what you see. Do not plan. Do not summarize at length. "
-                "Open the browser, check, report. That is your entire job."
-            ),
-        )
+    async def execute(self, **_) -> str:
+        """实际执行在 execute_one_tool 中通过 isinstance 分发。"""
+        return "Error: BrowserInspect must be dispatched via execute_one_tool."

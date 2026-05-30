@@ -226,6 +226,7 @@ class Scheduler:
                 for tc in t.message.get("tool_calls", []):
                     if intr.is_set():
                         raise InterruptedError("Interrupted between tools")
+
                     await execute_one_tool(
                         tc,
                         session._sandbox,

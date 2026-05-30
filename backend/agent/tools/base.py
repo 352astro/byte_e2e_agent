@@ -33,6 +33,5 @@ class BaseTool(BaseModel):
         interrupt_event: asyncio.Event | None = None,
         toolset: _ToolSet | None = None,
         result_id: str = "",
-        llm_client: HelloAgentsLLM | None = None,
     ) -> str:
         raise NotImplementedError(f"{type(self).__name__} 未实现 execute()")

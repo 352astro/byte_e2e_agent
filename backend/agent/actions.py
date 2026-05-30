@@ -14,7 +14,8 @@ from agent.metrics import LLMCallContext
 from agent.sandbox import Sandbox
 from agent.session import Session
 from agent.tools import BrowserInspect, TaskList, TaskRewrite
-from agent.tools.subagent import SubAgent
+from agent.tools.browser import BrowserInspect as BrowserInspectTool
+from agent.tools.subagent import SubAgent as SubAgentTool
 from agent.tools.toolset import ToolSet
 from agent.transcript import TranscriptStream
 
@@ -156,8 +157,9 @@ async def execute_one_tool(
     *,
     interrupt_event: asyncio.Event,
     llm_client: HelloAgentsLLM,
+    session_id: str = "",
 ) -> None:
-    """执行单个 tool_call。"""
+    """执行单个 tool_call。SubAgent / BrowserInspect 原地分发。"""
     func_name: str = tc["function"]["name"]
     func_args: str = tc["function"]["arguments"]
     result_id = _uuid.uuid4().hex
@@ -176,17 +178,54 @@ async def execute_one_tool(
         )
         return
 
-    try:
-        result_str = await action.execute(
-            sandbox=sandbox,
-            channel=channel,
-            interrupt_event=interrupt_event,
-            toolset=toolset,
-            result_id=result_id,
+    # ── SubAgent / BrowserInspect：原地执行，不走 action.execute() ──
+    if isinstance(action, SubAgentTool):
+        result_str = await run_subagent(
+            sandbox,
+            toolset,
+            channel,
+            prompt=action.prompt,
+            max_steps=action.max_steps,
             llm_client=llm_client,
+            session_id=session_id,
+            interrupt_event=interrupt_event,
+            with_skills=action.with_skills,
         )
-    except Exception as exc:
-        result_str = f"Error: {exc}"
+    elif isinstance(action, BrowserInspectTool):
+        from agent.tools.browser import BrowserAct, BrowserOpen
+
+        browser_toolset = ToolSet([BrowserOpen, BrowserAct])
+        result_str = await run_subagent(
+            sandbox,
+            browser_toolset,
+            channel,
+            prompt=action.prompt,
+            max_steps=action.max_steps,
+            llm_client=llm_client,
+            session_id=session_id,
+            interrupt_event=interrupt_event,
+            system_extra=(
+                "You are a browser inspection sub-agent. Your toolset "
+                "contains ONLY browser tools (BrowserOpen, BrowserAct). "
+                "Keep your reasoning extremely brief — one short sentence "
+                "at most — then call BrowserOpen to open the page. "
+                "After the page loads, inspect what was asked and report "
+                "what you see. Do not plan. Do not summarize at length. "
+                "Open the browser, check, report. That is your entire job."
+            ),
+        )
+    else:
+        # ── 普通工具 ──
+        try:
+            result_str = await action.execute(
+                sandbox=sandbox,
+                channel=channel,
+                interrupt_event=interrupt_event,
+                toolset=toolset,
+                result_id=result_id,
+            )
+        except Exception as exc:
+            result_str = f"Error: {exc}"
 
     if result_str:
         await channel.chunk(
@@ -214,7 +253,7 @@ async def run_subagent(
     from agent.tools.skill import get_skill
 
     subagent_tools = toolset.without(
-        SubAgent, BrowserInspect, TaskRewrite, TaskList
+        SubAgentTool, BrowserInspect, TaskList, TaskRewrite
     ).openai_tools
 
     subagent_messages: list[dict] = [
