@@ -1,6 +1,6 @@
 ---
 name: e2e-self-verification
-description: "MANDATORY when ANY frontend file is modified, created, or deleted — NO EXCEPTIONS. If you touched frontend/src/**, you MUST load this skill before claiming completion. Establishes the iron law that no frontend change is complete without browser verification: start service with nohup, use ps aux and ss to discover the actual port, always curl with --noproxy '*', enumerate every page and feature to verify, dispatch ONE BrowserInspect per feature (never batch multiple features), kill service by discovered port after verification. Evidence before assertions always."
+description: "MANDATORY when ANY frontend file is modified, created, or deleted — NO EXCEPTIONS. If you touched frontend/src/**, you MUST load this skill before claiming completion. Establishes the iron law that no frontend change is complete without browser verification: determine configured port from vite.config.ts, check if already running with ss, start with nohup only if needed, always curl with --noproxy '*', enumerate every page and feature, dispatch ONE BrowserInspect per feature (never batch multiple), kill service by port after verification. Evidence before assertions always."
 ---
 
 # Frontend Development Criteria
@@ -42,53 +42,43 @@ Before you do anything else after a frontend change — before you mark a task d
 
 ### Step 1: Discover or Start the Service
 
-The frontend dev server MUST be running. Follow this phased approach — always try discovery before starting a new process.
+The frontend dev server MUST be running. Follow this order — always check first, start only if needed.
 
-#### Phase 1: Pre-check — Is the service already running?
+#### 1a. Determine the configured port
 
-**First**, determine the project's configured port. Read `frontend/vite.config.ts` — look for the `server.port` field. If not explicitly configured, the Vite default is `5173`. Also check `frontend/package.json` scripts for any `--port` flag.
+Read `frontend/vite.config.ts`. Look for `server.port`. If not explicitly set,
+the Vite default is `5173`. This is `<CONFIGURED_PORT>`.
 
-**Then**, check if a frontend dev server is already bound to that port:
+Knowing the exact port is critical: `ss` may show several node processes from
+other projects. `<CONFIGURED_PORT>` is your anchor to identify the right one.
+
+#### 1b. Check if already running
 
 ```bash
 ss -tlnp | grep <CONFIGURED_PORT>
 ```
 
-Or search by process name:
+**If a process IS bound to `<CONFIGURED_PORT>` →** the service is already
+running. Set `<PORT>` = `<CONFIGURED_PORT>` and jump to step 1d (curl).
+Do NOT start a second instance.
+
+**If nothing is bound →** the service is not running. Proceed to 1c.
+
+#### 1c. Start the service (only if 1b found nothing)
 
 ```bash
-ps aux | grep -v grep | grep -E '(vite|npm run dev)'
+cd frontend && nohup npm run dev &
+sleep 3
+ss -tlnp | grep <CONFIGURED_PORT>
 ```
 
-**If a process IS found and bound to the expected port →** the service is already running. Note the `<PORT>` and proceed directly to Phase 3 (curl verification). Do NOT start a second instance. Do NOT run `nohup`.
+`nohup ... &` prints the background PID — note it.
 
-#### Phase 2: Start the service AND check for the port in parallel (only if Phase 1 found nothing)
+If `ss` now shows `<CONFIGURED_PORT>`, set `<PORT>` = `<CONFIGURED_PORT>`.
+If still nothing, wait 3 more seconds and retry `ss`. If still no port after
+retries, the server may have crashed — read `frontend/nohup.out` for the error.
 
-If Phase 1 confirmed no existing frontend dev server, you must start one. **Dispatch TWO tool calls simultaneously — the startup and the port check run in parallel:**
-
-```
-Tool call A (start the server):
-  cd frontend && nohup npm run dev &
-
-Tool call B (parallel port check — dispatched at the same time):
-  sleep 3 && ss -tlnp | grep node
-```
-
-`nohup ... &` naturally prints the background job PID — note it. Meanwhile, the parallel `ss` check captures the port as soon as the server binds. This avoids unnecessary sequential waiting.
-
-**If Tool call B successfully returns a port number** (e.g., `127.0.0.1:5173`), extract the `<PORT>` and proceed directly to Phase 3.
-
-**If Tool call B returns nothing**, wait another 3 seconds and retry:
-
-```bash
-sleep 3 && ss -tlnp | grep node
-```
-
-If still no port after retries, the server may have crashed on startup. Read `frontend/nohup.out` for the error, troubleshoot, and retry Phase 2.
-
-#### Phase 3: Verify the server responds
-
-Once you have the `<PORT>` (from Phase 1 or Phase 2), confirm the server is healthy:
+#### 1d. Verify the server responds
 
 ```bash
 curl -s --noproxy '*' -o /dev/null -w "%{http_code}" http://localhost:<PORT>
@@ -212,7 +202,7 @@ After completing all steps, produce a verification report in this exact format:
 
 ```
 📋 Frontend Verification Report
-   Service: <discovered via pre-check | started with nohup + parallel check>, port <PORT>
+   Service: <already running | started with nohup>, port <PORT>
    Killed via: fuser -k <PORT>/tcp
    Targets identified: <N>
    Targets verified: <N>
@@ -237,12 +227,12 @@ If any target failed: do NOT mark the task complete. Do NOT commit. Fix the fail
 | "Tests pass, so it works" | Tests don't render pixels. Tests don't catch z-index bugs, overflow issues, or visual regressions. |
 | "I only changed backend code" | Frontend consumes the backend. Changed response shape = broken UI. |
 | "I'll verify all features in one BrowserInspect call" | Sub-agents skip details when given too many tasks. One feature per dispatch. Not negotiable. |
-| "I don't need nohup, the server is already running" | Is it? Use ps aux to check. If not running, start with nohup. |
+| "I don't need nohup, the server is already running" | Is it? Use ss to check. If not running, start with nohup. |
 | "I can just killall node to clean up" | You just killed the user's terminal, editor, and other work. Kill by discovered port only. |
 | "The change is too small to need all these steps" | The protocol scales down — for a one-line fix you may only have 1-2 targets. But you still follow every step. |
 | "I already verified this feature earlier today" | Code changes. State drifts. Verify FRESH. |
 | "BrowserInspect is slow" | Shipping broken UI is slower. One dispatch takes 15-30 seconds. |
-| "I'll just assume port 5173" | Ports change. Configurations differ. Use ps aux + ss to discover the real port. |
+| "I'll just assume port 5173" | Ports change. Configurations differ. Read vite.config.ts for the real port. |
 | "curl returned 502 — the server is dead" | Did you use `--noproxy '*'`? http_proxy env vars hijack localhost requests through a proxy. The server is fine — your curl command is lying to you. Retry with `--noproxy '*'`. |
 
 ## Red Flags — STOP and Re-read This Skill
@@ -266,7 +256,7 @@ If you catch yourself thinking ANY of these:
 ## Tools Used
 
 - `BrowserInspect` — The ONLY verification tool. Dispatches a sub-agent with browser + file + shell tools to verify ONE feature.
-- `Shell` — Used only for: `nohup npm run dev &`, `ps aux`, `ss -tlnp`, `curl --noproxy '*'`, `fuser -k <PORT>/tcp`. No other shell commands.
+- `Shell` — Used only for: `nohup npm run dev &`, `ss -tlnp`, `curl --noproxy '*'`, `fuser -k <PORT>/tcp`. No other shell commands.
 - `BrowserOpen` / `BrowserAct` — Used internally by BrowserInspect. Do NOT use these directly for verification; always go through BrowserInspect.
 
 ## Integration

@@ -14,15 +14,6 @@ class SubAgent(BaseTool):
         le=15,
         description="Maximum reasoning steps for the subagent",
     )
-    fork: bool = Field(
-        default=False,
-        description=(
-            "If True, the sub-agent inherits the full parent conversation "
-            "history (all messages) and appends its own.  "
-            "Useful when the sub-agent needs full context about what has "
-            "been done so far."
-        ),
-    )
     with_skills: list[str] = Field(
         default_factory=list,
         description=(
@@ -37,17 +28,12 @@ class SubAgent(BaseTool):
         description=(
             "Task description for the sub-agent — treated as its question.\n"
             "\n"
-            "CRITICAL when fork=False (the default): the sub-agent starts "
-            "with an EMPTY context — it sees nothing from the parent "
-            "conversation. You MUST embed ALL relevant information into "
-            "this prompt: what has been done so far, current state, file "
-            "paths, error messages, decisions made, constraints, and "
-            "exactly what to do. A vague one-liner will cause the sub-agent "
-            "to fail. Be exhaustive.\n"
-            "\n"
-            "When fork=True: the sub-agent inherits full parent history, "
-            "so the prompt can be concise — but still cover anything the "
-            "parent conversation doesn't contain."
+            "CRITICAL: the sub-agent starts with an EMPTY context — it sees "
+            "nothing from the parent conversation. You MUST embed ALL relevant "
+            "information into this prompt: what has been done so far, current "
+            "state, file paths, error messages, decisions made, constraints, "
+            "and exactly what to do. A vague one-liner will cause the sub-agent "
+            "to fail. Be exhaustive."
         ),
     )
 
@@ -57,19 +43,20 @@ class SubAgent(BaseTool):
         sandbox=None,
         channel=None,
         interrupt_event=None,
-        scheduler=None,
         toolset=None,
         result_id: str = "",
+        llm_client=None,
     ) -> str:
-        run = getattr(scheduler, "_run_subagent", None)
-        if run is None:
-            return "Error: SubAgent requires scheduler reference."
-        return await run(
+        from agent.actions import run_subagent
+
+        return await run_subagent(
             sandbox,
             toolset,
             channel,
             self.prompt,
             self.max_steps,
-            fork=self.fork,
+            llm_client=llm_client,
+            session_id="",
+            interrupt_event=interrupt_event,
             with_skills=self.with_skills,
         )

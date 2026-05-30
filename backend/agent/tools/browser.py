@@ -2,26 +2,31 @@
 
 BrowserOpen  打开页面，返回 HTML + console 日志。
 BrowserAct  点击 / 输入 / 按键，返回新的 HTML + console。
+
+设为有头模式：环境变量 BROWSER_HEADLESS=0。默认无头运行。
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Literal
 
+from playwright.async_api import Page
 from pydantic import Field
 
 from agent.tools.base import BaseTool
-from agent.tools.glob import Glob
-from agent.tools.grep import Grep
-from agent.tools.read import Read
-from agent.tools.shell import Shell
 from agent.tools.toolset import ToolSet
 
 # ── Playwright 单例 ─────────────────────────────────────
 
-_page: object | None = None
-_playwright: object | None = None
+_page: Page | None = None
+_playwright: Playwright | None = None
+
+
+def _is_headless() -> bool:
+    """BROWSER_HEADLESS=0 时返回 False（有头模式），默认 True（无头）。"""
+    return os.getenv("BROWSER_HEADLESS", "1").lower() not in ("0", "false", "no")
 
 
 async def _ensure_browser():
@@ -41,8 +46,9 @@ async def _ensure_browser():
             "playwright install chromium"
         )
 
+    headless = _is_headless()
     pw = await async_playwright().__aenter__()
-    browser = await pw.chromium.launch(headless=True)
+    browser = await pw.chromium.launch(headless=headless)
     page = await browser.new_page()
     _playwright = pw
     _page = page
@@ -104,9 +110,9 @@ class BrowserOpen(BaseTool):
         sandbox=None,
         channel=None,
         interrupt_event=None,
-        scheduler=None,
         toolset=None,
         result_id: str = "",
+        **_,
     ) -> str:
         try:
             page = await _ensure_browser()
@@ -149,9 +155,9 @@ class BrowserAct(BaseTool):
         sandbox=None,
         channel=None,
         interrupt_event=None,
-        scheduler=None,
         toolset=None,
         result_id: str = "",
+        **_,
     ) -> str:
         page = _page
         if page is None:
@@ -186,10 +192,9 @@ class BrowserAct(BaseTool):
 
 
 class BrowserInspect(BaseTool):
-    """Launch a sub-agent with browser and file tools to inspect a web page.
-
-    The sub-agent can open URLs, click elements, and read source files.
-    It reports back findings, console errors, and DOM analysis.
+    """Launch a sub-agent with browser tools (BrowserOpen, BrowserAct) to
+    inspect a web page. The sub-agent starts with an empty context — the
+    prompt must contain everything it needs.
     """
 
     max_steps: int = Field(
@@ -198,14 +203,6 @@ class BrowserInspect(BaseTool):
         le=20,
         description="Maximum reasoning steps for the inspector sub-agent.",
     )
-    fork: bool = Field(
-        default=True,
-        description=(
-            "If True, the sub-agent inherits the full parent conversation "
-            "history. Strongly recommended for browser inspection — the "
-            "sub-agent needs context about what code has been changed."
-        ),
-    )
     prompt: str = Field(
         ...,
         description=(
@@ -213,18 +210,12 @@ class BrowserInspect(BaseTool):
             "to open and what to look for (e.g. 'Open http://localhost:5173, "
             "check for console errors, verify the Send button exists').\n"
             "\n"
-            "CRITICAL when fork=False: the sub-agent starts with an EMPTY "
-            "context — it sees nothing from the parent conversation. You "
-            "MUST embed ALL relevant information into this prompt: what "
-            "code was changed, what the expected behavior is, which files "
-            "are involved, any known issues, and exactly what to inspect. "
-            "A vague prompt will cause the sub-agent to miss issues. Be "
-            "exhaustive.\n"
-            "\n"
-            "When fork=True (the default): the sub-agent inherits full "
-            "parent history, so the prompt can focus on the inspection "
-            "target — but still include any specifics the parent "
-            "conversation doesn't contain."
+            "CRITICAL: the sub-agent starts with an EMPTY context — it sees "
+            "nothing from the parent conversation. You MUST embed ALL relevant "
+            "information into this prompt: what code was changed, what the "
+            "expected behavior is, which files are involved, any known issues, "
+            "and exactly what to inspect. A vague prompt will cause the "
+            "sub-agent to miss issues. Be exhaustive."
         ),
     )
 
@@ -234,29 +225,29 @@ class BrowserInspect(BaseTool):
         sandbox=None,
         channel=None,
         interrupt_event=None,
-        scheduler=None,
         toolset=None,
         result_id: str = "",
+        llm_client=None,
     ) -> str:
-        run = getattr(scheduler, "_run_subagent", None)
-        if run is None:
-            return "Error: BrowserInspect requires scheduler reference."
+        from agent.actions import run_subagent
 
         browser_toolset = ToolSet([BrowserOpen, BrowserAct])
-        return await run(
+        return await run_subagent(
             sandbox,
             browser_toolset,
             channel,
             self.prompt,
             self.max_steps,
-            fork=self.fork,
+            llm_client=llm_client,
+            session_id="",
+            interrupt_event=interrupt_event,
             system_extra=(
                 "You are a browser inspection sub-agent. Your toolset "
-                "contains ONLY browser tools. When you receive an "
-                "instruction, DO NOT overthink. DO NOT analyze, plan, "
-                "or summarize. Do NOT output any text — immediately "
-                "call BrowserOpen to open the page. Your sole purpose "
-                "is: open the browser → perform actions → report "
-                "exactly what you see. Do nothing else."
+                "contains ONLY browser tools (BrowserOpen, BrowserAct). "
+                "Keep your reasoning extremely brief — one short sentence "
+                "at most — then call BrowserOpen to open the page. "
+                "After the page loads, inspect what was asked and report "
+                "what you see. Do not plan. Do not summarize at length. "
+                "Open the browser, check, report. That is your entire job."
             ),
         )

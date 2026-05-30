@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from agent.llm import HelloAgentsLLM
     from agent.sandbox import Sandbox as _Sandbox
     from agent.tools.toolset import ToolSet as _ToolSet
     from agent.transcript import TranscriptStream
@@ -30,8 +31,8 @@ class BaseTool(BaseModel):
         sandbox: _Sandbox | None = None,
         channel: TranscriptStream | None = None,
         interrupt_event: asyncio.Event | None = None,
-        scheduler: object | None = None,
         toolset: _ToolSet | None = None,
         result_id: str = "",
+        llm_client: HelloAgentsLLM | None = None,
     ) -> str:
         raise NotImplementedError(f"{type(self).__name__} 未实现 execute()")

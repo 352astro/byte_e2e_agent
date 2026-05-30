@@ -6,7 +6,7 @@ Tool / SubTool 等旧式声明已移除。
 """
 
 from agent.tools.base import BaseTool
-from agent.tools.browser import BrowserInspect
+from agent.tools.browser import BrowserAct, BrowserInspect, BrowserOpen
 from agent.tools.edit import Edit, EditOp
 from agent.tools.glob import Glob
 from agent.tools.grep import Grep

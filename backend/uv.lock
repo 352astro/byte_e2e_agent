@@ -39,6 +39,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "dulwich" },
     { name = "fastapi" },
+    { name = "landlock" },
     { name = "openai" },
     { name = "playwright" },
     { name = "python-dotenv" },
@@ -51,6 +52,7 @@ dependencies = [
 requires-dist = [
     { name = "dulwich", specifier = ">=1.2.4" },
     { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "landlock", specifier = ">=1.0.0.dev0" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "playwright", specifier = ">=1.50.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
@@ -322,6 +324,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/60/e3/935b8034fd143f21125c87d51404a9e0e1449186a494405721ff5d1d695e/jiter-0.15.0-cp314-cp314t-win32.whl", hash = "sha256:7f6163c0f10b055245f814dcc59f4818da60dfe72f3e72ab89fc24b6bd5e9c52", size = 207950, upload-time = "2026-05-19T10:09:09.616Z" },
     { url = "https://files.pythonhosted.org/packages/93/59/984fd9ece895953dad3e0880a650e766f5a2da2c5514f0eafdaaabbeb5f9/jiter-0.15.0-cp314-cp314t-win_amd64.whl", hash = "sha256:980c256edb05b78a111b99c4de3b1d32e31634b867fd1fc2cf726e7b7bba9854", size = 200055, upload-time = "2026-05-19T10:09:11.367Z" },
     { url = "https://files.pythonhosted.org/packages/0e/a4/cf8d779feb133a27a2e3bc833bccb9e13aa332cdf820497ebf72c10ce8c3/jiter-0.15.0-cp314-cp314t-win_arm64.whl", hash = "sha256:66b1880df2d01e206e8339769d1c7c1753bcb653efd6289e203f6f24ebada0c0", size = 191244, upload-time = "2026-05-19T10:09:12.74Z" },
+]
+
+[[package]]
+name = "landlock"
+version = "1.0.0.dev5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/79/e2/ad65eb9afcde46eb055dce9b7003b372b1de19da94acf800a2e352ba5ae1/landlock-1.0.0.dev5.tar.gz", hash = "sha256:e82d511992be24986c51e3c9d2bfcc956833c2f82f95004216262aa4e2d50a2e", size = 7115, upload-time = "2025-05-03T16:51:57.738Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/45/c0/5cff902d2ff3df3db965e0b36208017569abf4a93ed30fe9ffafbf171c95/landlock-1.0.0.dev5-py3-none-any.whl", hash = "sha256:6d72357f5dc23d64b3b3d976672b61af736281b8d34a5825c1a61b602f2df815", size = 7969, upload-time = "2025-05-03T16:51:56.798Z" },
 ]
 
 [[package]]

@@ -3,7 +3,6 @@ import os
 import time
 from typing import Any, AsyncIterator, Dict, List
 
-from agent.utils._term import dim, error, info, success
 from openai import AsyncOpenAI
 
 from agent.metrics import (
@@ -12,6 +11,7 @@ from agent.metrics import (
     usage_to_dict,
     utc_now_iso,
 )
+from agent.utils._term import dim, error, info, success
 
 
 class HelloAgentsLLM:
@@ -73,7 +73,7 @@ class HelloAgentsLLM:
             kwargs["stream_options"] = {"include_usage": True}
         if self._thinking_enabled:
             kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
-            kwargs["reasoning_effort"] = "high"
+            kwargs["reasoning_effort"] = "max"
 
         created_at = utc_now_iso()
         started_at = time.perf_counter()

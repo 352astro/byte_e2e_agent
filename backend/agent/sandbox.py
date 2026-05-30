@@ -54,8 +54,27 @@ class Sandbox:
             self._terminal.stop()
             self._terminal = None
 
+    def reset_browser(self) -> None:
+        """关闭当前 browser，下次访问时自动重建。
+
+        注意：Chromium 进程由 OS 在 Python 进程退出时回收。
+        这里只清除 Playwright 的 Python 侧引用，下次 BrowserOpen
+        会重新调用 _ensure_browser() 启动新实例。
+        """
+        # 直接操作 browser 模块的全局变量，清除引用
+        # _shutdown_browser 是 async 的，在 sync 上下文中无法 await
+        # 但关闭 Python 引用足以让下次 BrowserOpen 重建
+        import agent.tools.browser as _browser_mod
+        from agent.tools.browser import _page as _browser_page
+        from agent.tools.browser import _playwright as _browser_pw
+
+        if _browser_mod._playwright is not None:
+            _browser_mod._page = None
+            _browser_mod._playwright = None
+
     async def shutdown(self) -> None:
         self.reset_terminal()
+        self.reset_browser()
 
     # ── 路径审查 ──────────────────────────────────────
 
