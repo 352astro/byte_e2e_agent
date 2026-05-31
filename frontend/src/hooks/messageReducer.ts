@@ -2,13 +2,8 @@
  * Pure reducer: apply a StreamEvent to a Message list.
  * No side effects, no React state — testable in isolation.
  *
- * Mirrors backend Hook build logic exactly (actions.py model_call):
- *   content              → chunk_delta: msg.content += delta
- *   reasoning            → chunk_delta: msg.reasoning += delta
- *   tool_calls[n].name   → chunk_delta: field="tool_calls", sub_field="name",  tool_index=n
- *   tool_calls[n].args   → chunk_delta: field="tool_calls", sub_field="args",  tool_index=n
- *   tool_result / error  → chunk_complete 一次性赋值
- *   status               → message_start: "streaming"; message_finish: "complete"
+ * NOTE: This module is no longer used by useAgentStream (now uses
+ * activeMessage pattern). Kept for unit test coverage only.
  */
 import type { Message, StreamEvent, ToolCall } from "../types";
 
@@ -30,7 +25,6 @@ export function reduceMessages(
   event: StreamEvent,
 ): Message[] {
   switch (event.kind) {
-    // ── message_start — 创建占位 Message ─────────────
     case "message_start": {
       if (messages.find((m) => m.id === event.message_id)) return messages;
       return [
@@ -51,13 +45,11 @@ export function reduceMessages(
       ];
     }
 
-    // ── chunk_delta — msg[field] += delta ─────────────
     case "chunk_delta": {
       const { message_id: mid, field, delta, tool_index, sub_field } = event;
       return messages.map((m) => {
         if (m.id !== mid) return m;
 
-        // Tool calls: mirror backend if tc_name / if tc_args
         if (field === "tool_calls") {
           const idx = tool_index >= 0 ? tool_index : 0;
           const tcs = ensureSlots([...(m.tool_calls || [])], idx);
@@ -78,14 +70,12 @@ export function reduceMessages(
           return {
             ...m,
             tool_calls: tcs,
-            // Keep raw buffer for streaming text display
             _toolCallsRaw:
               (((m as Record<string, unknown>)._toolCallsRaw as string) || "") +
               delta,
           };
         }
 
-        // Text fields: simple append
         const current = (m as Record<string, unknown>)[field as string];
         return {
           ...m,
@@ -94,7 +84,6 @@ export function reduceMessages(
       });
     }
 
-    // ── chunk_complete — 结构化字段一次性赋值 ────────
     case "chunk_complete": {
       const field = event.field as keyof Message;
       return messages.map((m) =>
@@ -102,12 +91,10 @@ export function reduceMessages(
       );
     }
 
-    // ── message_finish — 标记完成 + 清理 ─────────────
     case "message_finish": {
       return messages.map((m) => {
         if (m.id !== event.message_id) return m;
         const cleaned = { ...m, status: "complete" as const };
-        // Keep _toolCallsRaw as fallback if tool_calls never populated
         if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
           delete (cleaned as Record<string, unknown>)._toolCallsRaw;
         }
@@ -115,7 +102,6 @@ export function reduceMessages(
       });
     }
 
-    // ── turn_complete / interrupted — 不修改消息 ──────
     case "turn_complete":
     case "interrupted":
       return messages;

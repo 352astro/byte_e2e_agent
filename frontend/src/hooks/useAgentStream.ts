@@ -1,53 +1,127 @@
-import { useState, useRef, useCallback, useEffect } from "react";
-import type { Message, SessionCache, StreamEvent, RecoverData } from "../types";
-import { reduceMessages } from "./messageReducer";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import type { Message, StreamEvent, RecoverData } from "../types";
 
 // ── types ────────────────────────────────────────────
 
 interface UseAgentStreamOptions {
   sessionId: string | null;
-  cache?: SessionCache;
+  onSessionCreated?: (sid: string) => void;
   scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
-interface UseAgentStreamReturn {
+export interface UseAgentStreamReturn {
+  // ── 只读状态 ──
   running: boolean;
+  interrupting: boolean;
   messages: Message[];
-  handleRun: (sid: string, question: string) => Promise<void>;
+  activeMessage: Message | null;
+
+  // ── 命令（异步）──
+  send: (question: string) => Promise<void>;
+  interrupt: () => Promise<void>;
+  reloadMessages: () => Promise<void>;
+
+  // ── 命令（同步）──
+  truncateMessages: (truncateTid: string, keep?: boolean) => void;
+  resetRunning: () => void;
+
+  // ── 工具 ──
   createSession: () => Promise<string>;
   prefillRef: React.MutableRefObject<string>;
-  reloadMessages: () => void;
-  truncateMessages: (truncateTid: string, keep?: boolean) => void;
-  handleInterrupt: () => Promise<void>;
-  resetRunning: () => void;
-  interrupting: boolean;
   scrollToMessage: (id: string) => void;
+}
+
+// ── helpers ───────────────────────────────────────────
+
+function emptyMessage(id: string, turnId: string, role: string): Message {
+  return {
+    id,
+    turn_id: turnId,
+    role: role || "assistant",
+    status: "streaming",
+    content: "",
+    reasoning: "",
+    tool_calls: [],
+    tool_result: "",
+    tool_call_id: "",
+    tool_name: "",
+    error: "",
+  } as Message;
+}
+
+function emptyTC(): Record<string, unknown> {
+  return { id: "", type: "function", function: { name: "", arguments: "" } };
 }
 
 // ── hook ──────────────────────────────────────────────
 
 export default function useAgentStream({
   sessionId,
-  cache = {},
+  onSessionCreated,
   scrollContainerRef,
 }: UseAgentStreamOptions): UseAgentStreamReturn {
+  // ═══════════════════════════════════════════════════
+  //  State
+  // ═══════════════════════════════════════════════════
+
   const [running, _setRunning] = useState(false);
+  const [completed, setCompleted] = useState<Message[]>([]);
+  const [active, setActive] = useState<Message | null>(null);
+  const [interrupting, setInterrupting] = useState(false);
+
+  // ═══════════════════════════════════════════════════
+  //  Refs (mutable, no re-render on change)
+  // ═══════════════════════════════════════════════════
+
+  const genRef = useRef(0);
+  const opGuardRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const runningRef = useRef(false);
+  const prefillRef = useRef("");
+  const streamSidRef = useRef<string | null>(null);
+  const chatStreamActiveRef = useRef(false);
+  const lastIdRef = useRef<string | null>(null);
+  const prevSidRef = useRef<string | null>(sessionId);
+  const completedIdsRef = useRef<Set<string>>(new Set());
+
+  // ═══════════════════════════════════════════════════
+  //  Derived
+  // ═══════════════════════════════════════════════════
+
+  const messages = useMemo(
+    () => (active ? [...completed, active] : completed),
+    [completed, active],
+  );
+
+  // ═══════════════════════════════════════════════════
+  //  Internal helpers
+  // ═══════════════════════════════════════════════════
+
   const setRunning = (v: boolean) => {
     runningRef.current = v;
     _setRunning(v);
   };
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [interrupting, setInterrupting] = useState(false);
-  const [activeSid, setActiveSid] = useState<string | null>(sessionId);
 
-  const abortRef = useRef<AbortController | null>(null);
-  const lastIdRef = useRef<string | null>(null);
-  const fetchForRef = useRef<string | null>(null);
-  const streamingSidRef = useRef<string | null>(null);
-  const runningRef = useRef(false);
-  const prefillRef = useRef<string>("");
+  const bumpGen = () => {
+    genRef.current += 1;
+    return genRef.current;
+  };
 
-  // ── createSession ──────────────────────────────────
+  const appendCompleted = useCallback((msg: Message) => {
+    setCompleted((prev) => {
+      if (prev.some((m) => m.id === msg.id)) return prev;
+      completedIdsRef.current.add(msg.id);
+      return [...prev, msg];
+    });
+  }, []);
+
+  useEffect(() => {
+    completedIdsRef.current = new Set(completed.map((m) => m.id));
+  }, [completed]);
+
+  // ═══════════════════════════════════════════════════
+  //  createSession
+  // ═══════════════════════════════════════════════════
 
   const createSession = useCallback(async (): Promise<string> => {
     const res = await fetch("/api/session", { method: "POST" });
@@ -56,85 +130,322 @@ export default function useAgentStream({
     return data.session_id as string;
   }, []);
 
-  // ── reload ─────────────────────────────────────────
+  // ═══════════════════════════════════════════════════
+  //  reloadMessagesInternal (private, with gen gate)
+  // ═══════════════════════════════════════════════════
 
-  const reloadMessages = useCallback((): Promise<void> => {
-    if (!sessionId) return Promise.resolve();
-    const fetchFor = sessionId;
-    fetchForRef.current = fetchFor;
-    return fetch(`/api/session/${sessionId}/recover`)
-      .then((r) => r.json())
-      .then((data: RecoverData) => {
-        if (fetchForRef.current !== fetchFor) return;
+  const reloadMessagesInternal = useCallback(
+    async (sid: string, gen: number) => {
+      try {
+        const res = await fetch(`/api/session/${sid}/recover`);
+        if (!res.ok) return;
+        const data: RecoverData = await res.json();
+        if (genRef.current !== gen) return; // gen gate
         const msgs: Message[] = data.messages || [];
-        setMessages(msgs);
-        if (data.running) setRunning(true);
-        setInterrupting(false);
+        completedIdsRef.current = new Set(msgs.map((m) => m.id));
+        setCompleted(msgs);
+        setActive(null);
         lastIdRef.current = msgs.length ? msgs[msgs.length - 1].id : null;
-        cache[sessionId] = {
-          messages: msgs,
-          _complete: !data.running,
-        };
-      });
-  }, [sessionId, cache]);
+        if (data.running) {
+          setRunning(true);
+          streamSidRef.current = sid;
+        }
+      } catch {
+        // network error, ignore
+      }
+    },
+    [],
+  );
+
+  // ═══════════════════════════════════════════════════
+  //  reloadMessages (public)
+  // ═══════════════════════════════════════════════════
+
+  const reloadMessages = useCallback(async (): Promise<void> => {
+    if (!sessionId) return;
+    const gen = genRef.current;
+    await reloadMessagesInternal(sessionId, gen);
+  }, [sessionId, reloadMessagesInternal]);
+
+  // ═══════════════════════════════════════════════════
+  //  truncateMessages (sync, local only)
+  // ═══════════════════════════════════════════════════
 
   const truncateMessages = useCallback(
     (truncateTid: string, keep = false) => {
       if (!sessionId || !truncateTid) return;
-      setMessages((prev) => {
+        setCompleted((prev) => {
         const idx = prev.findIndex((m) => m.id === truncateTid);
         if (idx < 0) return prev;
         const cutoff = keep ? idx + 1 : idx;
         if (cutoff >= prev.length) return prev;
         const kept = prev.slice(0, cutoff);
+        completedIdsRef.current = new Set(kept.map((m) => m.id));
         lastIdRef.current = kept.length ? kept[kept.length - 1].id : null;
-        cache[sessionId] = { messages: kept, _complete: true };
         return kept;
       });
+      setActive(null);
     },
-    [sessionId, cache],
+    [sessionId],
   );
 
-  // ── session switch ─────────────────────────────────
+  // ═══════════════════════════════════════════════════
+  //  dispatchStreamEvent (with gen gate)
+  // ═══════════════════════════════════════════════════
 
-  // 跟踪上一次 sessionId，用于检测真正的切换
-  const prevSidRef = useRef<string | null>(sessionId);
+  const dispatchStreamEvent = useCallback((ev: StreamEvent, gen: number) => {
+    switch (ev.kind) {
+      case "message_start": {
+        if (genRef.current !== gen) return;
+        setActive((prev) => {
+          if (completedIdsRef.current.has(ev.message_id)) return prev;
+          if (prev?.id === ev.message_id) return prev;
+          if (prev) appendCompleted(prev);
+          return emptyMessage(ev.message_id, ev.turn_id, ev.role);
+        });
+        break;
+      }
 
-  useEffect(() => {
-    const prev = prevSidRef.current;
-    prevSidRef.current = sessionId;
+      case "chunk_delta": {
+        if (genRef.current !== gen) return;
+        const { field, delta, tool_index, sub_field } = ev;
+        setActive((prev) => {
+          if (!prev || prev.id !== ev.message_id) return prev;
 
-    // 同一个 session（包括首次渲染或 parent re-render）— 不动作
-    if (prev === sessionId) return;
+          if (field === "tool_calls") {
+            const idx = tool_index >= 0 ? tool_index : 0;
+            const tcs = [...(prev.tool_calls || [])];
+            while (tcs.length <= idx) tcs.push(emptyTC() as any);
+            const srcFn = tcs[idx].function || { name: "", arguments: "" };
+            const fn: { name: string; arguments: string } = {
+              name: srcFn.name || "",
+              arguments: srcFn.arguments || "",
+            };
+            if (sub_field === "name") {
+              fn.name += delta;
+            } else if (sub_field === "args") {
+              fn.arguments += delta;
+            }
+            tcs[idx] = { ...tcs[idx], function: fn };
+            return { ...prev, tool_calls: tcs };
+          }
 
-    // 切换到 null（清空）
-    if (!sessionId) {
-      setMessages([]);
-      setRunning(false);
-      setActiveSid(null);
-      return;
+          return { ...prev, [field]: (prev as any)[field] + delta };
+        });
+        break;
+      }
+
+      case "chunk_complete": {
+        if (genRef.current !== gen) return;
+        const { field, full_content } = ev;
+        if (field === "tool_calls") break;
+        setActive((prev) => {
+          if (!prev || prev.id !== ev.message_id) return prev;
+          return { ...prev, [field]: full_content };
+        });
+        break;
+      }
+
+      case "message_finish": {
+        if (genRef.current !== gen) return;
+        setActive((prev) => {
+          if (!prev || prev.id !== ev.message_id) return prev;
+          const done = { ...prev, status: "complete" as const };
+          appendCompleted(done);
+          lastIdRef.current = ev.message_id;
+          return null;
+        });
+        break;
+      }
+
+      case "turn_complete":
+      case "interrupted": {
+        if (genRef.current !== gen) return;
+        setActive((prev) => {
+          if (prev)
+            appendCompleted({ ...prev, status: "complete" as const });
+          return null;
+        });
+        setRunning(false);
+        break;
+      }
     }
+  }, [appendCompleted]);
 
-    // 从 null 或另一个 session 切换到新 sessionId
-    setActiveSid(sessionId);
+  // ═══════════════════════════════════════════════════
+  //  readSSEStream (shared by send + auto-reconnect)
+  // ═══════════════════════════════════════════════════
 
-    const cached = cache[sessionId];
-    if (cached && cached.messages) {
-      setMessages(cached.messages);
-      if (!cached._complete) setRunning(true);
-      lastIdRef.current = cached.messages.length
-        ? cached.messages[cached.messages.length - 1].id
-        : null;
-    } else {
-      setMessages([]);
-      setRunning(false);
-      reloadMessages().catch((err) => {
-        console.error("reloadMessages failed", err);
+  const readSSEStream = useCallback(
+    async (reader: ReadableStreamDefaultReader<Uint8Array>, gen: number) => {
+      const decoder = new TextDecoder();
+      let buffer = "";
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop()!;
+          for (const part of parts) {
+            const line = part.trim();
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const event = JSON.parse(line.slice(6)) as StreamEvent;
+              dispatchStreamEvent(event, gen);
+            } catch {
+              // ignore malformed JSON
+            }
+          }
+        }
+      } catch {
+        // stream ended or aborted
+      }
+    },
+    [dispatchStreamEvent],
+  );
+
+  // ═══════════════════════════════════════════════════
+  //  interruptInternal (no gen bump, no reload)
+  // ═══════════════════════════════════════════════════
+
+  const interruptInternal = useCallback(
+    async (sid: string) => {
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+      }
+      try {
+        await fetch(`/api/session/${sid}/interrupt`, { method: "POST" });
+      } catch {
+        // ignore network errors
+      }
+      setActive((prev) => {
+        if (prev) appendCompleted({ ...prev, status: "complete" as const });
+        return null;
       });
-    }
-  }, [sessionId]);
+      setRunning(false);
+      setInterrupting(false);
+    },
+    [appendCompleted],
+  );
 
-  // ── scroll ─────────────────────────────────────────
+  // ═══════════════════════════════════════════════════
+  //  interrupt (public) — idempotent, returns Promise
+  // ═══════════════════════════════════════════════════
+
+  const interrupt = useCallback(async (): Promise<void> => {
+    if (!sessionId || !runningRef.current) return;
+    if (opGuardRef.current) return;
+    opGuardRef.current = true;
+    const gen = bumpGen();
+    setInterrupting(true);
+    try {
+      await interruptInternal(sessionId);
+      await reloadMessagesInternal(sessionId, gen);
+    } finally {
+      opGuardRef.current = false;
+    }
+  }, [sessionId, interruptInternal, reloadMessagesInternal]);
+
+  // ═══════════════════════════════════════════════════
+  //  send — 统一发送入口
+  // ═══════════════════════════════════════════════════
+
+  const send = useCallback(
+    async (question: string): Promise<void> => {
+      if (opGuardRef.current) return;
+      opGuardRef.current = true;
+      const gen = bumpGen();
+
+      try {
+        const prefill = prefillRef.current.trim();
+        if (prefill) prefillRef.current = "";
+        const q = (prefill ? prefill + "\n" + question : question).trim();
+        if (!q) return;
+
+        // Ensure session exists
+        let sid = sessionId;
+        let selfStarted = false;
+        if (!sid) {
+          sid = await createSession();
+          // CRITICAL: set runningRef + streamSidRef *before* onSessionCreated,
+          // so the session-switch useEffect sees them and bails out instead of
+          // bumping gen / clearing messages / reloading.
+          selfStarted = true;
+          runningRef.current = true;
+          streamSidRef.current = sid;
+          onSessionCreated?.(sid);
+        }
+
+        // Interrupt any running stream (skip if we just created this session)
+        if (!selfStarted && runningRef.current) {
+          await interruptInternal(sid!);
+        }
+
+        setRunning(true);
+        setInterrupting(false);
+        streamSidRef.current = sid!;
+        chatStreamActiveRef.current = true;
+
+        const controller = new AbortController();
+        abortRef.current = controller;
+
+        try {
+          const streamRes = await fetch(`/api/session/${sid}/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ question: q, max_steps: 50 }),
+            signal: AbortSignal.any([
+              controller.signal,
+              AbortSignal.timeout(300_000),
+            ]),
+          });
+          if (!streamRes.ok) {
+            throw new Error(
+              streamRes.status === 409
+                ? "Session is already running"
+                : `Server returned ${streamRes.status}`,
+            );
+          }
+          await readSSEStream(streamRes.body!.getReader(), gen);
+        } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          throw err;
+        } finally {
+          if (abortRef.current === controller) {
+            abortRef.current = null;
+          }
+          chatStreamActiveRef.current = false;
+          if (genRef.current === gen && runningRef.current) {
+            setRunning(false);
+          }
+        }
+      } finally {
+        opGuardRef.current = false;
+      }
+    },
+    [
+      sessionId,
+      createSession,
+      onSessionCreated,
+      interruptInternal,
+      readSSEStream,
+    ],
+  );
+
+  // ═══════════════════════════════════════════════════
+  //  resetRunning — emergency escape hatch
+  // ═══════════════════════════════════════════════════
+
+  const resetRunning = useCallback(() => {
+    setRunning(false);
+    setInterrupting(false);
+  }, []);
+
+  // ═══════════════════════════════════════════════════
+  //  scrollToMessage
+  // ═══════════════════════════════════════════════════
 
   const scrollToMessage = useCallback(
     (id: string) => {
@@ -147,58 +458,62 @@ export default function useAgentStream({
     [scrollContainerRef],
   );
 
-  // ── interrupt ──────────────────────────────────────
+  // ═══════════════════════════════════════════════════
+  //  Session switch effect
+  // ═══════════════════════════════════════════════════
 
-  const handleInterrupt = useCallback(async () => {
-    const sid = activeSid || sessionId;
-    if (!sid || !runningRef.current || interrupting) return;
-    setInterrupting(true);
+  useEffect(() => {
+    const prev = prevSidRef.current;
+    prevSidRef.current = sessionId;
+
+    if (prev === sessionId) return;
+
+    // Session cleared
+    if (!sessionId) {
+      bumpGen();
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+      }
+      setCompleted([]);
+      completedIdsRef.current = new Set();
+      setActive(null);
+      setRunning(false);
+      streamSidRef.current = null;
+      return;
+    }
+
+    // If currently streaming on this exact session, don't interfere
+    if (runningRef.current && streamSidRef.current === sessionId) return;
+
+    // Switch to different session
+    const gen = bumpGen();
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
     }
-    try {
-      await fetch(`/api/session/${sid}/interrupt`, { method: "POST" });
-    } catch {
-      // ignore network errors during interrupt
-    }
+    setCompleted([]);
+    completedIdsRef.current = new Set();
+    setActive(null);
     setRunning(false);
-    runningRef.current = false;
-    setInterrupting(false);
-    streamingSidRef.current = null;
-    reloadMessages();
-  }, [interrupting, reloadMessages, sessionId, activeSid]);
+    streamSidRef.current = null;
+    reloadMessagesInternal(sessionId, gen);
+  }, [sessionId, reloadMessagesInternal]);
 
-  // ── SSE event dispatch ─────────────────────────────
-
-  const dispatchStreamEvent = useCallback((ev: StreamEvent) => {
-    switch (ev.kind) {
-      case "message_start":
-      case "chunk_delta":
-      case "chunk_complete":
-      case "message_finish": {
-        setMessages((prev) => reduceMessages(prev, ev));
-        if (ev.kind === "message_finish") {
-          lastIdRef.current = ev.message_id;
-        }
-        break;
-      }
-      case "turn_complete":
-      case "interrupted": {
-        setRunning(false);
-        break;
-      }
-    }
-  }, []);
-
-  // ── auto-reconnect stream ──────────────────────────
+  // ═══════════════════════════════════════════════════
+  //  Auto-reconnect effect (page refresh while running)
+  // ═══════════════════════════════════════════════════
 
   useEffect(() => {
     if (!sessionId) return;
     if (!running) return;
-    const sid = sessionId;
+    if (abortRef.current) return;
+    if (chatStreamActiveRef.current) return;
 
+    const sid = sessionId;
+    const gen = genRef.current;
     const controller = new AbortController();
+    abortRef.current = controller;
 
     (async () => {
       try {
@@ -206,124 +521,38 @@ export default function useAgentStream({
           signal: controller.signal,
         });
         if (!res.ok || !res.body) return;
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split("\n\n");
-          buffer = parts.pop()!;
-          for (const part of parts) {
-            const line = part.trim();
-            if (!line.startsWith("data: ")) continue;
-            try {
-              const event = JSON.parse(line.slice(6)) as StreamEvent;
-              dispatchStreamEvent(event);
-            } catch {
-              // ignore malformed JSON
-            }
-          }
-        }
+        await readSSEStream(res.body.getReader(), gen);
       } catch {
         // stream ended or aborted
+      } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
+        if (genRef.current === gen && runningRef.current) {
+          setRunning(false);
+        }
       }
     })();
 
     return () => controller.abort();
-  }, [sessionId, running, dispatchStreamEvent]);
+  }, [sessionId, running, readSSEStream]);
 
-  // ── handleRun ──────────────────────────────────────
-
-  const handleRun = useCallback(
-    async (sid: string, question: string) => {
-      const prefill = prefillRef.current.trim();
-      if (prefill) prefillRef.current = "";
-      const q = (prefill ? prefill + "\n" + question : question).trim();
-      if (!q || !sid || runningRef.current) return;
-
-      setRunning(true);
-      setInterrupting(false);
-
-      if (abortRef.current) {
-        abortRef.current.abort();
-        abortRef.current = null;
-      }
-      streamingSidRef.current = sid;
-
-      const controller = new AbortController();
-      abortRef.current = controller;
-      try {
-        const streamRes = await fetch(`/api/session/${sid}/chat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: q, max_steps: 50 }),
-          signal: AbortSignal.any([
-            controller.signal,
-            AbortSignal.timeout(300_000),
-          ]),
-        });
-        if (!streamRes.ok) {
-          throw new Error(
-            streamRes.status === 409
-              ? "Session is already running"
-              : `Server returned ${streamRes.status}`,
-          );
-        }
-
-        const reader = streamRes.body!.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split("\n\n");
-          buffer = parts.pop()!;
-          for (const part of parts) {
-            const line = part.trim();
-            if (!line.startsWith("data: ")) continue;
-            try {
-              const event = JSON.parse(line.slice(6)) as StreamEvent;
-              dispatchStreamEvent(event);
-            } catch {
-              // ignore malformed JSON
-            }
-          }
-        }
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-      } finally {
-        if (abortRef.current !== controller) return;
-        abortRef.current = null;
-        streamingSidRef.current = null;
-        if (runningRef.current) {
-          setRunning(false);
-        }
-      }
-    },
-    [dispatchStreamEvent],
-  );
-
-  const resetRunning = useCallback(() => {
-    setRunning(false);
-    setInterrupting(false);
-  }, []);
+  // ═══════════════════════════════════════════════════
+  //  Return
+  // ═══════════════════════════════════════════════════
 
   return {
     running,
     interrupting,
     messages,
-    handleRun,
-    createSession,
-    prefillRef,
+    activeMessage: active,
+    send,
+    interrupt,
     reloadMessages,
     truncateMessages,
-    handleInterrupt,
     resetRunning,
+    createSession,
+    prefillRef,
     scrollToMessage,
   };
 }

@@ -125,7 +125,7 @@ const MessageCard = React.memo(function MessageCard({
       {/* Content block */}
       {hasContent && (
         <div
-          className={`transcript-body${focusedId === `${m.id}/content` ? " card-latest" : ""}`}
+          className={`transcript-body no-focus-glow${focusedId === `${m.id}/content` ? " card-latest" : ""}`}
           data-fid={`${m.id}/content`}
         >
           <Markdown text={m.content} />

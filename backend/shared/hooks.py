@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from abc import ABC
 from typing import Any
@@ -131,14 +130,12 @@ class BaseHook(ABC):
 class HookManager:
     """管理多个 Hook 实例，并行分发事件。
 
-    - 每个 hook 独立 asyncio task
-    - 单个 hook 抛异常不影响其他 hook 和主循环
-    - dispatch() fire-and-forget，flush() 等待全部完成
+    - 每个 hook 顺序同步调用（单个 hook 异常不影响其他 hook）
+    - 适合 CLI（直接 stdout）和 SSE（put_nowait 非阻塞）
     """
 
     def __init__(self, hooks: list[BaseHook] | None = None) -> None:
         self._hooks: list[BaseHook] = list(hooks) if hooks else []
-        self._pending: set[asyncio.Task] = set()
 
     # ── 管理 ────────────────────────────────────────────
 
@@ -160,27 +157,20 @@ class HookManager:
     async def dispatch(self, method: str, **kwargs: Any) -> None:
         if not self._hooks:
             return
-
-        async def _safe_call(hook: BaseHook) -> None:
+        for hook in self._hooks:
             try:
                 fn = getattr(hook, method, None)
                 if fn is None:
                     logger.warning(
                         "Hook %s has no method %s", type(hook).__name__, method
                     )
-                    return
+                    continue
                 await fn(**kwargs)
             except Exception:
                 logger.exception("Hook %s.%s failed", type(hook).__name__, method)
 
-        for hook in self._hooks:
-            task = asyncio.create_task(_safe_call(hook))
-            self._pending.add(task)
-            task.add_done_callback(self._pending.discard)
-
     async def flush(self) -> None:
-        if self._pending:
-            await asyncio.gather(*self._pending, return_exceptions=True)
+        pass  # synchronous dispatch — no pending tasks to flush
 
     # ── 便捷方法 ────────────────────────────────────────
 

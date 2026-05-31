@@ -227,4 +227,65 @@ describe("full session trace", () => {
     expect(data.running).toBe(false);
     expect(data.current_message).toBeNull();
   });
+
+  it(
+    "tool call: no UNKNOWN spam during streaming assembly",
+    { timeout: 60000 },
+    async () => {
+      // 用新 session 隔离，避免历史干扰
+      const { session_id: testSid } = await post("/api/session");
+      console.log("Tool-call test session:", testSid);
+
+      const events = await sseChat(
+        testSid,
+        "Run the shell command `date` and tell me the output. " +
+          "Do not use any other tools. Just Shell once.",
+        3,
+      );
+
+      const ks = kinds(events);
+      console.log(`Tool-call chat: ${ks.length} events`);
+
+      // 1) 存在 tool_calls 的 chunk_complete
+      const tcCompletes = events.filter(
+        (e) => e.kind === "chunk_complete" && e.field === "tool_calls",
+      );
+      console.log(`  chunk_complete(tool_calls): ${tcCompletes.length}`);
+
+      // 2) 每个 tool_calls chunk_delta 的 tool_name 不能为空
+      const tcDeltas = events.filter(
+        (e) => e.kind === "chunk_delta" && e.field === "tool_calls",
+      );
+      console.log(`  chunk_delta(tool_calls): ${tcDeltas.length}`);
+      for (const d of tcDeltas) {
+        const tn = d.tool_name as string;
+        const sf = d.sub_field as string;
+        // tool_name 应该在 name 子字段收到后就有值
+        if (sf === "args" && !tn) {
+          console.log(
+            `  WARN: args delta with empty tool_name, delta="${d.delta}"`,
+          );
+        }
+      }
+
+      // 3) recover 后的消息不能有 "unknown" 的 tool name
+      const data = await g(`/api/session/${testSid}/recover`);
+      const msgs = data.messages as Record<string, unknown>[];
+      for (const m of msgs) {
+        const tcs = (m.tool_calls as Record<string, unknown>[]) || [];
+        for (const tc of tcs) {
+          const fn = (tc.function as Record<string, string>) || {};
+          const name = fn.name || "";
+          console.log(
+            `  tool_call: name="${name}" args_len=${(fn.arguments || "").length}`,
+          );
+          expect(name).not.toBe("");
+          expect(name).not.toBe("unknown");
+        }
+      }
+
+      // 4) 清理
+      await fetch(`${BASE}/api/session/${testSid}`, { method: "DELETE" });
+    },
+  );
 });

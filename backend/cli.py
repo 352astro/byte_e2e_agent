@@ -32,8 +32,8 @@ from shared.hooks import HookManager  # noqa: E402
 
 _R = "\033[0m"
 _B = "\033[1m"
-_C = "\033[36m"
-_Y = "\033[33m"
+_C = "\033[96m"  # bright cyan
+_Y = "\033[93m"  # bright yellow
 _K = "\033[90m"
 
 _WIDTH = min(os.get_terminal_size().columns, 80)

@@ -8,14 +8,13 @@ import ToolPairCard from "./ToolPairCard";
 import AgentInput from "./AgentInput";
 import EditableUserBubble from "./EditableUserBubble";
 import { pairToolCalls } from "../hooks/pairTools";
-import { type SessionCache, type CommitInfo } from "../types";
+import { type CommitInfo } from "../types";
 import CommitGraphPanel, { CommitGraphHandle } from "./CommitGraphPanel";
 import "./AgentDemo.css";
 
 interface AgentDemoProps {
   sessionId: string | null;
   onSessionCreated?: (sid: string) => void;
-  cache: SessionCache;
 }
 
 type CommitAction = "regret" | "restore" | "replay" | null;
@@ -101,7 +100,6 @@ function CommitBadge({
 export default function AgentDemo({
   sessionId,
   onSessionCreated,
-  cache,
 }: AgentDemoProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -109,17 +107,16 @@ export default function AgentDemo({
     running,
     interrupting,
     messages,
-    handleRun,
+    send,
+    interrupt,
     createSession,
     prefillRef,
     reloadMessages,
     truncateMessages,
-    handleInterrupt,
     resetRunning,
   } = useAgentStream({
     sessionId,
     onSessionCreated,
-    cache,
     scrollContainerRef: scrollRef,
   });
 
@@ -284,42 +281,15 @@ export default function AgentDemo({
   // ── Commit checkout ──────────────────────────
   const [checkingOut, setCheckingOut] = useState<string | null>(null);
   const [prefillContent, setPrefillContent] = useState("");
-  // Sync transcript content to commit graph messages
-  // TODO: Message has no commitSha — commit graph needs separate migration
-  /*
-  useEffect(() => {
-    for (const m of messages) {
-      if (!m.commitSha || m.role !== "user") continue;
-      const content = m.content || "";
-      if (!content) continue;
-      handleUpdateMessage(m.commitSha, content);
-    }
-  }, [messages, handleUpdateMessage]);
-  */
 
   // ── Send handler ─────────────────────────────
+  // 所有编排逻辑已移入 useAgentStream.send()，外部只需一行调用
 
   const handleSend = useCallback(
-    async (question: string) => {
-      if (running && !interrupting) {
-        await handleInterrupt();
-      }
-      let sid = sessionId;
-      if (!sid) {
-        sid = await createSession();
-        onSessionCreated?.(sid);
-      }
-      handleRun(sid, question);
+    (question: string) => {
+      send(question);
     },
-    [
-      running,
-      interrupting,
-      handleInterrupt,
-      handleRun,
-      createSession,
-      sessionId,
-      onSessionCreated,
-    ],
+    [send],
   );
 
   // ── Independent workspace/message rewind ──────
@@ -348,10 +318,11 @@ export default function AgentDemo({
   const applyTruncate = useCallback(
     async (opts: TruncateOpts) => {
       if (!sessionId) return;
-      if (running && !interrupting) {
-        await handleInterrupt();
-      }
+
+      // interrupt() is idempotent — no-op if nothing is running
+      await interrupt();
       resetRunning();
+
       if (opts.commitSha) setCheckingOut(opts.commitSha);
 
       try {
@@ -379,19 +350,21 @@ export default function AgentDemo({
 
       if (opts.truncateTid) truncateMessages(opts.truncateTid, !!opts.keepTid);
       if (opts.removeSha) handleRemoveFrom(opts.removeSha);
-      if (opts.sendContent && sessionId) handleRun(sessionId, opts.sendContent);
+
+      // send() internally handles session creation, interrupt, and streaming
+      if (opts.sendContent && sessionId) {
+        await send(opts.sendContent);
+      }
 
       if (opts.commitSha) setCheckingOut(null);
     },
     [
       sessionId,
-      running,
-      interrupting,
-      handleInterrupt,
+      interrupt,
       resetRunning,
       truncateMessages,
       handleRemoveFrom,
-      handleRun,
+      send,
     ],
   );
 
@@ -529,7 +502,7 @@ export default function AgentDemo({
         prefillContent={prefillContent}
         onPrefillChange={setPrefillContent}
         onSend={handleSend}
-        onInterrupt={handleInterrupt}
+        onInterrupt={interrupt}
       />
 
       <CommitGraphPanel

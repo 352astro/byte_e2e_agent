@@ -112,15 +112,15 @@ describe("useAgentStream", () => {
     expect(result.current.messages).toEqual([]);
   });
 
-  // ── handleInterrupt when not running ────────────────
+  // ── interrupt when not running ─────────────────────
 
-  it("handleInterrupt with null sessionId does nothing", async () => {
+  it("interrupt with null sessionId does nothing", async () => {
     const { result } = renderHook(() =>
       useAgentStream({ sessionId: null, cache: {} }),
     );
 
     await act(async () => {
-      await result.current.handleInterrupt();
+      await result.current.interrupt();
     });
 
     expect(result.current.interrupting).toBe(false);

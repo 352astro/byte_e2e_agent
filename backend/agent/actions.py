@@ -17,6 +17,7 @@ from shared.hooks import HookManager
 from shared.types import Message, ToolCall
 
 _SUBAGENT_DEBUG = True  # 设为 False 关闭子智能体控制台调试输出
+_STREAM_END = object()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -26,6 +27,13 @@ _SUBAGENT_DEBUG = True  # 设为 False 关闭子智能体控制台调试输出
 
 def _default_toolset() -> ToolSet:
     return ToolSet(tool_registry)
+
+
+def _next_stream_chunk(iterator):
+    try:
+        return next(iterator)
+    except StopIteration:
+        return _STREAM_END
 
 
 async def _debug_bridge_silent(msg: Message | None, label: str) -> None:
@@ -86,9 +94,13 @@ async def model_call(
     if tools:
         kwargs["tools"] = tools
 
-    stream = client.chat.completions.create(**kwargs)
+    stream = await asyncio.to_thread(client.chat.completions.create, **kwargs)
+    stream_iter = iter(stream)
 
-    for chunk in stream:
+    while True:
+        chunk = await asyncio.to_thread(_next_stream_chunk, stream_iter)
+        if chunk is _STREAM_END:
+            break
         if interrupt_event.is_set():
             raise InterruptedError("Interrupted during LLM call")
 

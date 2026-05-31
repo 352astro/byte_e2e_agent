@@ -22,13 +22,13 @@ logger = logging.getLogger(__name__)
 # ── ANSI palette ──────────────────────────────────────────
 
 _RST = "\033[0m"
-_DIM = "\033[2m"
+_DIM = "\033[2m"  # dim attribute (keeps fg color, readable on any bg)
 _BLD = "\033[1m"
-_CYN = "\033[36m"
-_GRN = "\033[32m"
-_RED = "\033[31m"
-_YLW = "\033[33m"
-_GRY = "\033[90m"
+_CYN = "\033[96m"  # bright cyan
+_GRN = "\033[92m"  # bright green
+_RED = "\033[91m"  # bright red
+_YLW = "\033[93m"  # bright yellow
+_GRY = "\033[2m"  # dim secondary text
 _WHI = "\033[97m"
 
 

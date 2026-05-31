@@ -1,15 +1,12 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import AgentDemo from "./components/AgentDemo";
 import SessionSidebar from "./components/SessionSidebar";
-import type { SessionCache } from "./types";
 import "./App.css";
 
-const sessionCache: SessionCache = {};
 
 export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState("");
-  const cacheRef = useRef<SessionCache>(sessionCache);
 
   const handleSelect = useCallback((sid: string) => {
     setSessionId(sid);
@@ -51,7 +48,6 @@ export default function App() {
         <AgentDemo
           sessionId={sessionId}
           onSessionCreated={handleSessionCreated}
-          cache={cacheRef.current}
         />
       </div>
     </div>

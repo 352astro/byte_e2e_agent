@@ -95,46 +95,37 @@ export function ShellCard({
   const hasResult = resultContent !== undefined;
 
   return (
-    <>
-      <CollapsibleCard
-        id={`${cardId}/shell`}
-        dataFid={focusId}
-        collapsed={collapsed}
-        onToggle={toggle}
-        cardClassName="tool-card--shell"
-        headerClassName="shell-call-bar"
-        title={
-          <>
-            <Icon name="tool" size={13} className="shell-call-icon" />
-            <span className="shell-call-label">Run Command</span>
-            {subtitle}
-          </>
-        }
-        headerRight={headerRight}
-      >
+    <CollapsibleCard
+      id={`${cardId}/shell`}
+      dataFid={focusId}
+      collapsed={collapsed}
+      onToggle={toggle}
+      cardClassName="tool-card--shell"
+      headerClassName="shell-call-bar"
+      title={
+        <>
+          <Icon name="tool" size={13} className="shell-call-icon" />
+          <span className="shell-call-label">Run Command</span>
+          {subtitle}
+        </>
+      }
+      headerRight={headerRight}
+    >
+      <div className="tool-paired-body tool-paired-body--shell">
         <HighlightCode
           code={command || "\u2026"}
           language="bash"
           className="shell-call-command"
         />
-      </CollapsibleCard>
-
-      {hasResult && (
-        <CollapsibleCard
-          id={`${cardId}/shell-result`}
-          dataFid={focusId}
-          collapsed={collapsed}
-          onToggle={toggle}
-          cardClassName="tool-card--shell"
-        >
+        {hasResult && (
           <HighlightCode
             code={resultContent}
             language="bash"
             className="tool-shell-output"
           />
-        </CollapsibleCard>
-      )}
-    </>
+        )}
+      </div>
+    </CollapsibleCard>
   );
 }
 
@@ -251,44 +242,36 @@ export function DefaultToolCard({
   );
 
   return (
-    <>
-      <CollapsibleCard
-        id={`${cardId}/default`}
-        dataFid={focusId}
-        collapsed={collapsed}
-        onToggle={toggle}
-        cardClassName={active ? "tool-card--streaming" : ""}
-        title={
-          <>
-            <Icon name="tool" size={13} className="tool-icon" />
-            <span className="tool-label">{toolName || "\u2026"}</span>
-            {subtitle}
-          </>
-        }
-        headerRight={headerRight}
-      >
+    <CollapsibleCard
+      id={`${cardId}/default`}
+      dataFid={focusId}
+      collapsed={collapsed}
+      onToggle={toggle}
+      cardClassName={active ? "tool-card--streaming" : ""}
+      title={
+        <>
+          <Icon name="tool" size={13} className="tool-icon" />
+          <span className="tool-label">{toolName || "\u2026"}</span>
+          {subtitle}
+        </>
+      }
+      headerRight={headerRight}
+    >
+      <div className="tool-paired-body">
         <div className="tool-code-block">
           <pre>
             <code>{args || "\u2026"}</code>
           </pre>
         </div>
-      </CollapsibleCard>
-
-      {resultContent !== undefined && (
-        <CollapsibleCard
-          id={`${cardId}/default-result`}
-          dataFid={focusId}
-          collapsed={collapsed}
-          onToggle={toggle}
-        >
+        {resultContent !== undefined && (
           <div className="tool-code-block">
             <pre>
               <code>{resultContent}</code>
             </pre>
           </div>
-        </CollapsibleCard>
-      )}
-    </>
+        )}
+      </div>
+    </CollapsibleCard>
   );
 }
 

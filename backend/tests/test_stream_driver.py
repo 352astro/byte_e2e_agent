@@ -263,6 +263,7 @@ class TestTurnComplete:
         assert ev.turn_id == "t1"
         assert ev.input_tokens == 100
         assert ev.output_tokens == 50
+        assert q.get_nowait() is None
 
     @pytest.mark.asyncio
     async def test_on_turn_end_empty_turn_id_skipped(self):
@@ -294,6 +295,7 @@ class TestInterrupted:
         assert ev is not None
         assert ev.kind == StreamEventKind.INTERRUPTED
         assert ev.reason == "boom"
+        assert q.get_nowait() is None
 
 
 # ═══════════════════════════════════════════════════════════

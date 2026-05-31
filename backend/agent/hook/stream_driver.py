@@ -44,6 +44,10 @@ class StreamDriverHook(BaseHook):
 
     def close(self) -> None:
         self._closed = True
+        self.close_subscribers()
+
+    def close_subscribers(self) -> None:
+        """End current SSE subscribers without permanently closing the driver."""
         for q in self._subscribers:
             try:
                 q.put_nowait(None)
@@ -77,6 +81,10 @@ class StreamDriverHook(BaseHook):
     ) -> None:
         if not delta or not msg.id:
             return
+
+        print(
+            f"\n>>>> on_chunk_delta {msg.id} | {field} | {delta} | {tool_name} | {kwargs}"
+        )
         tool_index = kwargs.get("tool_index", -1)
         sub_field = kwargs.get("sub_field", "")
         self._broadcast(
@@ -124,8 +132,10 @@ class StreamDriverHook(BaseHook):
             self._broadcast(
                 StreamEvent.turn_complete(turn_id, input_tokens, output_tokens)
             )
+            self.close_subscribers()
 
     async def on_message_error(
         self, *, msg: Message, error: Exception, **kwargs
     ) -> None:
         self._broadcast(StreamEvent.interrupted(str(error)))
+        self.close_subscribers()

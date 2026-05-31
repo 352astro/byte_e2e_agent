@@ -347,11 +347,18 @@ class AgentRuntime:
             total_input_tokens = 0
             total_output_tokens = 0
 
-            # 用户消息 — 构建 Message
+            # 用户消息 — 构建 Message 并完整流式传输
             user_id = _uuid.uuid4().hex
             user_msg = Message.user_message(user_id, turn_id, question)
             await self._hooks.on_message_start(msg=user_msg, session_id=sid)
+            await self._hooks.on_chunk_delta(
+                msg=user_msg, field="content", delta=question, session_id=sid
+            )
+            await self._hooks.on_chunk_complete(
+                msg=user_msg, field="content", full_content=question, session_id=sid
+            )
             await self._hooks.on_message_finish(msg=user_msg, session_id=sid)
+            await asyncio.sleep(0)
 
             for step in range(max_steps):
                 if intr.is_set():

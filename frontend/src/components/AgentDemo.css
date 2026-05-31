@@ -452,6 +452,18 @@
     overflow: hidden;
 }
 
+.tool-paired-body {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.tool-paired-body .tool-code-block pre,
+.tool-paired-body .shell-call-command,
+.tool-paired-body .tool-shell-output {
+    margin-top: 0;
+}
+
 .tool-code-block pre {
     margin: 0;
     padding: 8px 12px;
@@ -990,7 +1002,7 @@
 
 /* ── Rainbow glow on latest card ────────────── */
 
-[data-fid].card-latest {
+[data-fid].card-latest:not(.no-focus-glow) {
     animation: rainbow-glow 3s linear infinite;
     border-radius: 4px;
 }
@@ -1056,7 +1068,7 @@
 
 /* Hover glow on non-focused cards */
 /* Hover: white glow on non-focused sub-components */
-[data-fid]:not(.card-latest):hover {
+[data-fid]:not(.card-latest):not(.no-focus-glow):hover {
     box-shadow:
         10px 0 20px hsla(0, 0%, 60%, 0.25),
         -10px 0 20px hsla(0, 0%, 60%, 0.25),
