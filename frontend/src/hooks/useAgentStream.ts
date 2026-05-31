@@ -17,6 +17,8 @@ interface UseAgentStreamOptions {
     onCommit?: (targetTid: string, commitSha: string) => void;
 }
 
+const BUSY_MESSAGE = "系统正在繁忙，请稍后再试";
+
 interface UseAgentStreamReturn {
     running: boolean;
     transcripts: DisplayTranscript[];
@@ -29,6 +31,8 @@ interface UseAgentStreamReturn {
     resetRunning: () => void;
     interrupting: boolean;
     scrollToTranscript: (id: string) => void;
+    runError: string | null;
+    clearRunError: () => void;
 }
 
 export default function useAgentStream({
@@ -46,6 +50,7 @@ export default function useAgentStream({
     };
     const [transcripts, setTranscripts] = useState<DisplayTranscript[]>([]);
     const [interrupting, setInterrupting] = useState(false);
+    const [runError, setRunError] = useState<string | null>(null);
     const [currentSid, setCurrentSid] = useState<string | null>(sessionId);
 
     const abortRef = useRef<AbortController | null>(null);
@@ -397,6 +402,16 @@ export default function useAgentStream({
         return () => controller.abort();
     }, [sessionId, running, dispatchStreamEvent]);
 
+    const clearRunError = useCallback(() => {
+        setRunError(null);
+    }, []);
+
+    useEffect(() => {
+        if (!runError) return;
+        const timer = window.setTimeout(() => setRunError(null), 5000);
+        return () => window.clearTimeout(timer);
+    }, [runError]);
+
     // ── run ──────────────────────────────────────────
 
     const handleRun = useCallback(
@@ -408,6 +423,7 @@ export default function useAgentStream({
             const q = (prefill ? prefill + "\n" + question : question).trim();
             if (!q || runningRef.current) return;
 
+            setRunError(null);
             setRunning(true);
             setInterrupting(false);
 
@@ -453,11 +469,11 @@ export default function useAgentStream({
                     ]),
                 });
                 if (!streamRes.ok) {
-                    throw new Error(
-                        streamRes.status === 409
-                            ? "Session is already running"
-                            : `Server returned ${streamRes.status}`,
-                    );
+                    if (streamRes.status === 409) {
+                        setRunError(BUSY_MESSAGE);
+                        return;
+                    }
+                    throw new Error(`Server returned ${streamRes.status}`);
                 }
 
                 const reader = streamRes.body!.getReader();
@@ -541,5 +557,7 @@ export default function useAgentStream({
         handleInterrupt,
         resetRunning,
         scrollToTranscript,
+        runError,
+        clearRunError,
     };
 }

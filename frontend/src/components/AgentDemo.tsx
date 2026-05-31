@@ -118,6 +118,8 @@ export default function AgentDemo({
     handleInterrupt,
     resetRunning,
     scrollToTranscript,
+    runError,
+    clearRunError,
   } = useAgentStream({
     sessionId,
     pendingNew,
@@ -617,6 +619,20 @@ export default function AgentDemo({
           </FocusProvider>
         </div>
       </div>
+
+      {runError && (
+        <div className="agent-run-error" role="alert">
+          <span>{runError}</span>
+          <button
+            type="button"
+            className="agent-run-error-dismiss"
+            aria-label="关闭"
+            onClick={clearRunError}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <AgentInput
         running={running}
