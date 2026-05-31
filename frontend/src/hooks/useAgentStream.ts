@@ -9,6 +9,8 @@ interface UseAgentStreamOptions {
   scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
+const BUSY_MESSAGE = "系统正在繁忙，请稍后再试";
+
 export interface UseAgentStreamReturn {
   // ── 只读状态 ──
   running: boolean;
@@ -29,6 +31,8 @@ export interface UseAgentStreamReturn {
   createSession: () => Promise<string>;
   prefillRef: React.MutableRefObject<string>;
   scrollToMessage: (id: string) => void;
+  runError: string | null;
+  clearRunError: () => void;
 }
 
 // ── helpers ───────────────────────────────────────────
@@ -68,6 +72,7 @@ export default function useAgentStream({
   const [completed, setCompleted] = useState<Message[]>([]);
   const [active, setActive] = useState<Message | null>(null);
   const [interrupting, setInterrupting] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
 
   // ═══════════════════════════════════════════════════
   //  Refs (mutable, no re-render on change)
@@ -118,6 +123,16 @@ export default function useAgentStream({
   useEffect(() => {
     completedIdsRef.current = new Set(completed.map((m) => m.id));
   }, [completed]);
+
+  const clearRunError = useCallback(() => {
+    setRunError(null);
+  }, []);
+
+  useEffect(() => {
+    if (!runError) return;
+    const timer = window.setTimeout(() => setRunError(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [runError]);
 
   // ═══════════════════════════════════════════════════
   //  createSession
@@ -365,6 +380,7 @@ export default function useAgentStream({
       const gen = bumpGen();
 
       try {
+        setRunError(null);
         const prefill = prefillRef.current.trim();
         if (prefill) prefillRef.current = "";
         const q = (prefill ? prefill + "\n" + question : question).trim();
@@ -408,10 +424,12 @@ export default function useAgentStream({
             ]),
           });
           if (!streamRes.ok) {
+            if (streamRes.status === 409) {
+              setRunError(BUSY_MESSAGE);
+              return;
+            }
             throw new Error(
-              streamRes.status === 409
-                ? "Session is already running"
-                : `Server returned ${streamRes.status}`,
+              `Server returned ${streamRes.status}`,
             );
           }
           await readSSEStream(streamRes.body!.getReader(), gen);
@@ -560,5 +578,7 @@ export default function useAgentStream({
     createSession,
     prefillRef,
     scrollToMessage,
+    runError,
+    clearRunError,
   };
 }

@@ -32,6 +32,43 @@
     flex-shrink: 0;
 }
 
+/* ── Run error toast ────────────────────────── */
+
+.agent-run-error {
+    position: fixed;
+    left: 50%;
+    bottom: 96px;
+    z-index: 100;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: min(420px, calc(100vw - 32px));
+    padding: 12px 16px;
+    border-radius: 10px;
+    background: #fff5f5;
+    border: 1px solid #f5c2c2;
+    color: #b42318;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.agent-run-error-dismiss {
+    flex-shrink: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+}
+
+.agent-run-error-dismiss:hover {
+    opacity: 0.75;
+}
+
 /* ── Fixed input bar ────────────────────────── */
 
 .agent-input-bar {
