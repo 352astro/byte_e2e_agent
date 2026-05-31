@@ -12,6 +12,7 @@ from agent.sandbox import Sandbox
 from agent.scheduler import Scheduler
 from agent.session import Session, load_session
 from agent.shadow_repo import ShadowRepo
+from app.core.config import PROJECT_ROOT
 from app.services.errors import AgentBusy
 
 
@@ -111,7 +112,10 @@ class WorkspaceContext:
 
     @staticmethod
     def _normalize(path: str) -> str:
-        p = Path(path).expanduser().resolve()
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = PROJECT_ROOT / p
+        p = p.resolve()
         if not p.is_dir():
             raise ValueError(f"Directory does not exist: {path}")
         return str(p)
