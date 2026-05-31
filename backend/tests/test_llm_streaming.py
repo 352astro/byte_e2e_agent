@@ -155,9 +155,8 @@ class TestExecuteOneTool:
             )
 
     @pytest.mark.asyncio
-    async def test_shell_receives_interrupt_event(self):
-        ws = AsyncMock(spec=Workspace)
-        ws.run_shell.return_value = "ok"
+    async def test_shell_executes_in_workspace(self, tmp_path):
+        ws = Workspace(tmp_path)
         toolset = ToolSet(tool_registry, "Shell")
         interrupt_event = asyncio.Event()
 
@@ -168,10 +167,7 @@ class TestExecuteOneTool:
             interrupt_event=interrupt_event,
         )
 
-        assert result == "ok"
-        ws.run_shell.assert_called_once_with(
-            "pwd", 30000, interrupt_event=interrupt_event
-        )
+        assert str(tmp_path) in result
 
     @pytest.mark.asyncio
     async def test_subagent_dispatch_preserves_interrupt_event(self):

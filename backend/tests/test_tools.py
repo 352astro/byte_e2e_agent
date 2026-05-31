@@ -9,6 +9,7 @@ Tests cover:
 from __future__ import annotations
 
 import json
+import asyncio
 
 import pytest
 
@@ -238,17 +239,68 @@ class TestToolHandlers:
     """Smoke tests: verify tool handlers execute without errors."""
 
     @pytest.mark.asyncio
-    async def test_shell_handler(self):
-        from unittest.mock import AsyncMock
+    async def test_shell_handler(self, tmp_path):
+        from agent.core.workspace import Workspace
 
-        ws = AsyncMock()
-        ws.run_shell.return_value = "output"
+        ws = Workspace(tmp_path)
         tool = tool_registry.get("Shell")
         result = await tool.coroutine(command="echo hi", ws=ws)
-        assert result == "output"
-        ws.run_shell.assert_called_once_with(
-            "echo hi", 30000, interrupt_event=None
+        assert "hi" in result
+
+    @pytest.mark.asyncio
+    async def test_shell_handler_nonzero_exit(self, tmp_path):
+        from agent.core.workspace import Workspace
+
+        ws = Workspace(tmp_path)
+        tool = tool_registry.get("Shell")
+        result = await tool.coroutine(command="exit 7", ws=ws)
+        assert "exit code: 7" in result
+
+    @pytest.mark.asyncio
+    async def test_shell_handler_timeout(self, tmp_path):
+        from agent.core.workspace import Workspace
+
+        ws = Workspace(tmp_path)
+        tool = tool_registry.get("Shell")
+        result = await tool.coroutine(command="sleep 2", timeout_ms=1000, ws=ws)
+        assert "timed out" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_shell_handler_nohup_background_survives(self, tmp_path):
+        from agent.core.workspace import Workspace
+
+        ws = Workspace(tmp_path)
+        tool = tool_registry.get("Shell")
+        result = await tool.coroutine(
+            command="nohup sh -c 'sleep 0.2; echo done > nohup.out' >/dev/null 2>&1 &",
+            timeout_ms=1000,
+            ws=ws,
         )
+        await asyncio.sleep(0.5)
+        assert "timed out" not in result.lower()
+        assert (tmp_path / "nohup.out").read_text().strip() == "done"
+
+    @pytest.mark.asyncio
+    async def test_shell_handler_interrupt(self, tmp_path):
+        from agent.core.workspace import Workspace
+
+        ws = Workspace(tmp_path)
+        tool = tool_registry.get("Shell")
+        interrupt_event = asyncio.Event()
+
+        async def trigger_interrupt():
+            await asyncio.sleep(0.1)
+            interrupt_event.set()
+
+        task = asyncio.create_task(trigger_interrupt())
+        result = await tool.coroutine(
+            command="sleep 5",
+            timeout_ms=5000,
+            ws=ws,
+            interrupt_event=interrupt_event,
+        )
+        await task
+        assert "interrupted" in result.lower()
 
     @pytest.mark.asyncio
     async def test_read_handler(self):
