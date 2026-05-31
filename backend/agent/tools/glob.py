@@ -7,7 +7,7 @@ from pathlib import Path
 from pydantic import Field
 
 from agent.tools.base import BaseTool
-from app.core.config import TMP_DIR
+from agent.config import DEFAULT_TMP_DIR as TMP_DIR
 
 
 class Glob(BaseTool):

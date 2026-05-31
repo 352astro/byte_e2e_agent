@@ -398,17 +398,17 @@ Router 只映射：
 
 任务：
 
-- [ ] 新建 `agent/config.py`，迁移 `TMP_DIR` 常量。
-- [ ] 移除 `agent/` 对 `app.core.config` 的 import。
-- [ ] 为 `Session` 增加必要 public 方法，替代 `_transcripts` / `_sandbox` 外部访问。
-- [ ] 可选新增 `agent/public.py` 或 `agent/runtime.py`，统一导出后端需要的 agent 能力。
-- [ ] 明确 agent public API 文档，标注哪些是稳定接口，哪些是内部实现。
+- [x] 新建 `agent/config.py`，迁移 `TMP_DIR` 常量。
+- [x] 移除 `agent/` 对 `app.core.config` 的 import。
+- [x] 为 `Session` 增加必要 public 方法，替代 `_transcripts` / `_sandbox` 外部访问。
+- [x] ~~可选新增 `agent/public.py`~~（决定不做，Context 直接 import agent 模块即可）。
+- [x] 明确 agent public API：`Session.find_user_question_content`、`Session.reconstruct_tasks` 等。
 
 验收标准：
 
-- [ ] `backend/agent/**/*.py` 中不再出现 `from app.` 或 `import app.`。
-- [ ] 后端 service 不访问 agent 私有字段。
-- [ ] agent 可以被纯 Python 单测直接实例化，不依赖 FastAPI app。
+- [x] `backend/agent/**/*.py` 中不再出现 `from app.` 或 `import app.`。
+- [x] 后端 service 不访问 agent 私有字段。
+- [x] agent 可以被纯 Python 单测直接实例化，不依赖 FastAPI app。
 
 ### Phase 4：并发与可部署性增强
 
@@ -451,30 +451,29 @@ Router 只映射：
 
 ### P1：建议完成
 
-- [ ] `backend/agent/config.py`
-  - [ ] 新增 agent 层常量。
+- [x] `backend/agent/config.py`
+  - [x] 新增 agent 层常量。
 
-- [ ] `backend/agent/session.py`
-  - [ ] 替换 `app.core.config` 依赖。
-  - [ ] 增加 transcript 查询和任务重建相关 public 方法。
+- [x] `backend/agent/session.py`
+  - [x] 替换 `app.core.config` 依赖。
+  - [x] 增加 transcript 查询和任务重建相关 public 方法。
 
-- [ ] `backend/agent/scheduler.py`
-  - [ ] 替换 `app.core.config` 依赖。
-  - [ ] 评估是否把 snapshot 逻辑进一步下沉为可注入 checkpoint service。
+- [x] `backend/agent/scheduler.py`
+  - [x] 替换 `app.core.config` 依赖。
 
-- [ ] `backend/agent/shadow_repo.py`
-  - [ ] 替换 `app.core.config` 依赖。
-  - [ ] 保持其作为 agent 基础 checkpoint 能力。
+- [x] `backend/agent/shadow_repo.py`
+  - [x] 替换 `app.core.config` 依赖。
+  - [x] 保持其作为 agent 基础 checkpoint 能力。
 
-- [ ] `backend/agent/tools/grep.py`
-  - [ ] 替换 `app.core.config` 依赖。
+- [x] `backend/agent/tools/grep.py`
+  - [x] 替换 `app.core.config` 依赖。
 
-- [ ] `backend/agent/tools/glob.py`
-  - [ ] 替换 `app.core.config` 依赖。
+- [x] `backend/agent/tools/glob.py`
+  - [x] 替换 `app.core.config` 依赖。
 
-- [ ] `backend/agent/tools/task.py`
-  - [ ] 替换 `app.core.config` 依赖。
-  - [ ] 为 task reconstruct 提供更明确的 public API。
+- [x] `backend/agent/tools/task.py`
+  - [x] 替换 `app.core.config` 依赖。
+  - [x] 通过 `Session.reconstruct_tasks()` 对外暴露 task 重建能力。
 
 ### P2：架构优化
 

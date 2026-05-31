@@ -24,7 +24,7 @@ from dulwich.objects import Blob, Commit, Tree
 from dulwich.repo import Repo
 from dulwich.walk import Walker
 
-from app.core.config import TMP_DIR
+from agent.config import DEFAULT_TMP_DIR as TMP_DIR
 
 # ── helpers ──────────────────────────────────────────────
 

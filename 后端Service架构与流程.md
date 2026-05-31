@@ -363,10 +363,10 @@ WorkspaceContext
   └── HelloAgentsLLM（OpenAI 兼容 API）
 ```
 
-Agent 层关键约束（Phase 3 待完成）：
+Agent 层关键约束（Phase 3 已完成）：
 
-- [ ] `agent/` 不 import `app.*`（当前部分文件仍依赖 `app.core.config.TMP_DIR`）
-- [ ] Service 不访问 `session._transcripts` / `session._sandbox` 私有字段（当前 CheckpointService 仍有，Phase 3 封装 public 方法）
+- [x] `agent/` 不 import `app.*`（`TMP_DIR` 已迁移至 `agent/config.py`）
+- [x] Service 不访问 `session._transcripts` / `session._sandbox`（checkout 改用 `Session` public 方法）
 
 ---
 
@@ -418,5 +418,5 @@ Service 层可独立单测：mock `WorkspaceContext`，无需启动 FastAPI。
 | Phase 0 | 集成测试基线 | ✅ |
 | Phase 1 | Router 变薄，业务下沉 Service | ✅ |
 | Phase 2 | 拆分 5 个 Service + WorkspaceContext | ✅ |
-| Phase 3 | Agent 基础服务化，移除反向依赖 | 待开始 |
+| Phase 3 | Agent 基础服务化，移除反向依赖 | ✅ |
 | Phase 4 | 并发增强，SchedulerManager | 待开始 |

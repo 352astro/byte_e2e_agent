@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.tools.task import reconstruct_tasks
 from app.services.context import WorkspaceContext
 
 
@@ -29,14 +28,11 @@ class CheckpointService:
                 raise KeyError(f"Commit not found: {req.commit_sha}")
         user_content = ""
         if req.truncate_tid:
-            for t in session._transcripts:
-                if t.id == req.truncate_tid and t.kind == "user_question":
-                    user_content = t.message.get("content", "")
-                    break
+            user_content = session.find_user_question_content(req.truncate_tid)
         removed = session.truncate_transcripts_by_tid(
             req.truncate_tid or "", keep=req.keep_tid
         )
-        await reconstruct_tasks(session._sandbox, session._transcripts)
+        await session.reconstruct_tasks()
         if req.commit_sha:
             try:
                 self._ctx.shadow_repo.set_head(session_id, req.commit_sha)

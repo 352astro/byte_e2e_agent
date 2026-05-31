@@ -18,7 +18,7 @@ from agent.llm import HelloAgentsLLM
 from agent.sandbox import Sandbox
 from agent.tools.toolset import ToolSet
 from agent.transcript import Transcript, TranscriptKind
-from app.core.config import TMP_DIR
+from agent.config import DEFAULT_TMP_DIR as TMP_DIR
 
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 MessageConverter = Callable[[Transcript], dict | None]
@@ -140,6 +140,19 @@ class Session:
         self._messages = _build_llm_messages(kept, self._transcript_to_message)
         _rewrite_messages_file(self._sandbox.workspace, self.session_id, kept)
         return removed_count
+
+    def find_user_question_content(self, transcript_id: str) -> str:
+        """Return user question text for *transcript_id*, or empty string."""
+        for t in self._transcripts:
+            if t.id == transcript_id and t.kind == "user_question":
+                return t.message.get("content", "")
+        return ""
+
+    async def reconstruct_tasks(self) -> None:
+        """Rebuild task list from current transcripts (e.g. after checkout)."""
+        from agent.tools.task import reconstruct_tasks as _reconstruct_tasks
+
+        await _reconstruct_tasks(self._sandbox, self._transcripts)
 
     def truncate_transcripts_from(self, commit_sha: str) -> int:
         """删除匹配 commit_sha 的 transcript 及其后所有 transcript。

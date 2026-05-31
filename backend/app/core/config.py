@@ -11,9 +11,11 @@ PROJECT_ROOT = BACKEND_DIR.parent
 load_dotenv(BACKEND_DIR / ".env")
 load_dotenv()
 
+from agent.config import DEFAULT_TMP_DIR
+
 # Central constant for the project's temporary / cache directory.
 # All session data, shadow VCS, metrics DB, etc. live under this directory.
-TMP_DIR = ".tmp"
+TMP_DIR = DEFAULT_TMP_DIR
 
 DEFAULT_LLM_METRICS_DB_PATH = f"{TMP_DIR}/ai_metrics.sqlite3"
 
