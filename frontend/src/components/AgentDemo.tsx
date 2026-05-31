@@ -17,70 +17,55 @@ interface AgentDemoProps {
   onSessionCreated?: (sid: string) => void;
 }
 
-type CommitAction = "regret" | "restore" | "replay" | null;
+type MessageAction = "delete" | "replay" | null;
 
-// ── Commit badge ────────────────────────────────────
+// ── Message actions ─────────────────────────────────
 
-function CommitBadge({
-  shortSha,
+function MessageActions({
   locked,
-  onRegret,
-  onRestore,
+  onDelete,
   onReplay,
 }: {
-  shortSha: string;
   locked: boolean;
-  onRegret?: () => void;
-  onRestore?: () => void;
+  onDelete: () => void;
   onReplay?: () => void;
 }) {
-  const [confirming, setConfirming] = useState<CommitAction>(null);
-  const badgeRef = useRef<HTMLDivElement>(null);
+  const [confirming, setConfirming] = useState<MessageAction>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!confirming) return;
     const close = (e: MouseEvent) => {
-      if (badgeRef.current && !badgeRef.current.contains(e.target as Node))
+      if (actionsRef.current && !actionsRef.current.contains(e.target as Node))
         setConfirming(null);
     };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [confirming]);
 
-  const toggle = (a: CommitAction) => {
+  const toggle = (a: MessageAction) => {
     if (confirming === a) setConfirming(null);
     else setConfirming(a);
   };
 
-  const confirm = (a: CommitAction) => {
+  const confirm = (a: MessageAction) => {
     setConfirming(null);
-    if (a === "regret") onRegret?.();
-    else if (a === "restore") onRestore?.();
+    if (a === "delete") onDelete();
     else if (a === "replay") onReplay?.();
   };
 
   return (
-    <div className="commit-badge" ref={badgeRef}>
-      <span className="commit-short-id">{shortSha}</span>
-      {onRegret && (
-        <LockableButton
-          icon={<Icon name="undo" size={12} />}
-          label="regret"
-          confirming={confirming === "regret"}
-          locked={locked}
-          onToggle={() => toggle("regret")}
-          onConfirm={() => confirm("regret")}
-        />
-      )}
-      {onRestore && (
-        <LockableButton
-          icon={<Icon name="flag" size={12} />}
-          label="restore"
-          confirming={confirming === "restore"}
-          locked={locked}
-          onToggle={() => toggle("restore")}
-          onConfirm={() => confirm("restore")}
-        />
-      )}
+    <div className="message-actions" ref={actionsRef}>
+      <span className="message-action-trigger">
+        <Icon name="dots-vertical" size={12} />
+      </span>
+      <LockableButton
+        icon={<Icon name="trash" size={12} />}
+        label="delete"
+        confirming={confirming === "delete"}
+        locked={locked}
+        onToggle={() => toggle("delete")}
+        onConfirm={() => confirm("delete")}
+      />
       {onReplay && (
         <LockableButton
           icon={<Icon name="replay" size={12} />}
@@ -302,19 +287,6 @@ export default function AgentDemo({
     sendContent?: string;
   }
 
-  /**
-   * Find the next user_question transcript after tid.
-   * Returns its id, or empty string if none (nothing to truncate).
-   */
-  const nextUserQId = (tid: string): string => {
-    const idx = messages.findIndex((x) => x.id === tid);
-    if (idx < 0) return "";
-    for (let i = idx + 1; i < messages.length; i++) {
-      if (messages[i].role === "user") return messages[i].id;
-    }
-    return "";
-  };
-
   const applyTruncate = useCallback(
     async (opts: TruncateOpts) => {
       if (!sessionId) return;
@@ -453,18 +425,11 @@ export default function AgentDemo({
                         content={content}
                         onEditSubmit={(c) => handleEditSubmit(t.id, c)}
                       />
-                      <CommitBadge
-                        shortSha=""
+                      <MessageActions
                         locked={locked}
-                        onRegret={() =>
+                        onDelete={() =>
                           applyTruncate({
                             truncateTid: t.id,
-                            keepTid: false,
-                          })
-                        }
-                        onRestore={() =>
-                          applyTruncate({
-                            truncateTid: nextUserQId(t.id),
                             keepTid: false,
                           })
                         }

@@ -259,17 +259,21 @@
     }
 }
 
-/* ── Commit badge ─────────────────────────────── */
+/* ── Message actions ───────────────────────────── */
 
-.commit-badge {
+.message-actions {
     animation: badge-pop 0.25s ease;
     position: absolute;
-    left: calc(100% + 14px);
-    top: 0;
-    padding: 4px 10px;
+    left: calc(100% + 3px);
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 0;
     background: transparent;
     border: none;
-    border-radius: 12px;
+    border-radius: 0;
     font-family: ui-monospace, monospace;
     font-size: 0.68rem;
     color: #aaa;
@@ -277,21 +281,24 @@
     white-space: nowrap;
     line-height: 1.4;
     text-align: center;
-    box-shadow:
-        0 0 12px rgba(0, 0, 0, 0.06),
-        0 0 4px rgba(0, 0, 0, 0.04);
-    transition: all var(--anim-fast);
+    opacity: 0;
+    transform: translateX(-2px);
+    box-shadow: none;
+    transition:
+        opacity var(--anim-fast) ease,
+        transform var(--anim-fast) ease,
+        color var(--anim-fast) ease;
 }
 
-.commit-badge:hover {
+.user-bubble-wrapper:hover .message-actions,
+.message-actions:hover {
+    opacity: 1;
+    transform: translateX(0);
     color: #555;
-    padding-bottom: 6px;
-    box-shadow:
-        0 0 20px rgba(0, 0, 0, 0.12),
-        0 0 8px rgba(0, 0, 0, 0.08);
+    box-shadow: none;
 }
 
-.commit-badge .commit-short-id {
+.message-actions .message-action-trigger {
     display: block;
 }
 
@@ -318,25 +325,11 @@
 }
 
 /* badge-specific: hide/show animation */
-.commit-badge .lockable-btn {
-    max-height: 0;
-    opacity: 0;
-    overflow: hidden;
-    transition: all var(--anim-fast);
-}
-
-.commit-badge::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 100%;
-    height: 20px;
-}
-
-.commit-badge:hover .lockable-btn {
-    max-height: 18px;
+.message-actions .lockable-btn {
+    max-height: none;
     opacity: 1;
+    overflow: visible;
+    transition: all var(--anim-fast);
 }
 
 .lockable-btn--confirm {
