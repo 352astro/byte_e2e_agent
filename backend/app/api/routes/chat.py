@@ -3,9 +3,9 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.sse import sse_line, sse_response, yield_transcripts_as_flush
-from app.dependencies import get_project
+from app.dependencies import get_chat_service
 from app.schemas.chat import ChatRequest, RespondRequest
-from app.services.project import Project
+from app.services.chat_service import ChatService
 
 router = APIRouter(prefix="/api/session/{sid}")
 
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/session/{sid}")
 async def chat(
     sid: str,
     req: ChatRequest,
-    project: Project = Depends(get_project),
+    chat_service: ChatService = Depends(get_chat_service),
 ):
     """Start execution and return SSE stream directly.
 
@@ -22,7 +22,7 @@ async def chat(
     scheduler starts. No events are lost.
     """
     try:
-        stream = project.start_chat(sid, req.question, req.max_steps)
+        stream = chat_service.start_chat(sid, req.question, req.max_steps)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
     except RuntimeError as exc:
@@ -46,10 +46,13 @@ async def chat(
 
 
 @router.get("/stream")
-async def stream_events(sid: str, project: Project = Depends(get_project)):
+async def stream_events(
+    sid: str,
+    chat_service: ChatService = Depends(get_chat_service),
+):
     """SSE for reconnection. Subscribe-first, then catch-up, then live."""
     try:
-        stream = project.get_stream(sid)
+        stream = chat_service.get_stream(sid)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -94,10 +97,10 @@ async def stream_events(sid: str, project: Project = Depends(get_project)):
 async def respond(
     sid: str,
     req: RespondRequest,
-    project: Project = Depends(get_project),
+    chat_service: ChatService = Depends(get_chat_service),
 ):
     try:
-        project.respond_to_pending(req.transcript_id, req.response)
+        chat_service.respond_to_pending(req.transcript_id, req.response)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"ok": True}

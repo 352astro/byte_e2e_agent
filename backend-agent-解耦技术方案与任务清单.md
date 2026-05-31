@@ -377,20 +377,20 @@ Router 只映射：
 
 任务：
 
-- [ ] 新建 `app/services/session_service.py`。
-- [ ] 新建 `app/services/chat_service.py`。
-- [ ] 新建 `app/services/checkpoint_service.py`。
-- [ ] 新建 `app/services/metrics_service.py`。
-- [ ] 新建 `app/services/workspace_service.py`。
-- [ ] 将 `Project` 改为组合根，负责创建和持有共享依赖。
-- [ ] 在 `app/dependencies.py` 中增加 `get_session_service`、`get_chat_service`、`get_checkpoint_service`、`get_metrics_service`、`get_workspace_service`。
-- [ ] Router 从依赖 `Project` 逐步改为依赖具体 service。
+- [x] 新建 `app/services/session_service.py`。
+- [x] 新建 `app/services/chat_service.py`。
+- [x] 新建 `app/services/checkpoint_service.py`。
+- [x] 新建 `app/services/metrics_service.py`。
+- [x] 新建 `app/services/workspace_service.py`。
+- [x] 将 `Project` 改为组合根，负责创建和持有共享依赖。
+- [x] 在 `app/dependencies.py` 中增加 `get_session_service`、`get_chat_service`、`get_checkpoint_service`、`get_metrics_service`、`get_workspace_service`。
+- [x] Router 从依赖 `Project` 逐步改为依赖具体 service。
 
 验收标准：
 
-- [ ] `Project` 不再直接承载所有业务用例。
-- [ ] 每个 route 文件只依赖自身需要的 service。
-- [ ] 每个 service 可独立单测，不需要启动 FastAPI。
+- [x] `Project` 不再直接承载所有业务用例。
+- [x] 每个 route 文件只依赖自身需要的 service。
+- [x] 每个 service 可独立单测，不需要启动 FastAPI。
 
 ### Phase 3：agent 基础服务化
 
@@ -478,23 +478,23 @@ Router 只映射：
 
 ### P2：架构优化
 
-- [ ] `backend/app/services/session_service.py`
-  - [ ] 从 `Project` 拆出 session 生命周期逻辑。
+- [x] `backend/app/services/session_service.py`
+  - [x] 从 `Project` 拆出 session 生命周期逻辑。
 
-- [ ] `backend/app/services/chat_service.py`
-  - [ ] 从 `Project` 拆出 chat、stream、respond 逻辑。
+- [x] `backend/app/services/chat_service.py`
+  - [x] 从 `Project` 拆出 chat、stream、respond 逻辑。
 
-- [ ] `backend/app/services/checkpoint_service.py`
-  - [ ] 从 `Project` 拆出 shadow repo 与 checkout 逻辑。
+- [x] `backend/app/services/checkpoint_service.py`
+  - [x] 从 `Project` 拆出 shadow repo 与 checkout 逻辑。
 
-- [ ] `backend/app/services/metrics_service.py`
-  - [ ] 从 `Project` 拆出 metrics 查询逻辑。
+- [x] `backend/app/services/metrics_service.py`
+  - [x] 从 `Project` 拆出 metrics 查询逻辑。
 
-- [ ] `backend/app/services/workspace_service.py`
-  - [ ] 从 `Project` 拆出 workspace 逻辑。
+- [x] `backend/app/services/workspace_service.py`
+  - [x] 从 `Project` 拆出 workspace 逻辑。
 
-- [ ] `backend/app/dependencies.py`
-  - [ ] 增加具体 service 的 dependency provider。
+- [x] `backend/app/dependencies.py`
+  - [x] 增加具体 service 的 dependency provider。
 
 ## 7. 回归测试清单
 
