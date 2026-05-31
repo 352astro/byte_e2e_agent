@@ -1,140 +1,90 @@
 """
-ToolSet — 动态工具集，为 OpenAI 原生 function calling 服务。
+ToolSet — 工具集，为 OpenAI function calling 服务。
 
-替代旧的 Pydantic discriminated union 方案。
-每个工具生成一个 OpenAI function definition，
-通过函数名分发反序列化。
+适配 LangChain StructuredTool 注册方式。
+每个工具注册到 ToolRegistry，ToolSet 从 registry 构建子集。
 
 用法:
-    ts = ToolSet([Shell, Read, Write, ...])
-    ts.openai_tools            # → list[dict] 传给 API
-    ts.parse(name, arguments)  # → BaseTool 实例
-    ts.without(SubAgent)        # → 新 ToolSet
+    ts = ToolSet(registry)           # 全部工具
+    ts = ToolSet(registry, "Shell", "Read", "Write")  # 子集
+    ts.openai_tools                   # → list[dict] 传给 API
+    ts.parse(name, arguments)         # → (StructuredTool, parsed_args_dict)
+    ts.without("SubAgent")            # → 新 ToolSet
 """
 
 from __future__ import annotations
 
-from copy import deepcopy
+import json
 
-from agent.tools.base import BaseTool
+from langchain_core.tools import StructuredTool
 
-# ── Pydantic schema → OpenAI parameters ────────────────────
-
-_SKIP_META = frozenset({"title", "$defs", "$schema"})
-
-
-def _strip_pydantic_noise(schema: dict, *, in_properties: bool = False) -> dict:
-    """递归去掉 Pydantic JSON Schema 中 OpenAI 不需要的顶层字段。"""
-    if isinstance(schema, dict):
-        result = {}
-        for k, v in schema.items():
-            if not in_properties and k in _SKIP_META:
-                continue
-            result[k] = _strip_pydantic_noise(v, in_properties=(k == "properties"))
-        return result
-    if isinstance(schema, list):
-        return [_strip_pydantic_noise(i) for i in schema]
-    return schema
-
-
-def _inline_refs(schema: dict) -> dict:
-    """Inline local $defs refs so OpenAI receives concrete nested object schemas."""
-    defs = schema.get("$defs", {})
-
-    def resolve(node):
-        if isinstance(node, dict):
-            ref = node.get("$ref")
-            if isinstance(ref, str) and ref.startswith("#/$defs/"):
-                name = ref.removeprefix("#/$defs/")
-                target = deepcopy(defs.get(name, {}))
-                extras = {k: v for k, v in node.items() if k != "$ref"}
-                target.update(extras)
-                return resolve(target)
-            return {k: resolve(v) for k, v in node.items()}
-        if isinstance(node, list):
-            return [resolve(item) for item in node]
-        return node
-
-    return resolve(schema)
-
-
-def _ensure_strict(schema: dict) -> dict:
-    """为所有 object 节点添加 required 和 additionalProperties: false（strict 模式）。"""
-    if schema.get("type") == "object" and "properties" in schema:
-        props = schema["properties"]
-        if isinstance(props, dict) and props:
-            schema["required"] = list(props.keys())
-        schema["additionalProperties"] = False
-    for v in schema.values():
-        if isinstance(v, dict):
-            _ensure_strict(v)
-        elif isinstance(v, list):
-            for item in v:
-                if isinstance(item, dict):
-                    _ensure_strict(item)
-    return schema
-
-
-def _build_function_def(cls: type[BaseTool]) -> dict:
-    """从 Pydantic 工具类生成单个 OpenAI function definition。"""
-    raw = _inline_refs(cls.model_json_schema())
-    # 去掉 kind 字段（函数名已承担分发职责）
-    if "properties" in raw and "kind" in raw["properties"]:
-        del raw["properties"]["kind"]
-    if "required" in raw:
-        raw["required"] = [r for r in raw["required"] if r != "kind"]
-    params = _ensure_strict(_strip_pydantic_noise(raw))
-    return {
-        "type": "function",
-        "function": {
-            "name": cls.function_name(),
-            "description": (cls.__doc__ or "").strip().split("\n")[0],
-            "parameters": params,
-        },
-    }
-
-
-# ── ToolSet ────────────────────────────────────────────────
+from agent.tools.registry import ToolRegistry
 
 
 class ToolSet:
-    """按名称注册工具的集合，生成 OpenAI function 列表。"""
+    """按名称过滤的工具子集。"""
 
-    def __init__(self, tools: list[type[BaseTool]]) -> None:
-        if not tools:
+    def __init__(
+        self,
+        registry: ToolRegistry,
+        *names: str,
+    ) -> None:
+        if names:
+            self._tools: dict[str, StructuredTool] = {}
+            for name in names:
+                tool = registry.get(name)
+                if tool is None:
+                    raise KeyError(f"Unknown tool: {name}")
+                self._tools[name] = tool
+        else:
+            # 全部工具
+            self._tools = {t.name: t for t in registry.get_all()}
+
+        if not self._tools:
             raise ValueError("ToolSet must contain at least one tool.")
-        self._tools: tuple[type[BaseTool], ...] = tuple(tools)
-        self._registry: dict[str, type[BaseTool]] = {
-            t.function_name(): t for t in tools
-        }
 
     # ── 属性 ──────────────────────────────────────────
 
     @property
-    def tools(self) -> tuple[type[BaseTool], ...]:
-        return self._tools
+    def tools(self) -> list[StructuredTool]:
+        return list(self._tools.values())
 
     @property
     def openai_tools(self) -> list[dict]:
         """生成 OpenAI / DeepSeek tools 参数列表。"""
-        return [_build_function_def(t) for t in self._tools]
+        from agent.tools.registry import _tool_to_openai
+
+        return [_tool_to_openai(t) for t in self._tools.values()]
 
     # ── 工具操作 ──────────────────────────────────────
 
-    def parse(self, name: str, arguments: str) -> BaseTool:
-        """根据函数名和 JSON arguments 反序列化为工具实例。"""
-        cls = self._registry.get(name)
-        if cls is None:
-            raise KeyError(f"Unknown tool: {name}. Available: {list(self._registry)}")
-        return cls.model_validate_json(arguments)
+    def parse(self, name: str, arguments: str) -> tuple[StructuredTool, dict]:
+        """根据函数名和 JSON arguments 解析工具和参数。
 
-    def without(self, *exclude: type[BaseTool]) -> "ToolSet":
+        Returns:
+            (StructuredTool, parsed_args_dict)
+        """
+        tool = self._tools.get(name)
+        if tool is None:
+            raise KeyError(f"Unknown tool: {name}. Available: {list(self._tools)}")
+        try:
+            args = json.loads(arguments) if arguments else {}
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON arguments for {name}: {exc}")
+        return tool, args
+
+    def without(self, *names: str) -> "ToolSet":
         """返回排除指定工具的新 ToolSet。"""
-        return ToolSet([t for t in self._tools if t not in exclude])
+        result = ToolSet.__new__(ToolSet)
+        result._tools = {
+            name: tool for name, tool in self._tools.items() if name not in names
+        }
+        if not result._tools:
+            raise ValueError(f"ToolSet would be empty after excluding {names}")
+        return result
 
-    def __contains__(self, tool_cls: type[BaseTool]) -> bool:
-        return tool_cls in self._tools
+    def __contains__(self, name: str) -> bool:
+        return name in self._tools
 
     def __repr__(self) -> str:
-        names = [t.__name__ for t in self._tools]
-        return f"ToolSet({', '.join(names)})"
+        return f"ToolSet({', '.join(self._tools.keys())})"

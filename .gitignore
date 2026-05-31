@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 dist/
+.pytest_cache/
 *.egg
 .venv/
 venv/
@@ -29,12 +30,15 @@ pnpm-debug.log*
 # ─── Editor / IDE ────────────────────────────────────
 .vscode/
 .idea/
+.agents/
+.codex/
 *.swp
 *.swo
 *~
 
 # ─── Persistence ────────────────────────────────────
-.tmp/
+.byte_agent
+.tmp
 
 # ─── OS ──────────────────────────────────────────────
 .DS_Store

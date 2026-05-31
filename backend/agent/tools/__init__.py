@@ -1,70 +1,60 @@
-"""
-tools 包：工具定义和动态工具集。
+"""tools 包 — 工具定义和注册表。
 
-工具已通过 ToolSet 实现动态联合类型分发，不再需要硬编码 Union。
-Tool / SubTool 等旧式声明已移除。
+所有工具以 LangChain StructuredTool 形式注册到全局 ToolRegistry。
+ToolSet 从 registry 构建子集。
 """
 
-from agent.tools.base import BaseTool
-from agent.tools.browser import BrowserAct, BrowserInspect, BrowserOpen
-from agent.tools.edit import Edit, EditOp
-from agent.tools.glob import Glob
-from agent.tools.grep import Grep
-from agent.tools.pyrepl import PyRepl
-from agent.tools.read import Read
-from agent.tools.search import WebFetch, WebSearch
-from agent.tools.shell import Shell
-from agent.tools.skill import LoadSkill
-from agent.tools.subagent import SubAgent
-from agent.tools.task import Task, TaskList, TaskRewrite, TaskUpdate
+from agent.tools.browser import (
+    browser_act_tool,
+    browser_inspect_tool,
+    browser_open_tool,
+)
+from agent.tools.edit import edit_tool
+from agent.tools.glob import glob_tool
+from agent.tools.grep import grep_tool
+from agent.tools.pyrepl import pyrepl_tool
+from agent.tools.read import read_tool
+from agent.tools.registry import ToolRegistry
+from agent.tools.search import web_fetch_tool, web_search_tool
+from agent.tools.shell import shell_tool
+from agent.tools.skill import load_skill_tool
+from agent.tools.subagent import subagent_tool
+from agent.tools.task import task_list_tool, task_rewrite_tool, task_update_tool
 from agent.tools.toolset import ToolSet
-from agent.tools.write import Write
+from agent.tools.write import write_tool
 
-# ── 默认工具注册表 ──────────────────────────────────────
+# ── 全局注册表 ─────────────────────────────────────────
 
-_ALL_TOOL_CLASSES: list[type[BaseTool]] = [
-    WebSearch,
-    WebFetch,
-    Grep,
-    Glob,
-    PyRepl,
-    Shell,
-    Read,
-    Write,
-    Edit,
-    LoadSkill,
-    SubAgent,
-    BrowserInspect,
-    TaskList,
-    TaskRewrite,
-    TaskUpdate,
-]
+tool_registry = ToolRegistry()
+
+# 注册所有工具（按名称）
+tool_registry.register(shell_tool)
+tool_registry.register(read_tool)
+tool_registry.register(write_tool)
+tool_registry.register(edit_tool)
+tool_registry.register(glob_tool)
+tool_registry.register(grep_tool)
+tool_registry.register(pyrepl_tool)
+tool_registry.register(web_search_tool)
+tool_registry.register(web_fetch_tool)
+tool_registry.register(load_skill_tool)
+tool_registry.register(subagent_tool)
+tool_registry.register(browser_open_tool)
+tool_registry.register(browser_act_tool)
+tool_registry.register(browser_inspect_tool)
+tool_registry.register(task_list_tool)
+tool_registry.register(task_rewrite_tool)
+tool_registry.register(task_update_tool)
 
 
-def get_all_tool_classes() -> list[type[BaseTool]]:
-    """返回默认全部工具类（供 ToolSet 初始化）。"""
-    return list(_ALL_TOOL_CLASSES)
+def _default_toolset() -> ToolSet:
+    """创建默认 ToolSet（包含所有工具）。"""
+    return ToolSet(tool_registry)
 
 
 __all__ = [
-    "BaseTool",
-    "BrowserInspect",
-    "Edit",
-    "EditOp",
-    "Glob",
-    "Grep",
-    "LoadSkill",
-    "PyRepl",
-    "Read",
-    "Shell",
-    "SubAgent",
-    "Task",
-    "TaskList",
-    "TaskRewrite",
-    "TaskUpdate",
+    "ToolRegistry",
     "ToolSet",
-    "WebFetch",
-    "WebSearch",
-    "Write",
-    "get_all_tool_classes",
+    "tool_registry",
+    "_default_toolset",
 ]

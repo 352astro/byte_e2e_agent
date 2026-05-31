@@ -1,16 +1,15 @@
 """SubAgent 工具：启动子智能体执行独立任务。
 
 实际执行由 agent.actions.execute_one_tool 原地分发，
-本类仅承载参数定义和 OpenAI schema 生成。
+本模块仅承载参数定义和 OpenAI schema 生成。
 """
 
-from pydantic import Field
+from langchain_core.tools import StructuredTool
+from pydantic import BaseModel, Field
 
-from agent.tools.base import BaseTool
 
-
-class SubAgent(BaseTool):
-    """Launch a sub-agent with a restricted toolset (no recursive SubAgent)."""
+class SubAgentInput(BaseModel):
+    """SubAgent 工具输入参数。"""
 
     max_steps: int = Field(
         default=5,
@@ -41,6 +40,15 @@ class SubAgent(BaseTool):
         ),
     )
 
-    async def execute(self, **_) -> str:
-        """实际执行在 execute_one_tool 中通过 isinstance 分发。"""
-        return "Error: SubAgent must be dispatched via execute_one_tool."
+
+async def subagent_handler(**kwargs) -> str:
+    """实际执行在 execute_one_tool 中通过名称分发。"""
+    return "Error: SubAgent must be dispatched via execute_one_tool."
+
+
+subagent_tool = StructuredTool.from_function(
+    coroutine=subagent_handler,
+    name="SubAgent",
+    description="Launch a sub-agent with a restricted toolset (no recursive SubAgent).",
+    args_schema=SubAgentInput,
+)

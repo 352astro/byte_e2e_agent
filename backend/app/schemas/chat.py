@@ -7,5 +7,5 @@ class ChatRequest(BaseModel):
 
 
 class RespondRequest(BaseModel):
-    transcript_id: str = Field(..., description="Transcript ID to respond to")
+    message_id: str = Field(..., description="Message ID to respond to")
     response: dict = Field(..., description="User response payload")

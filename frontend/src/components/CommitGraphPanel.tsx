@@ -25,19 +25,8 @@ interface CommitGraphPanelProps {
     onRemoveFrom: (sha: string) => void;
     onAppend: (commit: CommitInfo) => void;
     onUpdateMessage: (sha: string, message: string) => void;
-    onCheckout: (sha: string, truncateTid?: string, removeSha?: string) => void;
-    onCheckoutKeep: (
-        sha: string,
-        truncateTid?: string,
-        removeSha?: string,
-    ) => void;
-    onReplay: (
-        sha: string,
-        tid?: string,
-        truncateTid?: string,
-        removeSha?: string,
-    ) => void;
-    onScrollToTranscript: (id: string) => void;
+    onCheckout: (sha: string, removeSha?: string) => void;
+    onCheckoutKeep: (sha: string, removeSha?: string) => void;
 }
 
 const CommitGraphPanel = forwardRef<CommitGraphHandle, CommitGraphPanelProps>(
@@ -53,8 +42,6 @@ const CommitGraphPanel = forwardRef<CommitGraphHandle, CommitGraphPanelProps>(
             onUpdateMessage,
             onCheckout,
             onCheckoutKeep,
-            onReplay,
-            onScrollToTranscript,
         },
         ref,
     ) {
@@ -286,10 +273,6 @@ const CommitGraphPanel = forwardRef<CommitGraphHandle, CommitGraphPanelProps>(
                             {displayCommits.map((c, i) => {
                                 const hasParent = i > 0;
                                 const hasNext = i < displayCommits.length - 1;
-                                const hasUserTid =
-                                    c.transcript_id &&
-                                    c.transcript_id !== "__init__";
-
                                 const makeActions = (
                                     action: string,
                                     onAction: () => void,
@@ -340,8 +323,6 @@ const CommitGraphPanel = forwardRef<CommitGraphHandle, CommitGraphPanelProps>(
                                                                 displayCommits[
                                                                     i - 1
                                                                 ].sha,
-                                                                c.transcript_id ||
-                                                                    undefined,
                                                                 c.sha,
                                                             ),
                                                     )}
@@ -364,42 +345,11 @@ const CommitGraphPanel = forwardRef<CommitGraphHandle, CommitGraphPanelProps>(
                                                                 hasNext
                                                                     ? displayCommits[
                                                                           i + 1
-                                                                      ]
-                                                                          .transcript_id ||
-                                                                          undefined
-                                                                    : undefined,
-                                                                hasNext
-                                                                    ? displayCommits[
-                                                                          i + 1
                                                                       ].sha
                                                                     : undefined,
                                                             ),
                                                     )}
                                                 />
-                                            {hasParent && hasUserTid && (
-                                                <LockableButton
-                                                    icon={
-                                                        <Icon
-                                                            name="replay"
-                                                            size={11}
-                                                        />
-                                                    }
-                                                    label="replay"
-                                                    locked={locked}
-                                                    {...makeActions(
-                                                        "replay",
-                                                        () =>
-                                                            onReplay(
-                                                                displayCommits[
-                                                                    i - 1
-                                                                ].sha,
-                                                                c.transcript_id!,
-                                                                c.transcript_id!,
-                                                                c.sha,
-                                                            ),
-                                                    )}
-                                                />
-                                            )}
                                         </div>
                                         <div className="commit-node-line">
                                             <div className="commit-node-dot" />
@@ -409,17 +359,7 @@ const CommitGraphPanel = forwardRef<CommitGraphHandle, CommitGraphPanelProps>(
                                         </div>
                                         <div
                                             className="commit-node-body"
-                                            onClick={() => {
-                                                if (c.transcript_id)
-                                                    onScrollToTranscript(
-                                                        c.transcript_id,
-                                                    );
-                                            }}
-                                            title={
-                                                c.transcript_id
-                                                    ? "Scroll to transcript"
-                                                    : undefined
-                                            }
+                                            title="Workspace commit"
                                         >
                                             <span className="commit-node-sha">
                                                 {c.short_sha}

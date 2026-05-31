@@ -1,138 +1,96 @@
-// ── Transcript ──────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// 前后端透传类型 — 自动生成部分从 types.generated.ts 导入
+// ═══════════════════════════════════════════════════════════
 
-export interface Transcript {
-    id: string;
-    kind: string;
-    message: Record<string, unknown>;
-    commit_sha?: string; // non-empty when a shadow commit is attached
+// ── Auto-generated (from backend /openapi.json via openapi-typescript) ──
+
+import type { components } from "./types.generated";
+
+export type { paths, operations } from "./types.generated";
+
+// 从 generated 提取常用类型别名
+export type Message = components["schemas"]["Message"];
+export type ToolCall = components["schemas"]["ToolCall"];
+export type ToolCallFunction = components["schemas"]["ToolCallFunction"];
+export type MessageRole = components["schemas"]["MessageRole"];
+export type MessageStatus = components["schemas"]["MessageStatus"];
+export type StreamEventKind = components["schemas"]["StreamEventKind"];
+
+// ── StreamEvent（SSE 协议，手写保持与 shared/types.py 一致）──
+
+export interface StreamEvent {
+  kind: StreamEventKind;
+  message_id: string;
+  turn_id: string;
+  role: string; // "user" | "assistant" | "tool"
+  field: string; // "content" | "reasoning" | "tool_calls"
+  delta: string;
+  tool_index: number; // tool_calls 流式时的 tool 序号
+  sub_field: string; // "name" | "args" | ""  — tool_calls 的子字段
+  full_content: string;
+  tool_name: string;
+  tool_args: string;
+  is_error: boolean;
+  input_tokens: number;
+  output_tokens: number;
+  reason: string;
 }
 
-export interface RecoverResponse {
-    transcripts: Transcript[];
-    running: boolean;
-}
-
-// ── Sub-stream (chunk with kind/id) ──────────────────────
-
-export interface SubStream {
-    id: string; // sub-stream id
-    kind: string; // thinking | response | tool_name | tool_arguments | tool_result
-    text: string; // accumulated text for this sub-stream
-}
-
-// ── SSE stream events ───────────────────────────────────
-
-export type StreamEvent =
-    | {
-          event: "chunk";
-          transcript_id: string;
-          id: string;
-          kind: string;
-          text: string;
-      }
-    | {
-          event: "flush";
-          transcript_id: string;
-          kind: string;
-          message: Record<string, unknown>;
-          sub_streams: Array<{ id: string; kind: string; text: string }>;
-          active_sub_stream: { id: string; kind: string; text: string } | null;
-          commit_sha?: string;
-      };
-
-// ── Display items ────────────────────────────────────────
-
-export interface DisplayTranscript {
-    id: string;
-    kind: string;
-    message: Record<string, unknown>;
-    subStreams: SubStream[]; // completed sub-streams, in order
-    activeSubStream: SubStream | null; // currently streaming
-    isFlushed: boolean;
-    commitSha?: string; // shadow commit sha for user_question transcripts
-}
-
-// ── Tool call ↔ result pairing ───────────────────────────
-
-export interface ToolPair {
-    callTranscriptId: string;
-    callIndex: number;
-    toolCallId: string;
-    toolName: string;
-    arguments: string;
-    result?: DisplayTranscript;
-}
-
-// ── Session info ──────────────────────────────────────
+// ── 前端专用类型 ──────────────────────────────────────
 
 export interface SessionInfo {
-    session_id: string;
-    session_name?: string;
-    workspace: string;
-    created_at?: string;
-    updated_at?: string;
+  session_id: string;
+  workspace: string;
 }
 
-// ── Session cache ─────────────────────────────────────
-
-export interface CacheEntry {
-    transcripts: DisplayTranscript[];
-    _complete?: boolean;
+export interface SessionCache {
+  [sessionId: string]: {
+    messages: Message[];
+    _complete: boolean;
+  };
 }
 
-export type SessionCache = Record<string, CacheEntry>;
+export interface RecoverData {
+  session: Record<string, unknown>;
+  messages: Message[];
+  running: boolean;
+}
 
-// ── Shadow commit ────────────────────────────────────────
+// ── Commit ──────────────────────────────────────────────
 
 export interface CommitInfo {
-    sha: string;
-    short_sha: string;
-    message: string;
-    author_time: number;
-    transcript_id: string | null;
+  sha: string;
+  short_sha: string;
+  message: string;
+  author_time: number;
 }
 
-/** Computed availability of regret / restore / replay for a commit. */
-export interface CommitActions {
-    parent: CommitInfo | null;
-    current: CommitInfo | null;
-    next: CommitInfo | null;
-    /** Non-null when the commit has a usable transcript_id (not __init__). */
-    tid: string | undefined;
+export interface WorkspaceRestoreRequest {
+  commit_sha: string;
+  set_head?: boolean;
 }
 
-export function getCommitActions(
-    commits: CommitInfo[],
-    sha: string,
-): CommitActions {
-    const idx = commits.findIndex((c) => c.sha === sha);
-    const current = idx >= 0 ? commits[idx] : null;
-    const parent = idx > 0 ? commits[idx - 1] : null;
-    const next = idx >= 0 && idx < commits.length - 1 ? commits[idx + 1] : null;
-    const tid =
-        current?.transcript_id &&
-        current.transcript_id !== "__init__"
-            ? current.transcript_id
-            : undefined;
-    return { parent, current, next, tid };
+export interface WorkspaceRestoreResponse {
+  ok: boolean;
+  commit_sha: string;
 }
 
-export interface CommitDetail extends CommitInfo {
-    files: string[];
+export interface MessageTruncateRequest {
+  message_id: string;
+  keep?: boolean;
 }
 
-export interface CommitListResponse {
-    commits: CommitInfo[];
+export interface MessageTruncateResponse {
+  ok: boolean;
+  message_id: string;
+  removed: number;
 }
 
-export interface CheckoutRequest {
-    commit_sha: string;
-    keep?: boolean;
-}
+// ── Tool pair（前端渲染辅助）───────────────────────────
 
-export interface CheckoutResponse {
-    ok: boolean;
-    commit_sha: string;
-    removed: number;
-    user_content: string;
+export interface ToolPair {
+  callMessageId: string;
+  callIndex: number;
+  toolCall: ToolCall;
+  resultMessage?: Message;
 }

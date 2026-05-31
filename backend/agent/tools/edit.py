@@ -1,27 +1,37 @@
-"""Edit 工具 — 委托 Sandbox 执行查找替换。"""
+"""Edit 工具 — 对 workspace 文件执行查找替换。"""
 
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from agent.tools.base import BaseTool
 
-
-class EditOp(BaseModel):
+class EditOpModel(BaseModel):
     old_text: str = Field(..., description="Exact text to find.")
     new_text: str = Field(..., description="Replacement text.")
 
 
-class Edit(BaseTool):
-    """Apply ordered find-and-replace edits to a file."""
+class EditInput(BaseModel):
+    """Edit 工具输入参数。"""
 
     path: str = Field(..., description="File path to edit (relative to workspace).")
-    edits: list[EditOp] = Field(..., description="Ordered find-and-replace ops.")
-
-    async def execute(self, *, sandbox=None, channel=None, interrupt_event=None, scheduler=None, toolset=None, result_id="") -> str:
-        ops = [{"old_text": e.old_text, "new_text": e.new_text} for e in self.edits]
-        return await sandbox.edit_file(self.path, ops)
+    edits: list[EditOpModel] = Field(..., description="Ordered find-and-replace ops.")
 
 
-# ── Helpers (used by Sandbox) ──────────────────────────────
+async def edit_handler(path: str, edits: list[dict], *, ws) -> str:
+    """Apply ordered find-and-replace edits to a file."""
+    # StructuredTool will parse edits as list of dicts from the LLM JSON
+    ops = [{"old_text": e["old_text"], "new_text": e["new_text"]} for e in edits]
+    return await ws.edit_file(path, ops)
+
+
+edit_tool = StructuredTool.from_function(
+    coroutine=edit_handler,
+    name="Edit",
+    description="Apply ordered find-and-replace edits to a file.",
+    args_schema=EditInput,
+)
+
+
+# ── Helpers (used by Workspace.edit_file) ──────────────
 
 
 def _fuzzy_replace(content: str, old_text: str, new_text: str) -> "tuple[str, bool]":

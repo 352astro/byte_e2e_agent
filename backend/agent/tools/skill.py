@@ -9,9 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import Field
-
-from agent.tools.base import BaseTool
+from langchain_core.tools import StructuredTool
+from pydantic import BaseModel, Field
 
 SKILLS_ROOT = Path(__file__).resolve().parent.parent / "skills"
 SKILL_FILE = "SKILL.md"
@@ -111,26 +110,27 @@ def _extract_description(md_file: Path) -> str:
     return " ".join(paragraph) if paragraph else "(no description)"
 
 
-class LoadSkill(BaseTool):
-    """加载指定 Skill 的完整内容。"""
+class LoadSkillInput(BaseModel):
+    """LoadSkill 工具输入参数。"""
 
     name: str = Field(..., description="Skill 目录名。")
 
-    async def execute(
-        self,
-        *,
-        sandbox=None,
-        channel=None,
-        interrupt_event=None,
-        scheduler=None,
-        toolset=None,
-        result_id="",
-    ) -> str:
-        skill = get_skill(self.name)
-        if skill is None:
-            available = [s.name for s in scan_skills()]
-            return (
-                f"Skill '{self.name}' not found. "
-                f"Available skills: {', '.join(available) if available else 'none'}"
-            )
-        return skill.read()
+
+async def load_skill_handler(name: str, *, ws=None) -> str:
+    """加载指定 Skill 的完整内容。"""
+    skill = get_skill(name)
+    if skill is None:
+        available = [s.name for s in scan_skills()]
+        return (
+            f"Skill '{name}' not found. "
+            f"Available skills: {', '.join(available) if available else 'none'}"
+        )
+    return skill.read()
+
+
+load_skill_tool = StructuredTool.from_function(
+    coroutine=load_skill_handler,
+    name="LoadSkill",
+    description="Load the full content of a Skill by name.",
+    args_schema=LoadSkillInput,
+)

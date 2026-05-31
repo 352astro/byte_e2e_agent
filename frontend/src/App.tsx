@@ -8,25 +8,21 @@ const sessionCache: SessionCache = {};
 
 export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [pendingNew, setPendingNew] = useState(false);
   const [workspace, setWorkspace] = useState("");
   const cacheRef = useRef<SessionCache>(sessionCache);
 
   const handleSelect = useCallback((sid: string) => {
     setSessionId(sid);
-    setPendingNew(false);
   }, []);
 
   const handleNew = useCallback(() => {
     setSessionId(null);
-    setPendingNew(true);
   }, []);
 
   const handleDelete = useCallback(
     (sid: string) => {
       if (sessionId === sid) {
         setSessionId(null);
-        setPendingNew(false);
       }
     },
     [sessionId],
@@ -34,13 +30,11 @@ export default function App() {
 
   const handleSessionCreated = useCallback((sid: string) => {
     setSessionId(sid);
-    setPendingNew(false);
   }, []);
 
   const handleWorkspaceChange = useCallback((nextWorkspace: string) => {
     setWorkspace(nextWorkspace);
     setSessionId(null);
-    setPendingNew(false);
   }, []);
 
   return (
@@ -54,18 +48,11 @@ export default function App() {
         onDelete={handleDelete}
       />
       <div className="app-main">
-        {sessionId || pendingNew ? (
-          <AgentDemo
-            sessionId={sessionId}
-            pendingNew={pendingNew}
-            onSessionCreated={handleSessionCreated}
-            cache={cacheRef.current}
-          />
-        ) : (
-          <div className="app-placeholder">
-            Select a session or create a new one.
-          </div>
-        )}
+        <AgentDemo
+          sessionId={sessionId}
+          onSessionCreated={handleSessionCreated}
+          cache={cacheRef.current}
+        />
       </div>
     </div>
   );

@@ -1,545 +1,329 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import type {
-    DisplayTranscript,
-    SessionCache,
-    StreamEvent,
-    SubStream,
-    Transcript,
-    RecoverResponse,
-} from "../types";
+import type { Message, SessionCache, StreamEvent, RecoverData } from "../types";
+import { reduceMessages } from "./messageReducer";
+
+// ── types ────────────────────────────────────────────
 
 interface UseAgentStreamOptions {
-    sessionId: string | null;
-    pendingNew: boolean;
-    onSessionCreated?: (sid: string) => void;
-    cache?: SessionCache;
-    scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
-    onCommit?: (targetTid: string, commitSha: string) => void;
+  sessionId: string | null;
+  cache?: SessionCache;
+  scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 interface UseAgentStreamReturn {
-    running: boolean;
-    transcripts: DisplayTranscript[];
-    /** Start a chat run with the given question (caller owns the input state). */
-    handleRun: (question: string) => Promise<void>;
-    prefillRef: React.MutableRefObject<string>;
-    reloadTranscripts: () => void;
-    truncateTranscripts: (truncateTid: string, keep?: boolean) => void;
-    handleInterrupt: () => Promise<void>;
-    resetRunning: () => void;
-    interrupting: boolean;
-    scrollToTranscript: (id: string) => void;
+  running: boolean;
+  messages: Message[];
+  handleRun: (sid: string, question: string) => Promise<void>;
+  createSession: () => Promise<string>;
+  prefillRef: React.MutableRefObject<string>;
+  reloadMessages: () => void;
+  truncateMessages: (truncateTid: string, keep?: boolean) => void;
+  handleInterrupt: () => Promise<void>;
+  resetRunning: () => void;
+  interrupting: boolean;
+  scrollToMessage: (id: string) => void;
 }
 
+// ── hook ──────────────────────────────────────────────
+
 export default function useAgentStream({
-    sessionId,
-    pendingNew,
-    onSessionCreated,
-    cache = {},
-    scrollContainerRef,
-    onCommit,
+  sessionId,
+  cache = {},
+  scrollContainerRef,
 }: UseAgentStreamOptions): UseAgentStreamReturn {
-    const [running, _setRunning] = useState(false);
-    const setRunning = (v: boolean) => {
-        runningRef.current = v;
-        _setRunning(v);
-    };
-    const [transcripts, setTranscripts] = useState<DisplayTranscript[]>([]);
-    const [interrupting, setInterrupting] = useState(false);
-    const [currentSid, setCurrentSid] = useState<string | null>(sessionId);
+  const [running, _setRunning] = useState(false);
+  const setRunning = (v: boolean) => {
+    runningRef.current = v;
+    _setRunning(v);
+  };
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [interrupting, setInterrupting] = useState(false);
+  const [activeSid, setActiveSid] = useState<string | null>(sessionId);
 
-    const abortRef = useRef<AbortController | null>(null);
-    const lazyCreatedRef = useRef<string | null>(null);
-    const lastIdRef = useRef<string | null>(null);
-    const fetchForRef = useRef<string | null>(null);
-    const streamingSidRef = useRef<string | null>(null);
-    const runningRef = useRef(false);
-    const prefillRef = useRef<string>("");
+  const abortRef = useRef<AbortController | null>(null);
+  const lastIdRef = useRef<string | null>(null);
+  const fetchForRef = useRef<string | null>(null);
+  const streamingSidRef = useRef<string | null>(null);
+  const runningRef = useRef(false);
+  const prefillRef = useRef<string>("");
 
-    // ── reload ─────────────────────────────────────
+  // ── createSession ──────────────────────────────────
 
-    const reloadTranscripts = useCallback((): Promise<void> => {
-        if (!sessionId) return Promise.resolve();
-        const fetchFor = sessionId;
-        fetchForRef.current = fetchFor;
-        return fetch(`/api/session/${sessionId}/recover`)
-            .then((r) => r.json())
-            .then((data: RecoverResponse) => {
-                if (fetchForRef.current !== fetchFor) return;
-                const items: DisplayTranscript[] = (data.transcripts || []).map(
-                    (t: Transcript) => ({
-                        id: t.id,
-                        kind: t.kind,
-                        message: t.message,
-                        subStreams: [],
-                        activeSubStream: null,
-                        isFlushed: true,
-                        commitSha: t.commit_sha,
-                    }),
-                );
-                setTranscripts(items);
-                if (data.running) setRunning(true);
-                setInterrupting(false);
-                lastIdRef.current = items.length
-                    ? items[items.length - 1].id
-                    : null;
-                cache[sessionId] = {
-                    transcripts: items,
-                    _complete: !data.running,
-                };
-            });
-    }, [sessionId, cache]);
+  const createSession = useCallback(async (): Promise<string> => {
+    const res = await fetch("/api/session", { method: "POST" });
+    if (!res.ok) throw new Error(`Server returned ${res.status}`);
+    const data = await res.json();
+    return data.session_id as string;
+  }, []);
 
-    const truncateTranscripts = useCallback(
-        (truncateTid: string, keep = false) => {
-            if (!sessionId || !truncateTid) return;
-            setTranscripts((prev) => {
-                const idx = prev.findIndex((t) => t.id === truncateTid);
-                if (idx < 0) return prev;
-                // keep=true: keep tid and before (restore)
-                // keep=false: remove tid and after (regret/replay)
-                const cutoff = keep ? idx + 1 : idx;
-                if (cutoff >= prev.length) return prev;
-                const kept = prev.slice(0, cutoff);
-                lastIdRef.current = kept.length
-                    ? kept[kept.length - 1].id
-                    : null;
-                cache[sessionId] = {
-                    transcripts: kept,
-                    _complete: true,
-                };
-                return kept;
-            });
-        },
-        [sessionId, cache],
-    );
+  // ── reload ─────────────────────────────────────────
 
-    // ── session switch: save & restore ────────────────
+  const reloadMessages = useCallback((): Promise<void> => {
+    if (!sessionId) return Promise.resolve();
+    const fetchFor = sessionId;
+    fetchForRef.current = fetchFor;
+    return fetch(`/api/session/${sessionId}/recover`)
+      .then((r) => r.json())
+      .then((data: RecoverData) => {
+        if (fetchForRef.current !== fetchFor) return;
+        const msgs: Message[] = data.messages || [];
+        setMessages(msgs);
+        if (data.running) setRunning(true);
+        setInterrupting(false);
+        lastIdRef.current = msgs.length ? msgs[msgs.length - 1].id : null;
+        cache[sessionId] = {
+          messages: msgs,
+          _complete: !data.running,
+        };
+      });
+  }, [sessionId, cache]);
 
-    useEffect(() => {
-        if (currentSid && currentSid !== sessionId) {
-            cache[currentSid] = {
-                transcripts,
-                _complete: !running,
-            };
+  const truncateMessages = useCallback(
+    (truncateTid: string, keep = false) => {
+      if (!sessionId || !truncateTid) return;
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === truncateTid);
+        if (idx < 0) return prev;
+        const cutoff = keep ? idx + 1 : idx;
+        if (cutoff >= prev.length) return prev;
+        const kept = prev.slice(0, cutoff);
+        lastIdRef.current = kept.length ? kept[kept.length - 1].id : null;
+        cache[sessionId] = { messages: kept, _complete: true };
+        return kept;
+      });
+    },
+    [sessionId, cache],
+  );
+
+  // ── session switch ─────────────────────────────────
+
+  // 跟踪上一次 sessionId，用于检测真正的切换
+  const prevSidRef = useRef<string | null>(sessionId);
+
+  useEffect(() => {
+    const prev = prevSidRef.current;
+    prevSidRef.current = sessionId;
+
+    // 同一个 session（包括首次渲染或 parent re-render）— 不动作
+    if (prev === sessionId) return;
+
+    // 切换到 null（清空）
+    if (!sessionId) {
+      setMessages([]);
+      setRunning(false);
+      setActiveSid(null);
+      return;
+    }
+
+    // 从 null 或另一个 session 切换到新 sessionId
+    setActiveSid(sessionId);
+
+    const cached = cache[sessionId];
+    if (cached && cached.messages) {
+      setMessages(cached.messages);
+      if (!cached._complete) setRunning(true);
+      lastIdRef.current = cached.messages.length
+        ? cached.messages[cached.messages.length - 1].id
+        : null;
+    } else {
+      setMessages([]);
+      setRunning(false);
+      reloadMessages().catch((err) => {
+        console.error("reloadMessages failed", err);
+      });
+    }
+  }, [sessionId]);
+
+  // ── scroll ─────────────────────────────────────────
+
+  const scrollToMessage = useCallback(
+    (id: string) => {
+      const container = scrollContainerRef?.current;
+      if (!container) return;
+      const el = container.querySelector(`[data-message-id="${id}"]`);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    },
+    [scrollContainerRef],
+  );
+
+  // ── interrupt ──────────────────────────────────────
+
+  const handleInterrupt = useCallback(async () => {
+    const sid = activeSid || sessionId;
+    if (!sid || !runningRef.current || interrupting) return;
+    setInterrupting(true);
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    try {
+      await fetch(`/api/session/${sid}/interrupt`, { method: "POST" });
+    } catch {
+      // ignore network errors during interrupt
+    }
+    setRunning(false);
+    runningRef.current = false;
+    setInterrupting(false);
+    streamingSidRef.current = null;
+    reloadMessages();
+  }, [interrupting, reloadMessages, sessionId, activeSid]);
+
+  // ── SSE event dispatch ─────────────────────────────
+
+  const dispatchStreamEvent = useCallback((ev: StreamEvent) => {
+    switch (ev.kind) {
+      case "message_start":
+      case "chunk_delta":
+      case "chunk_complete":
+      case "message_finish": {
+        setMessages((prev) => reduceMessages(prev, ev));
+        if (ev.kind === "message_finish") {
+          lastIdRef.current = ev.message_id;
         }
+        break;
+      }
+      case "turn_complete":
+      case "interrupted": {
+        setRunning(false);
+        break;
+      }
+    }
+  }, []);
 
-        if (!sessionId) {
-            if (streamingSidRef.current) {
-                return;
-            }
-            if (abortRef.current) {
-                abortRef.current.abort();
-                abortRef.current = null;
-            }
-            setTranscripts([]);
-            setInterrupting(false);
-            lastIdRef.current = null;
-            setCurrentSid(null);
-            return;
-        }
+  // ── auto-reconnect stream ──────────────────────────
 
-        if (sessionId === streamingSidRef.current) {
-            setCurrentSid(sessionId);
-            return;
-        }
+  useEffect(() => {
+    if (!sessionId) return;
+    if (!running) return;
+    const sid = sessionId;
 
-        if (abortRef.current) {
-            abortRef.current.abort();
-            abortRef.current = null;
-        }
+    const controller = new AbortController();
 
-        const cached = cache[sessionId];
-        if (cached && cached._complete) {
-            setTranscripts(cached.transcripts || []);
-            lastIdRef.current = cached.transcripts?.length
-                ? cached.transcripts[cached.transcripts.length - 1].id
-                : null;
-            setCurrentSid(sessionId);
-            fetch(`/api/session/${sessionId}/status`)
-                .then((r) => r.json())
-                .then((data: { running: boolean }) => {
-                    if (data.running) {
-                        setRunning(true);
-                        cache[sessionId]._complete = false;
-                    }
-                })
-                .catch(() => {});
-            return;
-        }
-
-        if (sessionId === lazyCreatedRef.current) {
-            lazyCreatedRef.current = null;
-            streamingSidRef.current = sessionId;
-            setCurrentSid(sessionId);
-            return;
-        }
-
-        if (currentSid !== sessionId) {
-            setTranscripts([]);
-        }
-        setCurrentSid(sessionId);
-
-        reloadTranscripts().catch((err) => {
-            console.error("Failed to recover session", sessionId, err);
+    (async () => {
+      try {
+        const res = await fetch(`/api/session/${sid}/stream`, {
+          signal: controller.signal,
         });
-    }, [sessionId, pendingNew]); // eslint-disable-line react-hooks/exhaustive-deps
+        if (!res.ok || !res.body) return;
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
 
-    // ── scroll to transcript ──────────────────────
-
-    const scrollToTranscript = useCallback(
-        (id: string) => {
-            const el = scrollContainerRef?.current;
-            if (!el) return;
-            const target = el.querySelector(`[data-transcript-id="${id}"]`);
-            if (target) {
-                target.scrollIntoView({ behavior: "smooth", block: "start" });
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop()!;
+          for (const part of parts) {
+            const line = part.trim();
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const event = JSON.parse(line.slice(6)) as StreamEvent;
+              dispatchStreamEvent(event);
+            } catch {
+              // ignore malformed JSON
             }
-        },
-        [scrollContainerRef],
-    );
-
-    // ── interrupt ─────────────────────────────────
-
-    const handleInterrupt = useCallback(async () => {
-        if (interrupting) return;
-        setInterrupting(true);
-        // Abort the current SSE stream so it stops competing with the next one
-        if (abortRef.current) {
-            abortRef.current.abort();
-            abortRef.current = null;
+          }
         }
+      } catch {
+        // stream ended or aborted
+      }
+    })();
+
+    return () => controller.abort();
+  }, [sessionId, running, dispatchStreamEvent]);
+
+  // ── handleRun ──────────────────────────────────────
+
+  const handleRun = useCallback(
+    async (sid: string, question: string) => {
+      const prefill = prefillRef.current.trim();
+      if (prefill) prefillRef.current = "";
+      const q = (prefill ? prefill + "\n" + question : question).trim();
+      if (!q || !sid || runningRef.current) return;
+
+      setRunning(true);
+      setInterrupting(false);
+
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+      }
+      streamingSidRef.current = sid;
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+      try {
+        const streamRes = await fetch(`/api/session/${sid}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: q, max_steps: 50 }),
+          signal: AbortSignal.any([
+            controller.signal,
+            AbortSignal.timeout(300_000),
+          ]),
+        });
+        if (!streamRes.ok) {
+          throw new Error(
+            streamRes.status === 409
+              ? "Session is already running"
+              : `Server returned ${streamRes.status}`,
+          );
+        }
+
+        const reader = streamRes.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop()!;
+          for (const part of parts) {
+            const line = part.trim();
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const event = JSON.parse(line.slice(6)) as StreamEvent;
+              dispatchStreamEvent(event);
+            } catch {
+              // ignore malformed JSON
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+      } finally {
+        if (abortRef.current !== controller) return;
+        abortRef.current = null;
         streamingSidRef.current = null;
-        try {
-            await fetch("/api/interrupt", { method: "POST" });
-        } catch {}
-        setInterrupting(false);
-        setRunning(false);
-        // Reload transcripts: tool_results generated after SSE abort
-        // would otherwise never reach the frontend.
-        reloadTranscripts();
-    }, [interrupting, reloadTranscripts]);
+        if (runningRef.current) {
+          setRunning(false);
+        }
+      }
+    },
+    [dispatchStreamEvent],
+  );
 
-    // ── helpers ──────────────────────────────────────
+  const resetRunning = useCallback(() => {
+    setRunning(false);
+    setInterrupting(false);
+  }, []);
 
-    const upsertTranscript = useCallback((t: DisplayTranscript) => {
-        setTranscripts((prev) => {
-            const idx = prev.findIndex((item) => item.id === t.id);
-            if (idx >= 0) {
-                const copy = [...prev];
-                copy[idx] = t;
-                return copy;
-            }
-            return [...prev, t];
-        });
-    }, []);
-
-    // ── stream event dispatch ────────────────────────
-
-    const dispatchStreamEvent = useCallback(
-        (ev: StreamEvent) => {
-            if (ev.event === "chunk") {
-                setTranscripts((prev) => {
-                    const idx = prev.findIndex(
-                        (item) => item.id === ev.transcript_id,
-                    );
-                    const existing = idx >= 0 ? prev[idx] : null;
-                    let subStreams = existing?.subStreams ?? [];
-                    let active = existing?.activeSubStream ?? null;
-
-                    if (
-                        active &&
-                        (active.id !== ev.id || active.kind !== ev.kind)
-                    ) {
-                        subStreams = [...subStreams, active];
-                        active = null;
-                    }
-
-                    if (
-                        active &&
-                        active.id === ev.id &&
-                        active.kind === ev.kind
-                    ) {
-                        active = {
-                            ...active,
-                            text: active.text + ev.text,
-                        };
-                    } else {
-                        active = {
-                            id: ev.id,
-                            kind: ev.kind,
-                            text: ev.text,
-                        };
-                    }
-
-                    const t: DisplayTranscript = {
-                        id: ev.transcript_id,
-                        kind:
-                            existing?.kind ??
-                            (ev.kind === "tool_result"
-                                ? "tool_result"
-                                : "assistant"),
-                        message: existing?.message ?? {},
-                        subStreams,
-                        activeSubStream: active,
-                        isFlushed: false,
-                        commitSha: existing?.commitSha,
-                    };
-                    if (idx >= 0) {
-                        const copy = [...prev];
-                        copy[idx] = t;
-                        return copy;
-                    }
-                    return [...prev, t];
-                });
-            } else if (ev.event === "flush") {
-                const msg = ev.message || {};
-
-                if (ev.kind === "commit_attachment") {
-                    const targetTid = (msg as Record<string, unknown>)
-                        .target_tid as string | undefined;
-                    const commitSha = (msg as Record<string, unknown>)
-                        .commit_sha as string | undefined;
-                    if (targetTid && commitSha) {
-                        setTranscripts((prev) =>
-                            prev.map((item) =>
-                                item.id === targetTid
-                                    ? { ...item, commitSha }
-                                    : item,
-                            ),
-                        );
-                        onCommit?.(targetTid, commitSha);
-                    }
-                    return;
-                }
-
-                if (
-                    ev.kind === "assistant" &&
-                    msg.content &&
-                    !(msg as Record<string, unknown>).tool_calls
-                ) {
-                }
-
-                const ss: SubStream[] = (ev.sub_streams || []).map((s) => ({
-                    id: s.id,
-                    kind: s.kind,
-                    text: s.text,
-                }));
-
-                upsertTranscript({
-                    id: ev.transcript_id,
-                    kind: ev.kind,
-                    message: msg,
-                    subStreams: ss,
-                    activeSubStream: null,
-                    isFlushed: true,
-                    commitSha: (ev as Record<string, unknown>).commit_sha as
-                        | string
-                        | undefined,
-                });
-                lastIdRef.current = ev.transcript_id;
-            }
-        },
-        [upsertTranscript],
-    );
-
-    // ── auto-reconnect live stream after refresh ────
-
-    useEffect(() => {
-        if (!sessionId) return;
-        if (!running) return;
-        if (streamingSidRef.current === sessionId) return;
-
-        streamingSidRef.current = sessionId;
-        const controller = new AbortController();
-
-        (async () => {
-            try {
-                const res = await fetch(`/api/session/${sessionId}/stream`, {
-                    signal: controller.signal,
-                });
-                if (!res.ok) return;
-
-                const reader = res.body!.getReader();
-                const decoder = new TextDecoder();
-                let buffer = "";
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    buffer += decoder.decode(value, { stream: true });
-                    const parts = buffer.split("\n\n");
-                    buffer = parts.pop()!;
-                    for (const part of parts) {
-                        const line = part.trim();
-                        if (!line.startsWith("data: ")) continue;
-                        try {
-                            const event = JSON.parse(
-                                line.slice(6),
-                            ) as StreamEvent;
-                            dispatchStreamEvent(event);
-                        } catch {
-                            // ignore malformed
-                        }
-                    }
-                }
-            } catch (err) {
-                if (err instanceof DOMException && err.name === "AbortError")
-                    return;
-            } finally {
-                // Only touch state if this stream hasn't been superseded
-                if (streamingSidRef.current !== sessionId) return;
-                streamingSidRef.current = null;
-                setRunning(false);
-            }
-        })();
-
-        return () => controller.abort();
-    }, [sessionId, running, dispatchStreamEvent]);
-
-    // ── run ──────────────────────────────────────────
-
-    const handleRun = useCallback(
-        async (question: string) => {
-            const prefill = prefillRef.current.trim();
-            if (prefill) {
-                prefillRef.current = "";
-            }
-            const q = (prefill ? prefill + "\n" + question : question).trim();
-            if (!q || runningRef.current) return;
-
-            setRunning(true);
-            setInterrupting(false);
-
-            let sid = currentSid;
-            if (!sid && pendingNew) {
-                try {
-                    const res = await fetch("/api/session", { method: "POST" });
-                    if (!res.ok)
-                        throw new Error(`Server returned ${res.status}`);
-                    const data: { session_id: string } = await res.json();
-                    sid = data.session_id;
-                    setCurrentSid(sid);
-                    lazyCreatedRef.current = sid;
-                    streamingSidRef.current = sid;
-                    if (onSessionCreated) onSessionCreated(sid);
-                } catch (err) {
-                    setRunning(false);
-                    return;
-                }
-            }
-            if (!sid) {
-                setRunning(false);
-                return;
-            }
-
-            // Abort any previous stream still lingering
-            if (abortRef.current) {
-                abortRef.current.abort();
-                abortRef.current = null;
-            }
-            streamingSidRef.current = sid;
-
-            const controller = new AbortController();
-            abortRef.current = controller;
-            try {
-                const streamRes = await fetch(`/api/session/${sid}/chat`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ question: q, max_steps: 50 }),
-                    signal: AbortSignal.any([
-                        controller.signal,
-                        AbortSignal.timeout(300_000),
-                    ]),
-                });
-                if (!streamRes.ok) {
-                    throw new Error(
-                        streamRes.status === 409
-                            ? "Session is already running"
-                            : `Server returned ${streamRes.status}`,
-                    );
-                }
-
-                const reader = streamRes.body!.getReader();
-                const decoder = new TextDecoder();
-                let buffer = "";
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    buffer += decoder.decode(value, { stream: true });
-                    const parts = buffer.split("\n\n");
-                    buffer = parts.pop()!;
-
-                    for (const part of parts) {
-                        const line = part.trim();
-                        if (!line.startsWith("data: ")) continue;
-                        try {
-                            const event = JSON.parse(
-                                line.slice(6),
-                            ) as StreamEvent;
-                            dispatchStreamEvent(event);
-                        } catch {
-                            // ignore malformed JSON
-                        }
-                    }
-                }
-            } catch (err) {
-                if (err instanceof DOMException && err.name === "AbortError")
-                    return;
-            } finally {
-                // Only clean up if this stream is still the current one.
-                // If the controller was replaced by an interrupt or a new run,
-                // the old stream's finally must not touch shared state.
-                if (abortRef.current !== controller) return;
-                abortRef.current = null;
-                streamingSidRef.current = null;
-                lazyCreatedRef.current = null;
-                if (sid) {
-                    try {
-                        const res = await fetch(`/api/session/${sid}/status`);
-                        if (res.ok) {
-                            const data = await res.json();
-                            if (!data.running) {
-                                setRunning(false);
-                            }
-                        } else {
-                            setRunning(false);
-                        }
-                    } catch {
-                        setRunning(false);
-                    }
-                } else {
-                    setRunning(false);
-                }
-            }
-        },
-        [
-            running,
-            dispatchStreamEvent,
-            upsertTranscript,
-            currentSid,
-            pendingNew,
-            onSessionCreated,
-        ],
-    );
-
-    const resetRunning = useCallback(() => {
-        setRunning(false);
-        setInterrupting(false);
-    }, []);
-
-    return {
-        running,
-        interrupting,
-        transcripts,
-        handleRun,
-        prefillRef,
-        reloadTranscripts,
-        truncateTranscripts,
-        handleInterrupt,
-        resetRunning,
-        scrollToTranscript,
-    };
+  return {
+    running,
+    interrupting,
+    messages,
+    handleRun,
+    createSession,
+    prefillRef,
+    reloadMessages,
+    truncateMessages,
+    handleInterrupt,
+    resetRunning,
+    scrollToMessage,
+  };
 }

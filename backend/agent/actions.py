@@ -1,23 +1,20 @@
 """ReAct 引擎原语：思考 → 行动 → 子代理。
 
-所有函数均无状态，依赖显式传入。从 scheduler 抽离以便独立测试和复用。
+纯 openai 实现。所有函数无状态，依赖显式传入。
 """
 
 from __future__ import annotations
 
 import asyncio
+import inspect
 import uuid as _uuid
 
-from agent.errors import InterruptedError, ToolMismatchError, repair_transcripts
-from agent.llm import HelloAgentsLLM
-from agent.metrics import LLMCallContext
-from agent.sandbox import Sandbox
-from agent.session import Session
-from agent.tools import BrowserInspect, TaskList, TaskRewrite
-from agent.tools.browser import BrowserInspect as BrowserInspectTool
-from agent.tools.subagent import SubAgent as SubAgentTool
+from agent.core.workspace import Workspace
+from agent.errors import InterruptedError
+from agent.tools import tool_registry
 from agent.tools.toolset import ToolSet
-from agent.transcript import TranscriptStream
+from shared.hooks import HookManager
+from shared.types import Message, ToolCall
 
 _SUBAGENT_DEBUG = True  # 设为 False 关闭子智能体控制台调试输出
 
@@ -28,138 +25,187 @@ _SUBAGENT_DEBUG = True  # 设为 False 关闭子智能体控制台调试输出
 
 
 def _default_toolset() -> ToolSet:
-    from agent.tools import get_all_tool_classes as _all
-
-    return ToolSet(_all())
+    return ToolSet(tool_registry)
 
 
-async def _apply_repairs(session: Session, channel: TranscriptStream, *stages) -> None:
-    old = session._transcripts
-    repaired = repair_transcripts(old, *stages)
-    new = repaired[len(old) :]
-    for rt in new:
-        try:
-            flushed = await channel.flush(rt.id, rt.kind, base=rt.message)
-            session.add_transcript(
-                flushed.kind, flushed.message, flushed.id, flushed.commit_sha
-            )
-        except Exception:
-            pass
-
-
-async def _debug_bridge_silent(silent: TranscriptStream, label: str) -> None:
-    if not _SUBAGENT_DEBUG:
+async def _debug_bridge_silent(msg: Message | None, label: str) -> None:
+    """子智能体调试输出（简化版）。"""
+    if not _SUBAGENT_DEBUG or msg is None:
         return
-    q = silent.subscribe()
-    try:
-        while True:
-            ev = await q.get()
-            if ev is None:
-                break
-            if ev.name == "chunk":
-                text = ev.payload.get("text", "")
-                if text:
-                    print(text, end="", flush=True)
-            elif ev.name == "flush":
-                print()
-    except asyncio.CancelledError:
-        pass
-    finally:
-        silent.unsubscribe(q)
+    if msg.content:
+        print(msg.content, end="", flush=True)
+    if msg.tool_calls:
+        for tc in msg.tool_calls:
+            print(f"\n[{label}] 🔧 {tc.function.name}")
 
 
 # ═══════════════════════════════════════════════════════════
-# 核心
+# model_call — OpenAI streaming
 # ═══════════════════════════════════════════════════════════
 
 
 async def model_call(
-    llm_client: HelloAgentsLLM,
+    client,  # openai.OpenAI
+    model_id: str,
     session_id: str,
-    channel: TranscriptStream,
     messages: list[dict],
     tools: list[dict],
-    transcript_id: str,
+    message_id: str,
     *,
+    turn_id: str = "",
     interrupt_event: asyncio.Event,
-) -> str | None:
-    """流式调用 LLM，全部 chunk 进入 channel。返回 finish_reason。"""
+    hook_manager: HookManager | None = None,
+    streaming_holder: list[Message | None] | None = None,
+) -> tuple[Message, str | None]:
+    """流式调用 LLM（原生 openai），直接构建 Message + hook 分发。
+
+    若提供 streaming_holder（单元素列表），会在流式构建期间持续更新
+    streaming_holder[0] 为当前 Message，调用方可通过此引用获取正在
+    构建中的消息（供 /recover 等端点使用）。
+
+    返回 (msg, finish_reason)。
+    """
+
     finish_reason: str | None = None
 
-    async for ev in llm_client.think_stream(
+    # ── 创建 Message ──────────────────────────────
+    msg = Message.assistant_message(message_id, turn_id or message_id)
+    if streaming_holder is not None:
+        streaming_holder[0] = msg
+    if hook_manager is not None:
+        await hook_manager.on_message_start(msg=msg, session_id=session_id)
+
+    kwargs: dict = dict(
+        model=model_id,
         messages=messages,
-        tools=tools,
-        metrics_context=LLMCallContext(
-            session_id=session_id,
-            transcript_id=transcript_id,
-            call_type="agent_step",
-        ),
-    ):
+        stream=True,
+        stream_options={"include_usage": True},
+        reasoning_effort="high",
+        extra_body={"thinking": {"type": "enabled"}},
+    )
+    if tools:
+        kwargs["tools"] = tools
+
+    stream = client.chat.completions.create(**kwargs)
+
+    for chunk in stream:
         if interrupt_event.is_set():
             raise InterruptedError("Interrupted during LLM call")
-        if ev["kind"] == "reasoning":
-            await channel.chunk(transcript_id, "thinking", ev["token"])
-        elif ev["kind"] == "content":
-            await channel.chunk(transcript_id, "response", ev["token"])
-        elif ev["kind"] == "tool_call_chunk":
-            tc = ev["tool_call"]
-            idx: int = tc.get("index", 0)
-            tool_id = f"{transcript_id}/tc/{idx}"
 
-            msg = channel.ensure_open(transcript_id)
-            calls = msg.setdefault("tool_calls", [])
-            while len(calls) <= idx:
-                calls.append(
+        delta = chunk.choices[0].delta if chunk.choices else None
+        if delta is None:
+            continue
+
+        _content = getattr(delta, "content", None) or ""
+        _reasoning = getattr(delta, "reasoning_content", None) or ""
+        _tool_calls = getattr(delta, "tool_calls", None) or []
+        _finish = getattr(chunk.choices[0], "finish_reason", None) or ""
+        _usage = getattr(chunk, "usage", None)
+
+        # ── reasoning ────────────────────────────────
+        if _reasoning:
+            msg.reasoning += _reasoning
+            if hook_manager is not None:
+                await hook_manager.on_chunk_delta(
+                    msg=msg, field="reasoning", delta=_reasoning
+                )
+
+        # ── text content ─────────────────────────────
+        if _content:
+            msg.content += _content
+            if hook_manager is not None:
+                await hook_manager.on_chunk_delta(
+                    msg=msg, field="content", delta=_content
+                )
+
+        # ── tool calls ───────────────────────────────
+        for tc in _tool_calls:
+            idx = getattr(tc, "index", 0)
+            tc_id = getattr(tc, "id", None) or ""
+            tc_fn = getattr(tc, "function", None)
+            tc_name = getattr(tc_fn, "name", None) or "" if tc_fn else ""
+            tc_args = getattr(tc_fn, "arguments", None) or "" if tc_fn else ""
+
+            while len(msg.tool_calls) <= idx:
+                msg.tool_calls.append(ToolCall())
+            if tc_id:
+                msg.tool_calls[idx].id = tc_id
+
+            if tc_name:
+                msg.tool_calls[idx].function.name += tc_name
+                if hook_manager is not None:
+                    await hook_manager.on_chunk_delta(
+                        msg=msg,
+                        field="tool_calls",
+                        delta=tc_name,
+                        tool_name=msg.tool_calls[idx].function.name,
+                        tool_index=idx,
+                        sub_field="name",
+                    )
+
+            if tc_args:
+                msg.tool_calls[idx].function.arguments += tc_args
+                if hook_manager is not None:
+                    await hook_manager.on_chunk_delta(
+                        msg=msg,
+                        field="tool_calls",
+                        delta=tc_args,
+                        tool_name=msg.tool_calls[idx].function.name,
+                        tool_index=idx,
+                        sub_field="args",
+                    )
+
+        if _finish:
+            finish_reason = _finish
+
+        if _usage and not hasattr(msg, "_usage"):
+            # openai returns CompletionUsage (Pydantic object), normalize to dict
+            if hasattr(_usage, "prompt_tokens"):
+                object.__setattr__(
+                    msg,
+                    "_usage",
                     {
-                        "id": "",
-                        "type": "function",
-                        "function": {"name": "", "arguments": ""},
-                    }
+                        "prompt_tokens": getattr(_usage, "prompt_tokens", 0),
+                        "completion_tokens": getattr(_usage, "completion_tokens", 0),
+                        "total_tokens": getattr(_usage, "total_tokens", 0),
+                    },
                 )
-            if tc.get("id"):
-                calls[idx]["id"] = tc["id"]
+            else:
+                object.__setattr__(msg, "_usage", _usage)
 
-            fn = tc.get("function", {})
-            if fn.get("name"):
-                await channel.chunk(
-                    transcript_id,
-                    "tool_name",
-                    fn["name"],
-                    chunk_id=tool_id,
-                )
-            if fn.get("arguments"):
-                await channel.chunk(
-                    transcript_id,
-                    "tool_arguments",
-                    fn["arguments"],
-                    chunk_id=tool_id,
-                )
-        elif ev["kind"] == "finish_reason":
-            finish_reason = ev["finish_reason"]
+    # ── 完成 ──────────────────────────────────────
+    msg.mark_complete()
+    if streaming_holder is not None:
+        streaming_holder[0] = None
+    if hook_manager is not None:
+        usage = getattr(msg, "_usage", None) or {}
+        await hook_manager.on_message_finish(
+            msg=msg,
+            finish_reason=finish_reason or "stop",
+            usage=usage,
+            session_id=session_id,
+        )
 
-    msg = channel.message
-    content = msg.get("content", "") if msg else ""
-    if (
-        content
-        and "tool" in content.lower()
-        and ("mismatch" in content.lower() or "not found" in content.lower())
-    ):
-        raise ToolMismatchError(content.strip())
+    return msg, finish_reason
 
-    return finish_reason
+
+# ═══════════════════════════════════════════════════════════
+# execute_one_tool
+# ═══════════════════════════════════════════════════════════
 
 
 async def execute_one_tool(
     tc: dict,
-    sandbox: Sandbox,
+    ws: Workspace,
     toolset: ToolSet,
-    channel: TranscriptStream,
     *,
     interrupt_event: asyncio.Event,
-    llm_client: HelloAgentsLLM,
+    openai_client=None,  # openai.OpenAI
+    model_id: str = "",
     session_id: str = "",
-) -> None:
-    """执行单个 tool_call。SubAgent / BrowserInspect 原地分发。"""
+    hook_manager: HookManager | None = None,
+) -> str:
+    """执行单个 tool_call。SubAgent / BrowserInspect 原地分发。返回结果字符串。"""
     func_name: str = tc["function"]["name"]
     func_args: str = tc["function"]["arguments"]
     result_id = _uuid.uuid4().hex
@@ -168,42 +214,36 @@ async def execute_one_tool(
         raise InterruptedError("Interrupted before tool execution")
 
     try:
-        action = toolset.parse(func_name, func_args)
+        tool, args = toolset.parse(func_name, func_args)
     except Exception as exc:
-        await channel.chunk(
-            result_id,
-            "tool_result",
-            f"Error parsing {func_name}: {exc}",
-            chunk_id=result_id,
-        )
-        return
+        return f"Error parsing {func_name}: {exc}"
 
-    # ── SubAgent / BrowserInspect：原地执行，不走 action.execute() ──
-    if isinstance(action, SubAgentTool):
+    # ── SubAgent / BrowserInspect：原地分发，不调 handler ──
+    if tool.name == "SubAgent":
         result_str = await run_subagent(
-            sandbox,
+            ws,
             toolset,
-            channel,
-            prompt=action.prompt,
-            max_steps=action.max_steps,
-            llm_client=llm_client,
+            prompt=args.get("prompt", ""),
+            max_steps=args.get("max_steps", 5),
+            openai_client=openai_client,
+            model_id=model_id,
             session_id=session_id,
             interrupt_event=interrupt_event,
-            with_skills=action.with_skills,
+            with_skills=args.get("with_skills", []),
+            hook_manager=hook_manager,
         )
-    elif isinstance(action, BrowserInspectTool):
-        from agent.tools.browser import BrowserAct, BrowserOpen
-
-        browser_toolset = ToolSet([BrowserOpen, BrowserAct])
+    elif tool.name == "BrowserInspect":
+        browser_toolset = ToolSet(tool_registry, "BrowserOpen", "BrowserAct")
         result_str = await run_subagent(
-            sandbox,
+            ws,
             browser_toolset,
-            channel,
-            prompt=action.prompt,
-            max_steps=action.max_steps,
-            llm_client=llm_client,
+            prompt=args.get("prompt", ""),
+            max_steps=args.get("max_steps", 8),
+            openai_client=openai_client,
+            model_id=model_id,
             session_id=session_id,
             interrupt_event=interrupt_event,
+            hook_manager=hook_manager,
             system_extra=(
                 "You are a browser inspection sub-agent. Your toolset "
                 "contains ONLY browser tools (BrowserOpen, BrowserAct). "
@@ -215,45 +255,59 @@ async def execute_one_tool(
             ),
         )
     else:
-        # ── 普通工具 ──
         try:
-            result_str = await action.execute(
-                sandbox=sandbox,
-                channel=channel,
-                interrupt_event=interrupt_event,
-                toolset=toolset,
-                result_id=result_id,
-            )
+            # 注入 workspace 和 session_id 到工具 handler
+            call_args = dict(args)
+            for meta_name, meta_value in (
+                ("ws", ws),
+                ("session_id", session_id),
+                ("interrupt_event", interrupt_event),
+            ):
+                if _accepts_kwarg(tool.coroutine, meta_name):
+                    call_args[meta_name] = meta_value
+            result_str = await tool.coroutine(**call_args)
+        except InterruptedError:
+            raise
         except Exception as exc:
             result_str = f"Error: {exc}"
 
-    if result_str:
-        await channel.chunk(
-            result_id,
-            "tool_result",
-            result_str,
-            chunk_id=result_id,
-        )
+    return result_str
+
+
+def _accepts_kwarg(fn, name: str) -> bool:
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except TypeError, ValueError:
+        return False
+    return any(
+        p.kind == inspect.Parameter.VAR_KEYWORD or p.name == name for p in params
+    )
+
+
+# ═══════════════════════════════════════════════════════════
+# run_subagent
+# ═══════════════════════════════════════════════════════════
 
 
 async def run_subagent(
-    sandbox: Sandbox,
+    ws: Workspace,
     toolset: ToolSet,
-    channel: TranscriptStream,
     prompt: str,
     max_steps: int,
     *,
-    llm_client: HelloAgentsLLM,
+    openai_client=None,  # openai.OpenAI
+    model_id: str = "",
     session_id: str,
     interrupt_event: asyncio.Event,
     with_skills: list[str] | None = None,
     system_extra: str | None = None,
+    hook_manager: HookManager | None = None,
 ) -> str:
     """在同一个 session 内运行子智能体。从空白上下文启动。"""
     from agent.tools.skill import get_skill
 
     subagent_tools = toolset.without(
-        SubAgentTool, BrowserInspect, TaskList, TaskRewrite
+        "SubAgent", "BrowserInspect", "TaskList", "TaskRewrite"
     ).openai_tools
 
     subagent_messages: list[dict] = [
@@ -295,36 +349,24 @@ async def run_subagent(
             break
         step += 1
 
-        silent = TranscriptStream()
         stream_id = _uuid.uuid4().hex
 
-        dbg_task: asyncio.Task | None = None
-        if _SUBAGENT_DEBUG:
-            dbg_task = asyncio.create_task(
-                _debug_bridge_silent(silent, f"s{step}"),
-                name=f"subagent_debug_{step}",
-            )
-
-        finish_reason = await model_call(
-            llm_client,
+        msg, finish_reason = await model_call(
+            openai_client,
+            model_id,
             session_id,
-            silent,
             subagent_messages,
             subagent_tools,
-            transcript_id=stream_id,
+            message_id=stream_id,
+            turn_id=stream_id,
             interrupt_event=interrupt_event,
+            hook_manager=hook_manager,
         )
 
-        if dbg_task is not None:
-            silent.close()
-            try:
-                await asyncio.wait_for(dbg_task, timeout=2)
-            except asyncio.TimeoutError:
-                dbg_task.cancel()
-
-        msg = silent.message or {}
-        content = msg.get("content", "")
-        tool_calls = msg.get("tool_calls", [])
+        content = msg.content
+        tool_calls = (
+            [tc.model_dump() for tc in msg.tool_calls] if msg.tool_calls else []
+        )
 
         if content:
             last_answer = content
@@ -337,26 +379,22 @@ async def run_subagent(
                 "role": "assistant",
                 "content": content or None,
                 "tool_calls": tool_calls,
-                **(
-                    {"reasoning_content": msg["reasoning_content"]}
-                    if msg.get("reasoning_content")
-                    else {}
-                ),
+                **({"reasoning_content": msg.reasoning} if msg.reasoning else {}),
             }
         )
 
         for tc in tool_calls:
             if interrupt_event.is_set():
                 break
-            await execute_one_tool(
+            result = await execute_one_tool(
                 tc,
-                sandbox,
+                ws,
                 toolset,
-                silent,
                 interrupt_event=interrupt_event,
-                llm_client=llm_client,
+                openai_client=openai_client,
+                model_id=model_id,
+                hook_manager=hook_manager,
             )
-            result = (silent.message or {}).get("result", "")
             subagent_messages.append(
                 {
                     "role": "tool",
