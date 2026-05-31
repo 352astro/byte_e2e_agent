@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from agent.tools.task import reconstruct_tasks
 from app.dependencies import get_project
 from app.services.project import Project
 
@@ -48,10 +47,9 @@ def get_history(sid: str, project: Project = Depends(get_project)) -> dict:
 async def session_status(sid: str, project: Project = Depends(get_project)):
     """Lightweight check: is the scheduler currently running this session?"""
     try:
-        project.get_session(sid)
+        return project.get_session_status(sid)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
-    return {"running": project.scheduler.state != "idle"}
 
 
 @router.get("/session/{sid}/recover")
@@ -70,21 +68,17 @@ async def recover_session(sid: str, project: Project = Depends(get_project)):
 async def list_commits(sid: str, project: Project = Depends(get_project)):
     """Return all shadow commits for this workspace."""
     try:
-        project.get_session(sid)
+        commits = project.list_commits(sid)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
-    return {"commits": project.shadow_repo.list_commits(sid)}
+    return {"commits": commits}
 
 
 @router.get("/session/{sid}/commits/{sha}")
 async def get_commit(sid: str, sha: str, project: Project = Depends(get_project)):
     """Return metadata for a specific commit."""
     try:
-        project.get_session(sid)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Session not found")
-    try:
-        return project.shadow_repo.get_commit(sha)
+        return project.get_commit(sid, sha)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Commit not found: {sha}")
 
@@ -97,59 +91,26 @@ async def checkout_commit(
 ):
     """Restore workspace and truncate transcripts at the given commit."""
     try:
-        session = project.get_session(sid)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Session not found")
-    if req.commit_sha:
-        try:
-            project.shadow_repo.restore(req.commit_sha)
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail=f"Commit not found: {req.commit_sha}"
-            )
-    # Capture user question text (for restore prefill)
-    user_content = ""
-    if req.truncate_tid:
-        for t in session._transcripts:
-            if t.id == req.truncate_tid and t.kind == "user_question":
-                user_content = t.message.get("content", "")
-                break
-    # Truncate transcripts
-    removed = session.truncate_transcripts_by_tid(
-        req.truncate_tid or "", keep=req.keep_tid
-    )
-    await reconstruct_tasks(session._sandbox, session._transcripts)
-
-    # Both regret and restore use set_head: HEAD → checkout sha,
-    # dropping everything after it. The difference is which sha:
-    #   regret → parent sha (keep parent, drop this and later)
-    #   restore → self sha  (keep self,  drop later only)
-    if req.commit_sha:
-        try:
-            project.shadow_repo.set_head(sid, req.commit_sha)
-        except Exception:
-            pass
-    return {
-        "ok": True,
-        "commit_sha": req.commit_sha,
-        "removed": removed,
-        "user_content": user_content,
-    }
+        return await project.checkout_session(sid, req)
+    except KeyError as exc:
+        detail = str(exc)
+        if "Session not found" in detail:
+            raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail=detail)
 
 
 @router.post("/session/{sid}/interrupt")
 async def interrupt_session(sid: str, project: Project = Depends(get_project)):
     """Interrupt the running agent loop for this session."""
     try:
-        project.get_session(sid)
+        ok = await project.interrupt_session(sid)
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
-    ok = await project.scheduler.interrupt()
     return {"ok": ok}
 
 
 @router.post("/interrupt")
 async def interrupt_global(project: Project = Depends(get_project)):
     """Interrupt whatever session is currently running (no session ID needed)."""
-    ok = await project.scheduler.interrupt()
+    ok = await project.interrupt_current()
     return {"ok": ok}

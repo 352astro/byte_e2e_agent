@@ -19,6 +19,7 @@ from agent.sandbox import Sandbox
 from agent.scheduler import Scheduler
 from agent.session import Session, clear, get_history, load_session
 from agent.shadow_repo import ShadowRepo
+from agent.tools.task import reconstruct_tasks
 from agent.transcript import TranscriptStream
 from app.core.config import TMP_DIR
 
@@ -183,6 +184,57 @@ class Project:
         return {
             "transcripts": session.get_transcripts(),
             "running": is_running,
+        }
+
+    def get_session_status(self, session_id: str) -> dict:
+        self.get_session(session_id)
+        return {"running": self.scheduler.is_running_session(session_id)}
+
+    def respond_to_pending(self, transcript_id: str, response: dict) -> None:
+        self.scheduler.resolve(transcript_id, response)
+
+    async def interrupt_session(self, session_id: str) -> bool:
+        self.get_session(session_id)
+        return await self.scheduler.interrupt()
+
+    async def interrupt_current(self) -> bool:
+        return await self.scheduler.interrupt()
+
+    def list_commits(self, session_id: str) -> list[dict]:
+        self.get_session(session_id)
+        return self.shadow_repo.list_commits(session_id)
+
+    def get_commit(self, session_id: str, sha: str) -> dict:
+        self.get_session(session_id)
+        return self.shadow_repo.get_commit(sha)
+
+    async def checkout_session(self, session_id: str, req: Any) -> dict:
+        session = self.get_session(session_id)
+        if req.commit_sha:
+            try:
+                self.shadow_repo.restore(req.commit_sha)
+            except KeyError:
+                raise KeyError(f"Commit not found: {req.commit_sha}")
+        user_content = ""
+        if req.truncate_tid:
+            for t in session._transcripts:
+                if t.id == req.truncate_tid and t.kind == "user_question":
+                    user_content = t.message.get("content", "")
+                    break
+        removed = session.truncate_transcripts_by_tid(
+            req.truncate_tid or "", keep=req.keep_tid
+        )
+        await reconstruct_tasks(session._sandbox, session._transcripts)
+        if req.commit_sha:
+            try:
+                self.shadow_repo.set_head(session_id, req.commit_sha)
+            except Exception:
+                pass
+        return {
+            "ok": True,
+            "commit_sha": req.commit_sha,
+            "removed": removed,
+            "user_content": user_content,
         }
 
     # ── LLM metrics / monitoring ────────────────────────

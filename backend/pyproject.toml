@@ -16,6 +16,13 @@ dependencies = [
     "landlock>=1.0.0.dev0",
 ]
 
+[dependency-groups]
+dev = [
+    "httpx>=0.28.0",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
 [tool.uv.workspace]
 members = [
     "double_pendulum_simulation",

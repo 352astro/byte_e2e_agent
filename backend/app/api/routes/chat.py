@@ -97,8 +97,7 @@ async def respond(
     project: Project = Depends(get_project),
 ):
     try:
-        scheduler = project.scheduler
-        scheduler.resolve(req.transcript_id, req.response)
+        project.respond_to_pending(req.transcript_id, req.response)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"ok": True}
