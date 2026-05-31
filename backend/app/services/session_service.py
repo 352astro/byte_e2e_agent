@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import shutil
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
-from agent.paths import init_session_storage, list_sessions as agent_list_sessions
+from agent.paths import (
+    init_session_storage,
+    list_sessions as agent_list_sessions,
+    messages_path,
+)
 from agent.session import clear, get_history
 from app.services.context import WorkspaceContext
+from app.services.workspace_registry import list_workspaces, register_workspace
 
 
 class SessionService:
@@ -17,16 +23,47 @@ class SessionService:
 
     def create_session(self) -> dict[str, Any]:
         self._ctx.ensure_storage_ready()
+        register_workspace(self._ctx.workspace)
         session_id = uuid.uuid4().hex[:12]
         init_session_storage(self._ctx.workspace, session_id)
         self._ctx.put_session(session_id, self._ctx._build_session(session_id))
         return {"session_id": session_id, "workspace": self._ctx.workspace}
 
     def list_sessions(self) -> list[dict[str, Any]]:
-        return [
-            {**info, "workspace": self._ctx.workspace}
-            for info in agent_list_sessions(self._ctx.workspace)
-        ]
+        return self._sessions_for_workspace(self._ctx.workspace)
+
+    def list_all_sessions(self) -> list[dict[str, Any]]:
+        workspaces = list_workspaces()
+        current = self._ctx.workspace
+        if current not in workspaces:
+            workspaces = [current, *workspaces]
+
+        combined: list[dict[str, Any]] = []
+        for ws in workspaces:
+            combined.extend(self._sessions_for_workspace(ws))
+        combined.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
+        return combined
+
+    @staticmethod
+    def _sessions_for_workspace(workspace: str) -> list[dict[str, Any]]:
+        result: list[tuple[float, dict[str, Any]]] = []
+        for info in agent_list_sessions(workspace):
+            sid = info["session_id"]
+            mtime = messages_path(workspace, sid).stat().st_mtime
+            result.append(
+                (
+                    mtime,
+                    {
+                        **info,
+                        "workspace": workspace,
+                        "updated_at": datetime.fromtimestamp(
+                            mtime, tz=timezone.utc
+                        ).isoformat(),
+                    },
+                )
+            )
+        result.sort(key=lambda row: row[0], reverse=True)
+        return [row[1] for row in result]
 
     def get_info(self, session_id: str) -> dict[str, Any]:
         return self._ctx.get_info(session_id)

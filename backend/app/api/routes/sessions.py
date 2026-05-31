@@ -38,6 +38,18 @@ def list_sessions(
     }
 
 
+@router.get("/sessions/all")
+def list_all_sessions(
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+    session_service: SessionService = Depends(get_session_service),
+) -> dict:
+    return {
+        "workspace": workspace_service.get_workspace(),
+        "workspaces": workspace_service.list_registered_workspaces(),
+        "sessions": session_service.list_all_sessions(),
+    }
+
+
 @router.delete("/session/{sid}")
 async def delete_session(
     sid: str,

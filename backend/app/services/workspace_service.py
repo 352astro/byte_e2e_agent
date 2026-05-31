@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.services.context import WorkspaceContext
+from app.services.workspace_registry import register_workspace
 
 
 class WorkspaceService:
@@ -14,6 +15,16 @@ class WorkspaceService:
 
     def set_workspace(self, path: str) -> None:
         self._ctx.set_workspace(path)
+        register_workspace(self._ctx.workspace)
+
+    def list_registered_workspaces(self) -> list[str]:
+        from app.services.workspace_registry import list_workspaces
+
+        workspaces = list_workspaces()
+        current = self._ctx.workspace
+        if current not in workspaces:
+            workspaces = [current, *workspaces]
+        return workspaces
 
     def resolve_workspace(self, path: str | None = None) -> str:
         return self._ctx.resolve_workspace(path)

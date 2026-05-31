@@ -179,6 +179,17 @@ class TestSessionEndpoints:
         assert listed.status_code == 200
         sessions = listed.json()
         assert sessions["workspace"] == created["workspace"]
+
+        listed_all = client.get("/api/sessions/all")
+        assert listed_all.status_code == 200
+        all_body = listed_all.json()
+        assert created["workspace"] in all_body["workspaces"]
+        all_ids = [item["session_id"] for item in all_body["sessions"]]
+        assert sid in all_ids
+        assert any(
+            item["session_id"] == sid and item["workspace"] == created["workspace"]
+            for item in all_body["sessions"]
+        )
         assert any(s["session_id"] == sid for s in sessions["sessions"])
 
         history = client.get(f"/api/session/{sid}/history")

@@ -29,6 +29,7 @@ members = [
 ]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 markers = [
     "unit: fast unit tests without external dependencies",
     "integration: tests that require real LLM or shell",

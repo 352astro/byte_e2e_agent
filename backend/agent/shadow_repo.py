@@ -22,6 +22,7 @@ from dulwich.ignore import IgnoreFilter, IgnoreFilterManager, get_xdg_config_hom
 from dulwich.index import Index, IndexEntry
 from dulwich.objects import Blob, Commit, Tree
 from dulwich.repo import Repo
+from dulwich.walk import Walker
 from agent.paths import shadow_repo_dir, TMP_DIR
 
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { SessionInfo } from "../types";
 
 interface SessionSidebarProps {
@@ -8,6 +8,12 @@ interface SessionSidebarProps {
   onSelect: (sid: string) => void;
   onNew: () => void;
   onDelete?: (sid: string) => void;
+}
+
+function workspaceLabel(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts[parts.length - 1] || path;
 }
 
 export default function SessionSidebar({
@@ -21,6 +27,7 @@ export default function SessionSidebar({
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selecting, setSelecting] = useState(false);
+  const [activatingId, setActivatingId] = useState<string | null>(null);
   const workspaceLoadedRef = useRef(false);
   const [menuSid, setMenuSid] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -28,7 +35,7 @@ export default function SessionSidebar({
 
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch("/api/sessions");
+      const res = await fetch("/api/sessions/all");
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
       const data: {
         workspace?: string;
@@ -48,11 +55,28 @@ export default function SessionSidebar({
     }
   }, []);
 
+  const groupedSessions = useMemo(() => {
+    const groups = new Map<string, SessionInfo[]>();
+    for (const session of sessions) {
+      const key = session.workspace || workspace || "unknown";
+      const bucket = groups.get(key);
+      if (bucket) {
+        bucket.push(session);
+      } else {
+        groups.set(key, [session]);
+      }
+    }
+    return Array.from(groups.entries()).sort(([a], [b]) => {
+      if (a === workspace) return -1;
+      if (b === workspace) return 1;
+      return a.localeCompare(b);
+    });
+  }, [sessions, workspace]);
+
   useEffect(() => {
     fetchSessions();
-  }, [fetchSessions, activeId]);
+  }, [fetchSessions, activeId, workspace]);
 
-  // Fetch current workspace on mount
   useEffect(() => {
     fetch("/api/workspace")
       .then((r) => r.json())
@@ -65,7 +89,6 @@ export default function SessionSidebar({
       .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Close context menu on outside click
   useEffect(() => {
     if (!menuSid) return;
     const close = (e: MouseEvent) => {
@@ -116,11 +139,46 @@ export default function SessionSidebar({
       }
       const data: { workspace: string } = await res.json();
       onWorkspaceChange(data.workspace);
+      await fetchSessions();
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSelecting(false);
+    }
+  };
+
+  const activateSession = async (session: SessionInfo) => {
+    const targetWorkspace = session.workspace;
+    if (!targetWorkspace) {
+      onSelect(session.session_id);
+      return;
+    }
+
+    setActivatingId(session.session_id);
+    try {
+      if (targetWorkspace !== workspace) {
+        const res = await fetch("/api/workspace/set", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: targetWorkspace }),
+        });
+        if (!res.ok) {
+          const detail = await res
+            .json()
+            .then((d) => d.detail)
+            .catch(() => "Unknown error");
+          throw new Error(detail);
+        }
+        const data: { workspace: string } = await res.json();
+        onWorkspaceChange(data.workspace);
+      }
+      onSelect(session.session_id);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setActivatingId(null);
     }
   };
 
@@ -162,55 +220,68 @@ export default function SessionSidebar({
       </button>
       {error && <div className="sidebar-error">{error}</div>}
       <div className="sidebar-list">
-        {sessions.map((session) => {
-          const label = session.session_name || session.session_id;
-          const isActive = session.session_id === activeId;
-          const isMenuOpen = session.session_id === menuSid;
-          const isDeleting = session.session_id === deleting;
-
-          return (
+        {groupedSessions.map(([wsPath, groupSessions]) => (
+          <div key={wsPath} className="sidebar-group">
             <div
-              key={session.session_id}
-              className={`sidebar-item ${isActive ? "active" : ""}`}
-              onClick={() => onSelect(session.session_id)}
+              className={`sidebar-group-label ${wsPath === workspace ? "sidebar-group-label--current" : ""}`}
+              title={wsPath}
             >
-              <span className="sidebar-item-dot" />
-              <span className="sidebar-item-text">
-                <span className="sidebar-item-title">{label}</span>
-                <span className="sidebar-item-id">{session.session_id}</span>
-              </span>
+              {workspaceLabel(wsPath)}
+              {wsPath === workspace ? " (current)" : ""}
+            </div>
+            {groupSessions.map((session) => {
+              const label = session.session_name || session.session_id;
+              const isActive = session.session_id === activeId;
+              const isMenuOpen = session.session_id === menuSid;
+              const isDeleting = session.session_id === deleting;
+              const isActivating = session.session_id === activatingId;
 
-              {/* three-dot menu */}
-              <div className="sidebar-item-actions">
-                <button
-                  className="sidebar-menu-btn"
-                  title="Session actions"
-                  disabled={isDeleting}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setMenuSid(isMenuOpen ? null : session.session_id);
-                  }}
+              return (
+                <div
+                  key={`${session.workspace}:${session.session_id}`}
+                  className={`sidebar-item ${isActive ? "active" : ""}`}
+                  onClick={() => void activateSession(session)}
                 >
-                  ⋮
-                </button>
+                  <span className="sidebar-item-dot" />
+                  <span className="sidebar-item-text">
+                    <span className="sidebar-item-title">{label}</span>
+                    <span className="sidebar-item-id">
+                      {session.session_id}
+                    </span>
+                  </span>
 
-                {isMenuOpen && (
-                  <div className="sidebar-context-menu">
+                  <div className="sidebar-item-actions">
                     <button
-                      className="sidebar-context-item sidebar-context-item--danger"
+                      className="sidebar-menu-btn"
+                      title="Session actions"
+                      disabled={isDeleting || isActivating}
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleDelete(session.session_id);
+                        setMenuSid(isMenuOpen ? null : session.session_id);
                       }}
                     >
-                      Delete
+                      ⋮
                     </button>
+
+                    {isMenuOpen && (
+                      <div className="sidebar-context-menu">
+                        <button
+                          className="sidebar-context-item sidebar-context-item--danger"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDelete(session.session_id);
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
     </div>
   );
