@@ -20,6 +20,7 @@ export type StreamEventKind = components["schemas"]["StreamEventKind"];
 
 export interface StreamEvent {
   kind: StreamEventKind;
+  session_id: string;
   message_id: string;
   turn_id: string;
   role: string; // "user" | "assistant" | "tool"

@@ -5,6 +5,7 @@ import type { Message, StreamEvent } from "../../types";
 function ev(overrides: Partial<StreamEvent> = {}): StreamEvent {
   return {
     kind: "chunk_delta",
+    session_id: "",
     message_id: "m1",
     turn_id: "turn-1",
     role: "",

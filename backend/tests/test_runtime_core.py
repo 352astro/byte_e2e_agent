@@ -84,6 +84,17 @@ def _make_mock_execute_turn_hanging(runtime: AgentRuntime):
     return _mock
 
 
+async def _mock_invoke_execute_turn(
+    entry: SessionEntry,
+    question: str,
+    max_steps: int,
+    shadow_repo=None,
+    **kwargs,
+) -> str:
+    entry.transition_to(SessionStatus.IDLE)
+    return f"SubAgent '{entry.id}' completed task: {question}"
+
+
 # ═══════════════════════════════════════════════════════════
 # Factory helpers
 # ═══════════════════════════════════════════════════════════
@@ -471,7 +482,10 @@ class TestInvokeAgent:
         assert entry is not None
         # Patch the access to allow any agent
         with patch.object(entry.config.access, "can_invoke", return_value=True):
-            result = await runtime.invoke_agent("caller-id", "abc", "do something")
+            with patch.object(
+                runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn
+            ):
+                result = await runtime.invoke_agent("caller-id", "abc", "do something")
             # Should resolve to abcdef123456 and not return an error
             assert "error" not in result.lower()
             assert "abcdef123456" in result
@@ -495,7 +509,12 @@ class TestInvokeAgent:
         entry = runtime.get_session("target-id")
         assert entry is not None
         with patch.object(entry.config.access, "can_invoke", return_value=True):
-            await runtime.invoke_agent("caller-id", "target-id", "do task", max_turns=5)
+            with patch.object(
+                runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn
+            ):
+                await runtime.invoke_agent(
+                    "caller-id", "target-id", "do task", max_turns=5
+                )
 
         hm.on_subagent_start.assert_called_once()
         call_kwargs = hm.on_subagent_start.call_args.kwargs
@@ -516,7 +535,10 @@ class TestInvokeAgent:
 
         # Allow invoke
         with patch.object(target.config.access, "can_invoke", return_value=True):
-            await runtime.invoke_agent("caller-id", "target-id", "do task")
+            with patch.object(
+                runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn
+            ):
+                await runtime.invoke_agent("caller-id", "target-id", "do task")
 
         # After invoke_agent completes, caller should be back to RUNNING
         # (It goes PENDING during the call, RUNNING after)
@@ -543,13 +565,16 @@ class TestInvokeAgent:
         hm.on_subagent_start = slow_hook
 
         with patch.object(target.config.access, "can_invoke", return_value=True):
-            task = asyncio.create_task(
-                runtime.invoke_agent("caller-id", "target-id", "do task")
-            )
-            # Give the task time to start and transition
-            await asyncio.sleep(0.05)
-            blocking.set()
-            await task
+            with patch.object(
+                runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn
+            ):
+                task = asyncio.create_task(
+                    runtime.invoke_agent("caller-id", "target-id", "do task")
+                )
+                # Give the task time to start and transition
+                await asyncio.sleep(0.05)
+                blocking.set()
+                await task
 
         assert SessionStatus.PENDING in observed_status
         assert caller.status == SessionStatus.RUNNING

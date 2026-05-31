@@ -1,17 +1,20 @@
-"""Shell tool backed by a per-call terminal session."""
+"""Shell tool — subprocess execution via PTY with async interrupt support.
+
+Architecture (ported from main):
+  write_command (sync) → read_stream (executor) + timeout (async) + interrupt (async)
+  Three tasks race via asyncio.wait — no polling, no race conditions.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import sys
-import threading
 from pathlib import Path
-from queue import Empty, Queue
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from agent.tools.terminal import PersistentTerminal, TerminalResult
+from agent.tools.terminal import PersistentTerminal
 
 _PLATFORM_MAP = {"linux": "Linux", "darwin": "macOS", "win32": "Windows"}
 
@@ -48,51 +51,139 @@ async def shell_handler(
     timeout_ms: int = 30000,
     *,
     ws,
-    interrupt_event=None,
+    interrupt_event: asyncio.Event | None = None,
 ) -> str:
-    """Execute a shell command in the workspace."""
-    terminal = PersistentTerminal()
-    cwd = str(getattr(ws, "root", Path.cwd()))
-    queue: Queue[TerminalResult | BaseException] = Queue(maxsize=1)
-    interrupted = False
+    """Execute a shell command in the workspace with async interrupt.
 
-    def worker() -> None:
-        try:
-            terminal.start(cwd)
-            queue.put(terminal.run(command, timeout_ms))
-        except BaseException as exc:
-            queue.put(exc)
-        finally:
+    Flow:
+      1. Start terminal + write wrapped command (sync, fast).
+      2. Read output in executor → async chunks into a queue.
+      3. Three async tasks race: chunk reader, timeout timer, interrupt waiter.
+      4. On interrupt/timeout: SIGINT to process group, drain, return.
+      5. Normal exit: collect all output, return with exit code annotation.
+    """
+    loop = asyncio.get_event_loop()
+    cwd = str(getattr(ws, "root", Path.cwd()))
+
+    terminal = PersistentTerminal()
+    terminal.start(cwd)
+
+    # ── Write command synchronously (fast — no I/O wait) ──
+    marker, start_time = terminal.write_command(command)
+
+    # ── Async queue for chunks from the executor thread ──
+    chunk_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def _read_task() -> None:
+        """Read PTY output in an executor thread, feed chunks into async queue."""
+
+        def _run() -> None:
+            try:
+                for chunk in terminal.read_stream(marker, start_time, timeout_ms):
+                    loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
+            finally:
+                loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
+
+        await loop.run_in_executor(None, _run)
+
+    # ── Trigger: fires on timeout OR user interrupt ──
+    trigger = asyncio.Event()
+    timed_out = False
+
+    async def _timeout_task() -> None:
+        nonlocal timed_out
+        await asyncio.sleep(timeout_ms / 1000.0)
+        timed_out = True
+        trigger.set()
+
+    async def _intr_wait_task() -> None:
+        if interrupt_event is None:
+            return  # never triggers
+        await interrupt_event.wait()
+        trigger.set()
+
+    # ── Signal task: on trigger, send SIGINT to foreground process group ──
+    interrupted_flag = asyncio.Event()
+
+    async def _signal_task() -> None:
+        await trigger.wait()
+        terminal.interrupt()
+        interrupted_flag.set()
+
+    read_task = asyncio.create_task(_read_task())
+    timeout_task = asyncio.create_task(_timeout_task())
+    intr_wait_task = asyncio.create_task(_intr_wait_task())
+    signal_task = asyncio.create_task(_signal_task())
+
+    output_parts: list[str] = []
+
+    try:
+        while not interrupted_flag.is_set():
+            chunk_future = asyncio.ensure_future(chunk_queue.get())
+            intr_future = asyncio.ensure_future(interrupted_flag.wait())
+
+            done, _ = await asyncio.wait(
+                [chunk_future, intr_future],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            if chunk_future in done:
+                intr_future.cancel()
+                chunk = chunk_future.result()
+                if chunk is None:
+                    break
+                output_parts.append(chunk)
+            else:
+                chunk_future.cancel()
+
+        # ── Interrupted or timed out: drain remaining chunks ──
+        if interrupted_flag.is_set():
+            while True:
+                try:
+                    chunk = chunk_queue.get_nowait()
+                    if chunk is None:
+                        break
+                    output_parts.append(chunk)
+                except asyncio.QueueEmpty:
+                    break
+
+            if timed_out:
+                output_parts.append(f"\n[Command timed out after {timeout_ms}ms]")
+            else:
+                output_parts.append("\n[Command interrupted]")
+
+            # Terminal may be dirty after interrupt — reset for next command
             terminal.stop()
 
-    thread = threading.Thread(target=worker, daemon=True)
-    thread.start()
-
-    while True:
+    finally:
+        for t in (read_task, timeout_task, intr_wait_task, signal_task):
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(
+            read_task,
+            timeout_task,
+            intr_wait_task,
+            signal_task,
+            return_exceptions=True,
+        )
+        # Ensure terminal is stopped if not already
         try:
-            item = queue.get_nowait()
-            break
-        except Empty:
-            if interrupt_event is not None and interrupt_event.is_set() and not interrupted:
-                interrupted = True
-                terminal.interrupt()
-            await asyncio.sleep(0.05)
+            terminal.stop()
+        except Exception:
+            pass
 
-    thread.join(timeout=1)
-    if isinstance(item, BaseException):
-        return f"Error: {item}"
+    output = "".join(output_parts).strip()
 
-    output = item.output.strip()
-    parts: list[str] = []
-    if output:
-        parts.append(output)
-    if interrupted:
-        parts.append("[Command interrupted]")
-    elif item.exit_code == -1:
-        parts.append(f"[Command timed out after {timeout_ms}ms]")
-    elif item.exit_code != 0:
-        parts.append(f"[exit code: {item.exit_code}]")
-    return "\n".join(parts) if parts else "(no output)"
+    # ── Append exit code for non-zero (normal exit path only) ──
+    if not interrupted_flag.is_set():
+        exit_code = terminal._last_exit_code
+        if exit_code not in (0, -1):
+            if output:
+                output += f"\n[exit code: {exit_code}]"
+            else:
+                output = f"[exit code: {exit_code}]"
+
+    return output if output else "(no output)"
 
 
 shell_tool = StructuredTool.from_function(

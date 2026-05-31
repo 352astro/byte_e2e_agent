@@ -173,7 +173,7 @@ class Project:
         """
         session = self.get_session(session_id)
         driver = self.stream_driver
-        queue = driver.subscribe()
+        queue = driver.subscribe(session_id)
 
         # 获取或创建 SessionEntry
         entry = self.scheduler.get_session(session_id)

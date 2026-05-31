@@ -83,6 +83,7 @@ class StreamEventSchema(BaseModel):
     """SSE event structure — documented for frontend gen, served via SSE not REST."""
 
     kind: StreamEventKind
+    session_id: str = ""
     message_id: str = ""
     turn_id: str = ""
     field: str = ""  # "content" | "reasoning" | "tool_calls"

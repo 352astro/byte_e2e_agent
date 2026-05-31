@@ -154,6 +154,13 @@ class PersistentTerminal:
         yield from self.read_stream(marker, start, timeout_ms)
 
     def interrupt(self) -> None:
+        """Send SIGINT to the foreground process group.
+
+        os.killpg is intentional here: SIGINT must reach both the shell
+        AND the foreground job (e.g. sleep). os.kill would only target
+        the shell process, which may not forward the signal in
+        non-interactive mode, causing the interrupt to silently fail.
+        """
         if not self.alive:
             return
         try:
@@ -161,7 +168,8 @@ class PersistentTerminal:
                 self._write_stdin("\x03")
             else:
                 assert self._proc is not None
-                os.killpg(os.getpgid(self._proc.pid), signal.SIGINT)
+                pgid = os.getpgid(self._proc.pid)
+                os.killpg(pgid, signal.SIGINT)
         except Exception:
             pass
 
@@ -200,16 +208,21 @@ class PersistentTerminal:
             pass
 
     def _recover_after_timeout(self) -> None:
+        """Interrupt the stuck process, drain output, sync terminal.
+
+        Uses os.killpg intentionally — same reason as interrupt().
+        """
         if not self.alive:
             return
         try:
             if sys.platform == "win32":
                 self._write_stdin("\x03")
-                time.sleep(0.2)
+                time.sleep(0.3)
             else:
                 assert self._proc is not None
-                os.killpg(os.getpgid(self._proc.pid), signal.SIGINT)
-                time.sleep(0.2)
+                pgid = os.getpgid(self._proc.pid)
+                os.killpg(pgid, signal.SIGINT)
+                time.sleep(0.3)
                 self._drain_startup()
         except Exception:
             pass

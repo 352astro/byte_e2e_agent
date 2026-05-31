@@ -311,8 +311,14 @@ class Workspace:
 
     @staticmethod
     def _kill_process_group(proc) -> None:
+        """Send SIGKILL to a single subprocess, NOT the process group.
+
+        Uses os.kill instead of os.killpg. killpg is dangerous: if the
+        child exits and its PID gets reused for a process-group-leader
+        (e.g. a shell session), killpg would wipe out that entire group.
+        """
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
+            os.kill(proc.pid, signal.SIGKILL)
         except Exception:
             try:
                 proc.kill()

@@ -184,8 +184,15 @@ async def pyrepl_handler(
 
 
 def _kill_proc(proc) -> None:
+    """Send SIGKILL to the subprocess.
+
+    Uses os.kill (single process), NOT os.killpg (entire process group).
+    killpg is dangerous: if the child process exits and its PID is reused
+    by the kernel for a process-group-leader (e.g. a shell session),
+    killpg would kill that entire group, causing unexpected logout.
+    """
     try:
-        os.killpg(proc.pid, signal.SIGKILL)
+        os.kill(proc.pid, signal.SIGKILL)
     except Exception:
         try:
             proc.kill()

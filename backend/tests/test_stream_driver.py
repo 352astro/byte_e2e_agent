@@ -330,6 +330,44 @@ class TestMultipleSubscribers:
 
 
 # ═══════════════════════════════════════════════════════════
+# Session-scoped subscribers
+# ═══════════════════════════════════════════════════════════
+
+
+class TestSessionScopedSubscribers:
+    @pytest.mark.asyncio
+    async def test_session_subscriber_only_receives_matching_events(self):
+        """Session-scoped subscribers ignore events from other sessions."""
+        driver = StreamDriverHook()
+        parent_q = driver.subscribe("parent")
+        child_q = driver.subscribe("child")
+
+        msg = Message.assistant_message("m1", "t1")
+        await driver.on_message_start(msg=msg, session_id="child")
+
+        assert parent_q.empty()
+        ev = child_q.get_nowait()
+        assert ev is not None
+        assert ev.session_id == "child"
+        assert ev.kind == StreamEventKind.MESSAGE_START
+
+    @pytest.mark.asyncio
+    async def test_turn_end_closes_only_matching_session_subscribers(self):
+        """Child turn completion does not close the parent subscriber."""
+        driver = StreamDriverHook()
+        parent_q = driver.subscribe("parent")
+        child_q = driver.subscribe("child")
+
+        await driver.on_turn_end(turn_id="t1", session_id="child")
+
+        assert parent_q.empty()
+        assert child_q.get_nowait().kind == StreamEventKind.TURN_COMPLETE
+        assert child_q.get_nowait() is None
+        assert parent_q in driver._subscribers
+        assert child_q not in driver._subscribers
+
+
+# ═══════════════════════════════════════════════════════════
 # Dead Subscriber Cleanup
 # ═══════════════════════════════════════════════════════════
 

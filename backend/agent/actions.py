@@ -119,7 +119,10 @@ async def model_call(
             msg.reasoning += _reasoning
             if hook_manager is not None:
                 await hook_manager.on_chunk_delta(
-                    msg=msg, field="reasoning", delta=_reasoning
+                    msg=msg,
+                    field="reasoning",
+                    delta=_reasoning,
+                    session_id=session_id,
                 )
 
         # ── text content ─────────────────────────────
@@ -127,7 +130,10 @@ async def model_call(
             msg.content += _content
             if hook_manager is not None:
                 await hook_manager.on_chunk_delta(
-                    msg=msg, field="content", delta=_content
+                    msg=msg,
+                    field="content",
+                    delta=_content,
+                    session_id=session_id,
                 )
 
         # ── tool calls ───────────────────────────────
@@ -153,6 +159,7 @@ async def model_call(
                         tool_name=msg.tool_calls[idx].function.name,
                         tool_index=idx,
                         sub_field="name",
+                        session_id=session_id,
                     )
 
             if tc_args:
@@ -165,6 +172,7 @@ async def model_call(
                         tool_name=msg.tool_calls[idx].function.name,
                         tool_index=idx,
                         sub_field="args",
+                        session_id=session_id,
                     )
 
         if _finish:
@@ -216,6 +224,7 @@ async def execute_one_tool(
     model_id: str = "",
     session_id: str = "",
     hook_manager: HookManager | None = None,
+    agent_invoker=None,
 ) -> str:
     """执行单个 tool_call。SubAgent / BrowserInspect 原地分发。返回结果字符串。"""
     func_name: str = tc["function"]["name"]
@@ -232,18 +241,25 @@ async def execute_one_tool(
 
     # ── SubAgent / BrowserInspect：原地分发，不调 handler ──
     if tool.name == "SubAgent":
-        result_str = await run_subagent(
-            ws,
-            toolset,
-            prompt=args.get("prompt", ""),
-            max_steps=args.get("max_steps", 5),
-            openai_client=openai_client,
-            model_id=model_id,
-            session_id=session_id,
-            interrupt_event=interrupt_event,
-            with_skills=args.get("with_skills", []),
-            hook_manager=hook_manager,
-        )
+        if agent_invoker is not None:
+            result_str = await agent_invoker(
+                prompt=args.get("prompt", ""),
+                max_steps=args.get("max_steps", 5),
+                with_skills=args.get("with_skills", []),
+            )
+        else:
+            result_str = await run_subagent(
+                ws,
+                toolset,
+                prompt=args.get("prompt", ""),
+                max_steps=args.get("max_steps", 5),
+                openai_client=openai_client,
+                model_id=model_id,
+                session_id=session_id,
+                interrupt_event=interrupt_event,
+                with_skills=args.get("with_skills", []),
+                hook_manager=hook_manager,
+            )
     elif tool.name == "BrowserInspect":
         browser_toolset = ToolSet(tool_registry, "BrowserOpen", "BrowserAct")
         result_str = await run_subagent(
@@ -405,6 +421,7 @@ async def run_subagent(
                 interrupt_event=interrupt_event,
                 openai_client=openai_client,
                 model_id=model_id,
+                session_id=session_id,
                 hook_manager=hook_manager,
             )
             subagent_messages.append(

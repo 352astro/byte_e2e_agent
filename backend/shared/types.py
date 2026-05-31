@@ -182,6 +182,7 @@ class StreamEvent(BaseModel):
     """
 
     kind: StreamEventKind
+    session_id: str = ""
     message_id: str = ""
     turn_id: str = ""
 
@@ -211,10 +212,15 @@ class StreamEvent(BaseModel):
 
     @classmethod
     def message_start(
-        cls, turn_id: str, message_id: str, role: str = "assistant"
+        cls,
+        turn_id: str,
+        message_id: str,
+        role: str = "assistant",
+        session_id: str = "",
     ) -> "StreamEvent":
         return cls(
             kind=StreamEventKind.MESSAGE_START,
+            session_id=session_id,
             message_id=message_id,
             turn_id=turn_id,
             role=role,
@@ -229,9 +235,11 @@ class StreamEvent(BaseModel):
         tool_name: str = "",
         tool_index: int = -1,
         sub_field: str = "",
+        session_id: str = "",
     ) -> "StreamEvent":
         return cls(
             kind=StreamEventKind.CHUNK_DELTA,
+            session_id=session_id,
             message_id=message_id,
             field=field,
             delta=delta,
@@ -249,9 +257,11 @@ class StreamEvent(BaseModel):
         tool_name: str = "",
         tool_args: str = "",
         is_error: bool = False,
+        session_id: str = "",
     ) -> "StreamEvent":
         return cls(
             kind=StreamEventKind.CHUNK_COMPLETE,
+            session_id=session_id,
             message_id=message_id,
             field=field,
             full_content=full_content,
@@ -261,9 +271,10 @@ class StreamEvent(BaseModel):
         )
 
     @classmethod
-    def message_finish(cls, message_id: str) -> "StreamEvent":
+    def message_finish(cls, message_id: str, session_id: str = "") -> "StreamEvent":
         return cls(
             kind=StreamEventKind.MESSAGE_FINISH,
+            session_id=session_id,
             message_id=message_id,
         )
 
@@ -273,18 +284,21 @@ class StreamEvent(BaseModel):
         turn_id: str,
         input_tokens: int = 0,
         output_tokens: int = 0,
+        session_id: str = "",
     ) -> "StreamEvent":
         return cls(
             kind=StreamEventKind.TURN_COMPLETE,
+            session_id=session_id,
             turn_id=turn_id,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
 
     @classmethod
-    def interrupted(cls, reason: str) -> "StreamEvent":
+    def interrupted(cls, reason: str, session_id: str = "") -> "StreamEvent":
         return cls(
             kind=StreamEventKind.INTERRUPTED,
+            session_id=session_id,
             reason=reason,
         )
 

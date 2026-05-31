@@ -26,7 +26,7 @@ def _sse_event_line(event) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _message_replay_events(msg: dict):
+def _message_replay_events(msg: dict, session_id: str = ""):
     """将已完成 Message dict 转换为 StreamEvent 序列（用于 SSE 回放）。"""
     msg_id = msg.get("id", "")
     turn_id = msg.get("turn_id", "")
@@ -35,6 +35,7 @@ def _message_replay_events(msg: dict):
     # 1) message_start
     yield StreamEvent(
         kind=StreamEventKind.MESSAGE_START,
+        session_id=session_id,
         message_id=msg_id,
         turn_id=turn_id,
         role=role,
@@ -43,14 +44,20 @@ def _message_replay_events(msg: dict):
     # 2) content
     content = msg.get("content", "")
     if content:
-        yield StreamEvent.chunk_delta(msg_id, "content", content)
-        yield StreamEvent.chunk_complete(msg_id, "content", content)
+        yield StreamEvent.chunk_delta(msg_id, "content", content, session_id=session_id)
+        yield StreamEvent.chunk_complete(
+            msg_id, "content", content, session_id=session_id
+        )
 
     # 3) reasoning
     reasoning = msg.get("reasoning", "")
     if reasoning:
-        yield StreamEvent.chunk_delta(msg_id, "reasoning", reasoning)
-        yield StreamEvent.chunk_complete(msg_id, "reasoning", reasoning)
+        yield StreamEvent.chunk_delta(
+            msg_id, "reasoning", reasoning, session_id=session_id
+        )
+        yield StreamEvent.chunk_complete(
+            msg_id, "reasoning", reasoning, session_id=session_id
+        )
 
     # 4) tool_calls
     for i, tc in enumerate(msg.get("tool_calls", []) or []):
@@ -59,31 +66,50 @@ def _message_replay_events(msg: dict):
         args = fn.get("arguments", "")
         if name:
             yield StreamEvent.chunk_delta(
-                msg_id, "tool_calls", name,
-                tool_name=name, tool_index=i, sub_field="name",
+                msg_id,
+                "tool_calls",
+                name,
+                tool_name=name,
+                tool_index=i,
+                sub_field="name",
+                session_id=session_id,
             )
         if args:
             yield StreamEvent.chunk_delta(
-                msg_id, "tool_calls", args,
-                tool_name=name, tool_index=i, sub_field="args",
+                msg_id,
+                "tool_calls",
+                args,
+                tool_name=name,
+                tool_index=i,
+                sub_field="args",
+                session_id=session_id,
             )
         yield StreamEvent.chunk_complete(
-            msg_id, "tool_calls", args,
-            tool_name=name, tool_args=args,
+            msg_id,
+            "tool_calls",
+            args,
+            tool_name=name,
+            tool_args=args,
+            session_id=session_id,
         )
 
     # 5) tool_result
     tool_result = msg.get("tool_result", "")
     if tool_result:
-        yield StreamEvent.chunk_delta(msg_id, "tool_result", tool_result)
+        yield StreamEvent.chunk_delta(
+            msg_id, "tool_result", tool_result, session_id=session_id
+        )
         yield StreamEvent.chunk_complete(
-            msg_id, "tool_result", tool_result,
+            msg_id,
+            "tool_result",
+            tool_result,
             tool_name=msg.get("tool_name", ""),
             is_error=bool(msg.get("error", "")),
+            session_id=session_id,
         )
 
     # 6) message_finish
-    yield StreamEvent.message_finish(msg_id)
+    yield StreamEvent.message_finish(msg_id, session_id=session_id)
 
 
 @router.post("/chat")
@@ -134,13 +160,13 @@ async def stream_events(sid: str, project: Project = Depends(get_project)):
     async def event_generator():
         # 回放已完成的历史消息（StreamEvent 格式）
         for msg in session.get_messages():
-            for ev in _message_replay_events(msg):
+            for ev in _message_replay_events(msg, sid):
                 yield _sse_event_line(ev)
 
         if driver is None:
             return
 
-        q = driver.subscribe()
+        q = driver.subscribe(sid)
         try:
             # 直播事件
             while True:

@@ -174,7 +174,7 @@ export default function useAgentStream({
   const truncateMessages = useCallback(
     (truncateTid: string, keep = false) => {
       if (!sessionId || !truncateTid) return;
-        setCompleted((prev) => {
+      setCompleted((prev) => {
         const idx = prev.findIndex((m) => m.id === truncateTid);
         if (idx < 0) return prev;
         const cutoff = keep ? idx + 1 : idx;
@@ -193,84 +193,86 @@ export default function useAgentStream({
   //  dispatchStreamEvent (with gen gate)
   // ═══════════════════════════════════════════════════
 
-  const dispatchStreamEvent = useCallback((ev: StreamEvent, gen: number) => {
-    switch (ev.kind) {
-      case "message_start": {
-        if (genRef.current !== gen) return;
-        setActive((prev) => {
-          if (completedIdsRef.current.has(ev.message_id)) return prev;
-          if (prev?.id === ev.message_id) return prev;
-          if (prev) appendCompleted(prev);
-          return emptyMessage(ev.message_id, ev.turn_id, ev.role);
-        });
-        break;
-      }
+  const dispatchStreamEvent = useCallback(
+    (ev: StreamEvent, gen: number) => {
+      switch (ev.kind) {
+        case "message_start": {
+          if (genRef.current !== gen) return;
+          setActive((prev) => {
+            if (completedIdsRef.current.has(ev.message_id)) return prev;
+            if (prev?.id === ev.message_id) return prev;
+            if (prev) appendCompleted(prev);
+            return emptyMessage(ev.message_id, ev.turn_id, ev.role);
+          });
+          break;
+        }
 
-      case "chunk_delta": {
-        if (genRef.current !== gen) return;
-        const { field, delta, tool_index, sub_field } = ev;
-        setActive((prev) => {
-          if (!prev || prev.id !== ev.message_id) return prev;
+        case "chunk_delta": {
+          if (genRef.current !== gen) return;
+          const { field, delta, tool_index, sub_field } = ev;
+          setActive((prev) => {
+            if (!prev || prev.id !== ev.message_id) return prev;
 
-          if (field === "tool_calls") {
-            const idx = tool_index >= 0 ? tool_index : 0;
-            const tcs = [...(prev.tool_calls || [])];
-            while (tcs.length <= idx) tcs.push(emptyTC() as any);
-            const srcFn = tcs[idx].function || { name: "", arguments: "" };
-            const fn: { name: string; arguments: string } = {
-              name: srcFn.name || "",
-              arguments: srcFn.arguments || "",
-            };
-            if (sub_field === "name") {
-              fn.name += delta;
-            } else if (sub_field === "args") {
-              fn.arguments += delta;
+            if (field === "tool_calls") {
+              const idx = tool_index >= 0 ? tool_index : 0;
+              const tcs = [...(prev.tool_calls || [])];
+              while (tcs.length <= idx) tcs.push(emptyTC() as any);
+              const srcFn = tcs[idx].function || { name: "", arguments: "" };
+              const fn: { name: string; arguments: string } = {
+                name: srcFn.name || "",
+                arguments: srcFn.arguments || "",
+              };
+              if (sub_field === "name") {
+                fn.name += delta;
+              } else if (sub_field === "args") {
+                fn.arguments += delta;
+              }
+              tcs[idx] = { ...tcs[idx], function: fn };
+              return { ...prev, tool_calls: tcs };
             }
-            tcs[idx] = { ...tcs[idx], function: fn };
-            return { ...prev, tool_calls: tcs };
-          }
 
-          return { ...prev, [field]: (prev as any)[field] + delta };
-        });
-        break;
-      }
+            return { ...prev, [field]: (prev as any)[field] + delta };
+          });
+          break;
+        }
 
-      case "chunk_complete": {
-        if (genRef.current !== gen) return;
-        const { field, full_content } = ev;
-        if (field === "tool_calls") break;
-        setActive((prev) => {
-          if (!prev || prev.id !== ev.message_id) return prev;
-          return { ...prev, [field]: full_content };
-        });
-        break;
-      }
+        case "chunk_complete": {
+          if (genRef.current !== gen) return;
+          const { field, full_content } = ev;
+          if (field === "tool_calls") break;
+          setActive((prev) => {
+            if (!prev || prev.id !== ev.message_id) return prev;
+            return { ...prev, [field]: full_content };
+          });
+          break;
+        }
 
-      case "message_finish": {
-        if (genRef.current !== gen) return;
-        setActive((prev) => {
-          if (!prev || prev.id !== ev.message_id) return prev;
-          const done = { ...prev, status: "complete" as const };
-          appendCompleted(done);
-          lastIdRef.current = ev.message_id;
-          return null;
-        });
-        break;
-      }
+        case "message_finish": {
+          if (genRef.current !== gen) return;
+          setActive((prev) => {
+            if (!prev || prev.id !== ev.message_id) return prev;
+            const done = { ...prev, status: "complete" as const };
+            appendCompleted(done);
+            lastIdRef.current = ev.message_id;
+            return null;
+          });
+          break;
+        }
 
-      case "turn_complete":
-      case "interrupted": {
-        if (genRef.current !== gen) return;
-        setActive((prev) => {
-          if (prev)
-            appendCompleted({ ...prev, status: "complete" as const });
-          return null;
-        });
-        setRunning(false);
-        break;
+        case "turn_complete":
+        case "interrupted": {
+          if (genRef.current !== gen) return;
+          setActive((prev) => {
+            if (prev) appendCompleted({ ...prev, status: "complete" as const });
+            return null;
+          });
+          setRunning(false);
+          break;
+        }
       }
-    }
-  }, [appendCompleted]);
+    },
+    [appendCompleted],
+  );
 
   // ═══════════════════════════════════════════════════
   //  readSSEStream (shared by send + auto-reconnect)
@@ -336,15 +338,19 @@ export default function useAgentStream({
 
   const interrupt = useCallback(async (): Promise<void> => {
     if (!sessionId || !runningRef.current) return;
-    if (opGuardRef.current) return;
-    opGuardRef.current = true;
+    // NOTE: intentionally NOT checking opGuardRef here.
+    // send() holds opGuardRef while blocked on readSSEStream (e.g.
+    // during a long-running tool like sleep). If interrupt were gated
+    // by opGuardRef, the Stop button silently does nothing.
+    // Instead we always allow interrupt — it aborts the SSE stream
+    // first (via abortRef), causing send() to unwind and release the lock.
     const gen = bumpGen();
     setInterrupting(true);
     try {
       await interruptInternal(sessionId);
       await reloadMessagesInternal(sessionId, gen);
     } finally {
-      opGuardRef.current = false;
+      // No opGuardRef clearing here — interrupt is lock-free by design
     }
   }, [sessionId, interruptInternal, reloadMessagesInternal]);
 

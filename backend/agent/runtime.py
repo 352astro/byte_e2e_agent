@@ -19,9 +19,8 @@ import uuid as _uuid
 from agent.actions import (
     execute_one_tool,
     model_call,
-    run_subagent,
 )
-from agent.core.config import SessionConfig
+from agent.core.config import SessionConfig, ToolSetPreset
 from agent.core.prompts import SYSTEM_PROMPT
 from agent.core.workspace import Workspace
 from agent.errors import InterruptedError
@@ -30,6 +29,7 @@ from agent.session.status import RuntimeStatus, SessionStatus
 from agent.tools.shell import get_platform_hint
 from agent.tools.skill import skill_context_message
 from agent.tools.task import task_context_message
+from agent.tools import tool_registry
 from agent.tools.toolset import ToolSet
 from app.core.config import TMP_DIR
 from shared.hooks import BaseHook, HookManager
@@ -273,20 +273,81 @@ class AgentRuntime:
         if caller_entry:
             caller_entry.transition_to(SessionStatus.PENDING)
 
+        created_interrupt_event = False
+        if self._interrupt_event is None:
+            self._interrupt_event = asyncio.Event()
+            created_interrupt_event = True
+        previous_running = self._running_session_id
         try:
             await self._hooks.on_subagent_start(
                 task=task,
                 parent_session_id=caller_id,
                 max_steps=max_turns or 10,
             )
-            # 简化实现：在当前 runtime 中执行目标 session
-            # TODO(Phase 4): 完整实现 session 切换和 PENDING 恢复
-            result = f"SubAgent '{resolved}' completed task: {task}"
+            self._running_session_id = target.id
+            target.transition_to(SessionStatus.RUNNING)
+            result = await self._execute_turn(
+                target,
+                task,
+                max_turns or 10,
+                top_level=False,
+            )
+            self._running_session_id = previous_running
             await self._hooks.on_subagent_end(result=result)
             return result
         finally:
+            self._running_session_id = previous_running
+            if created_interrupt_event:
+                self._interrupt_event = None
+            if target.status == SessionStatus.RUNNING:
+                target.transition_to(SessionStatus.IDLE)
             if caller_entry:
                 caller_entry.transition_to(SessionStatus.RUNNING)
+
+    async def invoke_subagent(
+        self,
+        caller_id: str,
+        task: str,
+        *,
+        max_steps: int = 5,
+        with_skills: list[str] | None = None,
+    ) -> str:
+        """Create an ephemeral child session and invoke it from caller_id."""
+        openai_client, model_id = self._get_llm()
+        child_id = f"{caller_id}-sub-{_uuid.uuid4().hex[:8]}"
+        preamble = _build_subagent_preamble(with_skills or [])
+        child_tools = [
+            name
+            for name in ToolSetPreset.ALL.tool_names()
+            if name not in {"SubAgent", "BrowserInspect", "TaskList", "TaskRewrite"}
+        ]
+        config = SessionConfig(
+            name=f"subagent:{caller_id}",
+            model_id=model_id,
+            preamble=preamble,
+            tool_set_preset=ToolSetPreset.CUSTOM,
+            custom_tools=child_tools,
+            rules=[task],
+            access=SessionConfig.subagent(
+                parent_id=caller_id,
+                name=f"subagent:{caller_id}",
+                task=task,
+                model_id=model_id,
+            ).access,
+        )
+        self.create_session(
+            config,
+            session_id=child_id,
+            llm_client=openai_client,
+            ws=Workspace(str(self._workspace.root)),
+        )
+        result = await self.invoke_agent(
+            caller_id,
+            child_id,
+            task,
+            max_turns=max_steps,
+        )
+        return f"SubAgent session {child_id} completed.\n\n{result}"
 
     async def resolve(self, message_id: str, response: dict) -> None:
         """解决待处理的权限请求。"""
@@ -323,18 +384,22 @@ class AgentRuntime:
         question: str,
         max_steps: int,
         shadow_repo=None,
-    ) -> None:
+        *,
+        top_level: bool = True,
+    ) -> str:
         """主循环 — 拥有 messages 和 errors 的完整所有权。
 
         对标 Rust AgentRuntime::execute_turn()。
         """
-        openai_client, model_id = self._get_llm()
+        openai_client, default_model_id = self._get_llm()
+        model_id = entry.config.model_id or default_model_id
         sid = entry.id
         ws = entry.ws
         intr = self._interrupt_event
         assert intr is not None
 
         turn_id = _uuid.uuid4().hex
+        final_answer = ""
 
         # ── on_turn_start ──────────────────────────────
         await self._hooks.on_turn_start(
@@ -384,6 +449,18 @@ class AgentRuntime:
                     skill_context_message(),
                     task_context_message(ws, session_id=sid),
                 ]
+                if entry.config.preamble:
+                    messages.append(
+                        {"role": "system", "content": entry.config.preamble}
+                    )
+                if entry.config.rules:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": "## Session Rules\n"
+                            + "\n".join(f"- {rule}" for rule in entry.config.rules),
+                        }
+                    )
                 # 附加 Session 中的 LLM 上下文
                 from agent.session import load_session
 
@@ -391,7 +468,12 @@ class AgentRuntime:
                 messages.extend(session.get_llm_context())
 
                 assistant_id = _uuid.uuid4().hex
-                toolset = _default_toolset()
+                tool_names = entry.config.tool_names()
+                toolset = (
+                    ToolSet(tool_registry, *tool_names)
+                    if tool_names
+                    else _default_toolset()
+                )
 
                 # ── model_call ─────────────────────────
                 # model_call 内部已处理 on_message_start / on_message_finish
@@ -412,6 +494,8 @@ class AgentRuntime:
                 self._streaming_holder = None
 
                 has_tool_calls = assistant_msg.has_tool_calls
+                if assistant_msg.content:
+                    final_answer = assistant_msg.content
 
                 # ── 累计 token ──────────────────────────
                 usage = _extract_usage(assistant_msg)
@@ -447,6 +531,7 @@ class AgentRuntime:
                         full_content=func_args_str,
                         tool_name=func_name,
                         tool_args=func_args_str,
+                        session_id=sid,
                     )
 
                     # 执行
@@ -456,6 +541,17 @@ class AgentRuntime:
                         "id": tool_call_id,
                         "function": {"name": func_name, "arguments": func_args_str},
                     }
+
+                    async def invoke_child_agent(
+                        prompt, max_steps=5, with_skills=None
+                    ):
+                        return await self.invoke_subagent(
+                            sid,
+                            prompt,
+                            max_steps=max_steps,
+                            with_skills=with_skills,
+                        )
+
                     try:
                         tool_output = await execute_one_tool(
                             tc_dict,
@@ -464,7 +560,9 @@ class AgentRuntime:
                             interrupt_event=intr,
                             openai_client=openai_client,
                             model_id=model_id,
+                            session_id=sid,
                             hook_manager=self._hooks,
+                            agent_invoker=invoke_child_agent,
                         )
                     except InterruptedError:
                         raise
@@ -486,6 +584,7 @@ class AgentRuntime:
                         full_content=tool_output,
                         tool_name=func_name,
                         is_error=tool_error is not None,
+                        session_id=sid,
                     )
                     await self._hooks.on_message_finish(
                         msg=tool_result_msg, session_id=sid
@@ -504,6 +603,7 @@ class AgentRuntime:
             )
             await self._hooks.on_message_start(msg=error_msg_obj, session_id=sid)
             await self._hooks.on_message_finish(msg=error_msg_obj, session_id=sid)
+            final_answer = error_msg_obj.error
         except Exception as exc:
             import traceback
 
@@ -512,6 +612,7 @@ class AgentRuntime:
             error_msg_obj = Message.error_message(error_id, turn_id, str(exc))
             await self._hooks.on_message_start(msg=error_msg_obj, session_id=sid)
             await self._hooks.on_message_finish(msg=error_msg_obj, session_id=sid)
+            final_answer = error_msg_obj.error
         finally:
             # ── on_turn_end ───────────────────────────
             await self._hooks.on_turn_end(
@@ -524,9 +625,11 @@ class AgentRuntime:
 
             # 清理
             self._streaming_holder = None
-            self._running_session_id = None
-            self._loop_task = None
+            if top_level:
+                self._running_session_id = None
+                self._loop_task = None
             entry.transition_to(SessionStatus.IDLE)
+        return final_answer or "SubAgent completed (no output)."
 
     # ── 内部辅助 ────────────────────────────────────────
 
@@ -580,3 +683,29 @@ def _extract_usage(msg: Message | None) -> dict:
     if msg.content:
         result["completion_tokens"] = len(msg.content) // 4
     return result
+
+
+def _build_subagent_preamble(with_skills: list[str]) -> str:
+    parts = [
+        (
+            "You are a sub-agent. Complete the assigned task and return a final "
+            "answer. You have an independent session and do not inherit the "
+            "parent conversation; rely only on the task and your own tool results."
+        )
+    ]
+    if not with_skills:
+        return "\n\n".join(parts)
+
+    from agent.tools.skill import get_skill
+
+    for skill_name in with_skills:
+        skill = get_skill(skill_name)
+        if skill is None:
+            continue
+        parts.append(
+            f"[SKILL: {skill_name}]\n\n"
+            "The following skill methodology is pre-loaded into your context. "
+            "Follow it exactly.\n\n"
+            f"{skill.read()}"
+        )
+    return "\n\n".join(parts)
