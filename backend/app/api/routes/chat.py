@@ -6,6 +6,7 @@ from app.api.sse import sse_line, sse_response, yield_transcripts_as_flush
 from app.dependencies import get_chat_service
 from app.schemas.chat import ChatRequest, RespondRequest
 from app.services.chat_service import ChatService
+from app.services.errors import AgentBusy, PendingRequestNotFound, SessionNotFound
 
 router = APIRouter(prefix="/api/session/{sid}")
 
@@ -23,9 +24,9 @@ async def chat(
     """
     try:
         stream = chat_service.start_chat(sid, req.question, req.max_steps)
-    except KeyError:
+    except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
-    except RuntimeError as exc:
+    except AgentBusy as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
     q = stream.queue
@@ -53,7 +54,7 @@ async def stream_events(
     """SSE for reconnection. Subscribe-first, then catch-up, then live."""
     try:
         stream = chat_service.get_stream(sid)
-    except KeyError:
+    except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
 
     session = stream.session
@@ -101,6 +102,6 @@ async def respond(
 ):
     try:
         chat_service.respond_to_pending(req.transcript_id, req.response)
-    except KeyError as exc:
+    except PendingRequestNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"ok": True}

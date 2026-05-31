@@ -22,11 +22,7 @@ from dulwich.ignore import IgnoreFilter, IgnoreFilterManager, get_xdg_config_hom
 from dulwich.index import Index, IndexEntry
 from dulwich.objects import Blob, Commit, Tree
 from dulwich.repo import Repo
-from dulwich.walk import Walker
-
-from agent.config import DEFAULT_TMP_DIR as TMP_DIR
-
-# ── helpers ──────────────────────────────────────────────
+from agent.paths import shadow_repo_dir, TMP_DIR
 
 
 def _ensure_dir(p: str) -> None:
@@ -65,9 +61,9 @@ class ShadowRepo:
         return f"refs/heads/{session_id}".encode()
     MAP_FILE = "transcript_map.json"
 
-    def __init__(self, workdir: str, repodir: str) -> None:
+    def __init__(self, workdir: str) -> None:
         self._workdir = os.path.abspath(workdir)
-        self._repodir = os.path.abspath(repodir)
+        self._repodir = os.path.abspath(str(shadow_repo_dir(workdir)))
 
         # ── open or init bare repo ──────────────────────
         _ensure_dir(self._repodir)

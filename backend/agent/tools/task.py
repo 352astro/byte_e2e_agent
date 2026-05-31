@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from agent.tools.base import BaseTool
-from agent.config import DEFAULT_TMP_DIR as TMP_DIR
+from agent.paths import TMP_DIR
 
 TaskStatus = Literal["pending", "progress", "done"]
 

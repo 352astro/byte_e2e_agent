@@ -382,17 +382,39 @@ Agent 层关键约束（Phase 3 已完成）：
 
 ---
 
-## 11. 单 Scheduler 并发模型
+## 11. 单 Scheduler 并发模型（Phase 4）
 
 当前设计：**一个 WorkspaceContext = 一个 Scheduler = 同一时刻只运行一个 Session**。
 
 ```text
 Session A: POST /chat  → scheduler.state = "running"  ✓
-Session B: POST /chat  → RuntimeError → HTTP 409      ✗
-Session B: GET /status → {"running": false}            ✓（不误报 A 的状态）
+Session B: POST /chat  → ChatService 抛 AgentBusy → HTTP 409  ✗
+Session B: GET /status → {"running": false}                    ✓（不误报 A 的状态）
 ```
 
-Phase 4 计划：如需多人并发，引入 `SchedulerManager` 按 workspace / session 隔离。
+**领域异常**（`app/services/errors.py`）：
+
+| 异常 | HTTP | 场景 |
+|---|---|---|
+| `AgentBusy` | 409 | 第二个 chat 并发、运行中切换 workspace |
+| `SessionNotFound` | 404 | session 不存在 |
+| `PendingRequestNotFound` | 404 | respond 无 pending |
+
+前端 `useAgentStream` 已在 409 时显示「系统正在繁忙，请稍后再试」。
+
+**Agent 存储**（`agent/paths.py`，固定 `TMP_DIR = ".tmp"`）：
+
+- 后端只传 `workspace`，session 目录、列举、初始化均由 agent 路径模块负责
+- 启动与 `create_session` 时 `ensure_agent_storage(workspace)` 探测可写
+- 切换 workspace 时若 scheduler 非 idle → `AgentBusy`
+
+```text
+backend 只给 workspace
+  → agent/paths.py 拼 {workspace}/.tmp/{session_id}/...
+  → SessionService 调用 list_sessions / init_session_storage（agent 侧）
+```
+
+后续如需多人并发，可引入 `SchedulerManager`（未在本轮实现）。
 
 ---
 
@@ -409,6 +431,10 @@ uv run pytest tests/test_api_http.py -v -m integration
 
 Service 层可独立单测：mock `WorkspaceContext`，无需启动 FastAPI。
 
+```bash
+uv run pytest tests/test_chat_service.py -v
+```
+
 ---
 
 ## 13. 演进路线（解耦 Phase 进度）
@@ -419,4 +445,4 @@ Service 层可独立单测：mock `WorkspaceContext`，无需启动 FastAPI。
 | Phase 1 | Router 变薄，业务下沉 Service | ✅ |
 | Phase 2 | 拆分 5 个 Service + WorkspaceContext | ✅ |
 | Phase 3 | Agent 基础服务化，移除反向依赖 | ✅ |
-| Phase 4 | 并发增强，SchedulerManager | 待开始 |
+| Phase 4 | 并发增强、AgentBusy、存储边界检查 | ✅ |

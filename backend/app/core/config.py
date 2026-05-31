@@ -5,17 +5,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from agent.paths import TMP_DIR
+
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = BACKEND_DIR.parent
 
 load_dotenv(BACKEND_DIR / ".env")
 load_dotenv()
-
-from agent.config import DEFAULT_TMP_DIR
-
-# Central constant for the project's temporary / cache directory.
-# All session data, shadow VCS, metrics DB, etc. live under this directory.
-TMP_DIR = DEFAULT_TMP_DIR
 
 DEFAULT_LLM_METRICS_DB_PATH = f"{TMP_DIR}/ai_metrics.sqlite3"
 

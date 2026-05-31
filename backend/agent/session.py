@@ -9,18 +9,16 @@
 from __future__ import annotations
 
 import json
-import re
 import uuid as _uuid
 from collections.abc import Callable
 from pathlib import Path
 
 from agent.llm import HelloAgentsLLM
+from agent.paths import messages_path as _messages_path
 from agent.sandbox import Sandbox
 from agent.tools.toolset import ToolSet
 from agent.transcript import Transcript, TranscriptKind
-from agent.config import DEFAULT_TMP_DIR as TMP_DIR
 
-_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 MessageConverter = Callable[[Transcript], dict | None]
 _LEGACY_ROLE_TO_KIND: dict[str, TranscriptKind] = {
     "user": "user_question",
@@ -115,7 +113,9 @@ class Session:
         )
         if persist:
             _rewrite_messages_file(
-                self._sandbox.workspace, self.session_id, transcripts
+                self._sandbox.workspace,
+                self.session_id,
+                transcripts,
             )
 
     def truncate_transcripts_by_tid(self, tid: str, keep: bool = False) -> int:
@@ -235,11 +235,11 @@ def load_session(
         session_id=session_id,
     )
 
-    messages_path = _messages_path(workspace, session_id)
-    if not messages_path.exists():
+    messages_path_obj = _messages_path(workspace, session_id)
+    if not messages_path_obj.exists():
         return session
 
-    raw = _load_transcripts(messages_path)
+    raw = _load_transcripts(messages_path_obj)
     cleaned = _merge_commit_attachments(_normalize_transcript_order(raw))
     session.replace_transcripts(cleaned, persist=True)
     # Repair any unpaired tool_calls from interrupted sessions
@@ -337,9 +337,9 @@ def _rewrite_messages_file(
     transcripts: list[Transcript],
 ) -> None:
     """Rewrite the entire JSONL file with the given transcripts."""
-    messages_path = _messages_path(workspace, session_id)
-    messages_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(messages_path, "w", encoding="utf-8") as fh:
+    path = _messages_path(workspace, session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
         for t in transcripts:
             record = {"kind": t.kind, "uuid": t.id, "message": t.message}
             if t.commit_sha:
@@ -356,12 +356,12 @@ def _save_transcript_sync(
     message: dict,
     commit_sha: str = "",
 ) -> None:
-    messages_path = _messages_path(workspace, session_id)
-    messages_path.parent.mkdir(parents=True, exist_ok=True)
+    path = _messages_path(workspace, session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
     record = {"kind": kind, "uuid": transcript_uuid, "message": message}
     if commit_sha:
         record["commit_sha"] = commit_sha
-    with open(messages_path, "a", encoding="utf-8") as fh:
+    with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
         fh.write("\n")
 
@@ -568,22 +568,3 @@ def drop_trailing_unpaired_tool_calls(messages: list[dict]) -> list[dict]:
         break
 
     return messages[:cutoff]
-
-
-# ============================================================
-# Filesystem helpers
-# ============================================================
-
-
-def _messages_path(workspace: str | Path, session_id: str) -> Path:
-    return _session_dir(workspace, session_id) / "messages.jsonl"
-
-
-def _session_dir(workspace: str | Path, session_id: str) -> Path:
-    _validate_session_id(session_id)
-    return Path(workspace).expanduser().resolve() / TMP_DIR / session_id
-
-
-def _validate_session_id(session_id: str) -> None:
-    if not _SESSION_ID_RE.fullmatch(session_id):
-        raise ValueError(f"Invalid session_id: {session_id!r}")

@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import shutil
 import uuid
-from pathlib import Path
 from typing import Any
 
+from agent.paths import init_session_storage, list_sessions as agent_list_sessions
 from agent.session import clear, get_history
-from app.core.config import TMP_DIR
 from app.services.context import WorkspaceContext
 
 
@@ -17,31 +16,17 @@ class SessionService:
         self._ctx = ctx
 
     def create_session(self) -> dict[str, Any]:
+        self._ctx.ensure_storage_ready()
         session_id = uuid.uuid4().hex[:12]
-        messages_path = self._ctx._messages_path(session_id)
-        messages_path.parent.mkdir(parents=True, exist_ok=True)
-        messages_path.touch()
+        init_session_storage(self._ctx.workspace, session_id)
         self._ctx.put_session(session_id, self._ctx._build_session(session_id))
         return {"session_id": session_id, "workspace": self._ctx.workspace}
 
     def list_sessions(self) -> list[dict[str, Any]]:
-        tmp_dir = Path(self._ctx.workspace) / TMP_DIR
-        if not tmp_dir.is_dir():
-            return []
-        result: list[tuple[float, dict[str, Any]]] = []
-        for entry in tmp_dir.iterdir():
-            if not entry.is_dir() or not self._ctx._valid_id(entry.name):
-                continue
-            if not (entry / "messages.jsonl").is_file():
-                continue
-            result.append(
-                (
-                    (entry / "messages.jsonl").stat().st_mtime,
-                    {"session_id": entry.name, "workspace": self._ctx.workspace},
-                )
-            )
-        result.sort(key=lambda item: item[0], reverse=True)
-        return [info for _, info in result]
+        return [
+            {**info, "workspace": self._ctx.workspace}
+            for info in agent_list_sessions(self._ctx.workspace)
+        ]
 
     def get_info(self, session_id: str) -> dict[str, Any]:
         return self._ctx.get_info(session_id)
@@ -57,9 +42,9 @@ class SessionService:
             self._ctx.shadow_repo.delete_branch(session_id)
         except Exception:
             pass
-        session_dir = self._ctx._session_dir(session_id)
-        if session_dir.is_dir():
-            shutil.rmtree(session_dir)
+        session_dir_path = self._ctx.session_dir(session_id)
+        if session_dir_path.is_dir():
+            shutil.rmtree(session_dir_path)
 
     def get_session_status(self, session_id: str) -> dict:
         self._ctx.get_session(session_id)

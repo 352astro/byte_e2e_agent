@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
 from agent.llm import HelloAgentsLLM
 from agent.metrics import SQLiteLLMMetricsStore
+from agent.paths import ensure_agent_storage, messages_path, session_dir
 from agent.sandbox import Sandbox
 from agent.scheduler import Scheduler
 from agent.session import Session, load_session
 from agent.shadow_repo import ShadowRepo
-from app.core.config import TMP_DIR
-
-_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+from app.services.errors import AgentBusy
 
 
 class WorkspaceContext:
@@ -31,6 +29,13 @@ class WorkspaceContext:
             metrics_path = Path(self._workspace) / metrics_path
         self.metrics_store = SQLiteLLMMetricsStore(metrics_path)
         self._shadow_repo: ShadowRepo | None = None
+        self.ensure_storage_ready()
+
+    def ensure_storage_ready(self) -> None:
+        ensure_agent_storage(self._workspace)
+        metrics_parent = self.metrics_store.db_path.parent
+        metrics_parent.mkdir(parents=True, exist_ok=True)
+        _probe_writable(metrics_parent, "Metrics storage")
 
     @property
     def workspace(self) -> str:
@@ -55,11 +60,14 @@ class WorkspaceContext:
     @property
     def shadow_repo(self) -> ShadowRepo:
         if self._shadow_repo is None:
-            repodir = str(Path(self._workspace) / TMP_DIR / ".shadow-vcs")
-            self._shadow_repo = ShadowRepo(self._workspace, repodir)
+            self._shadow_repo = ShadowRepo(self._workspace)
         return self._shadow_repo
 
     def set_workspace(self, path: str) -> None:
+        if self._scheduler is not None and self._scheduler.state != "idle":
+            raise AgentBusy(
+                "Cannot switch workspace while an agent task is running"
+            )
         resolved = self._normalize(path)
         self._workspace = resolved
         metrics_path = Path(self._metrics_db_path).expanduser()
@@ -69,6 +77,7 @@ class WorkspaceContext:
         self._shadow_repo = None
         if self._llm is not None:
             self._llm.metrics_store = self.metrics_store
+        self.ensure_storage_ready()
 
     def resolve_workspace(self, path: str | None = None) -> str:
         if path is None or not path.strip():
@@ -77,13 +86,13 @@ class WorkspaceContext:
 
     def get_session(self, session_id: str) -> Session:
         if session_id not in self._sessions:
-            if not self._messages_path(session_id).is_file():
+            if not messages_path(self._workspace, session_id).is_file():
                 raise KeyError(f"Session not found: {session_id}")
             self._sessions[session_id] = self._build_session(session_id)
         return self._sessions[session_id]
 
     def get_info(self, session_id: str) -> dict[str, Any]:
-        if not self._messages_path(session_id).is_file():
+        if not messages_path(self._workspace, session_id).is_file():
             raise KeyError(f"Session not found: {session_id}")
         return {"session_id": session_id, "workspace": self._workspace}
 
@@ -97,17 +106,8 @@ class WorkspaceContext:
         sandbox = Sandbox(self._workspace, session_id=session_id)
         return load_session(self._workspace, session_id, self.llm, sandbox=sandbox)
 
-    def _session_dir(self, session_id: str) -> Path:
-        if not self._valid_id(session_id):
-            raise ValueError(f"Invalid session_id: {session_id!r}")
-        return Path(self._workspace) / TMP_DIR / session_id
-
-    def _messages_path(self, session_id: str) -> Path:
-        return self._session_dir(session_id) / "messages.jsonl"
-
-    @staticmethod
-    def _valid_id(session_id: str) -> bool:
-        return bool(_SESSION_ID_RE.fullmatch(session_id))
+    def session_dir(self, session_id: str) -> Path:
+        return session_dir(self._workspace, session_id)
 
     @staticmethod
     def _normalize(path: str) -> str:
@@ -115,3 +115,12 @@ class WorkspaceContext:
         if not p.is_dir():
             raise ValueError(f"Directory does not exist: {path}")
         return str(p)
+
+
+def _probe_writable(directory: Path, label: str) -> None:
+    probe = directory / ".write_probe"
+    try:
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+    except OSError as exc:
+        raise ValueError(f"{label} not writable: {directory} ({exc})") from exc

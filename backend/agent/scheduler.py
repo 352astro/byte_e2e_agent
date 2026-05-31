@@ -25,7 +25,7 @@ from agent.tools.shell import get_platform_hint
 from agent.tools.skill import skill_context_message
 from agent.tools.task import task_context_message
 from agent.transcript import TranscriptStream
-from agent.config import DEFAULT_TMP_DIR as TMP_DIR
+from agent.paths import TMP_DIR
 
 
 class Scheduler:

@@ -7,7 +7,6 @@ from pathlib import Path
 from pydantic import Field
 
 from agent.tools.base import BaseTool
-from agent.config import DEFAULT_TMP_DIR as TMP_DIR
 
 
 class Glob(BaseTool):
@@ -17,7 +16,7 @@ class Glob(BaseTool):
         ...,
         description=(
             "Glob pattern (e.g. '**/*.py', 'src/**/*.ts'). "
-            "Hint: avoid scanning the " + TMP_DIR + "/ directory — it contains "
+            "Hint: avoid scanning the agent session storage directory — it contains "
             "session metadata and is not part of the user's codebase."
         ),
     )

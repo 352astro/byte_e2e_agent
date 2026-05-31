@@ -8,7 +8,6 @@ from pathlib import Path
 from pydantic import Field
 
 from agent.tools.base import BaseTool
-from agent.config import DEFAULT_TMP_DIR as TMP_DIR
 
 # — 单文件最大读取 —
 _MAX_FILE_BYTES = 1_048_576  # 1 MiB
@@ -45,7 +44,7 @@ class Grep(BaseTool):
         default="**/*",
         description=(
             "Glob to filter which files to search (e.g. '**/*.py'). "
-            "Hint: exclude " + TMP_DIR + "/ to avoid scanning session metadata."
+            "Hint: exclude the agent session storage directory to avoid scanning metadata."
         ),
     )
     max_results: int = Field(

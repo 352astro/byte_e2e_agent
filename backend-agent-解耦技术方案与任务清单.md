@@ -416,16 +416,16 @@ Router 只映射：
 
 任务：
 
-- [ ] 明确当前单 scheduler 限制：同一 workspace 同一时间只允许一个 agent 运行。
-- [ ] 在 service 层将 `RuntimeError("Scheduler already running")` 转换为 `AgentBusy`。
-- [ ] 前端收到 409 时提示当前已有任务运行。
-- [ ] 如需多人并发，设计 `SchedulerManager`：按 workspace 或 session 管理 scheduler。
-- [ ] 检查 `.tmp/`、SQLite metrics、shadow repo 的可写目录和清理策略。
+- [x] 明确当前单 scheduler 限制：同一 workspace 同一时间只允许一个 agent 运行。
+- [x] 在 service 层将 `RuntimeError("Scheduler already running")` 转换为 `AgentBusy`。
+- [x] 前端收到 409 时提示当前已有任务运行（已有 `useAgentStream` BUSY_MESSAGE）。
+- [x] ~~SchedulerManager 多并发~~（本轮不做，留待后续）。
+- [x] 检查 `.tmp/`、SQLite metrics、shadow repo 的可写目录（`WorkspaceContext.ensure_storage_ready`）。
 
 验收标准：
 
-- [ ] 并发冲突时 API 返回明确 409。
-- [ ] 不会出现多个 agent 同时写同一个 workspace 的未定义行为。
+- [x] 并发冲突时 API 返回明确 409。
+- [x] 不会出现多个 agent 同时写同一个 workspace 的未定义行为（单 scheduler 硬限制 + AgentBusy）。
 
 ## 6. 文件级任务清单
 
