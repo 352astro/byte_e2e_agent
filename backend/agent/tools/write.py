@@ -1,21 +1,24 @@
-"""Write 工具 — 委托 Sandbox 写入文件。"""
+"""Write 工具 — 写入 workspace 文件。"""
 
-from pydantic import Field
+from langchain_core.tools import StructuredTool
+from pydantic import BaseModel, Field
 
-from agent.tools.base import BaseTool
+
+class WriteInput(BaseModel):
+    """Write 工具输入参数。"""
+
+    path: str = Field(..., description="File path to write (relative to workspace).")
+    content: str = Field(..., description="Text content to write to the file.")
 
 
-class Write(BaseTool):
+async def write_handler(path: str, content: str, *, ws) -> str:
     """Write text content to a file in the workspace."""
+    return await ws.write_file(path, content)
 
-    path: str = Field(
-        ...,
-        description="File path to write (relative to workspace).",
-    )
-    content: str = Field(
-        ...,
-        description="Text content to write to the file.",
-    )
 
-    async def execute(self, *, sandbox=None, channel=None, interrupt_event=None, scheduler=None, toolset=None, result_id="") -> str:
-        return await sandbox.write_file(self.path, self.content)
+write_tool = StructuredTool.from_function(
+    coroutine=write_handler,
+    name="Write",
+    description="Write text content to a file in the workspace.",
+    args_schema=WriteInput,
+)

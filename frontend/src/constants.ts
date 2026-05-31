@@ -1,21 +1,8 @@
-// ── Backend-kind constants (single source of truth) ──────
+// ── 后端枚举常量（从 types.ts 透传，与 shared/types.py 一致）──
+//
+// MessageRole:  "user" | "assistant" | "tool"
+// MessageStatus: "streaming" | "complete"
+// StreamEventKind: "message_start" | "chunk_delta" | "chunk_complete"
+//                   | "message_finish" | "turn_complete" | "interrupted"
 
-export const TranscriptKind = {
-  UserQuestion: "user_question",
-  Assistant: "assistant",
-  ToolResult: "tool_result",
-  Error: "error",
-  PermissionRequest: "permission_request",
-  PermissionResponse: "permission_response",
-} as const;
-export type TranscriptKind =
-  (typeof TranscriptKind)[keyof typeof TranscriptKind];
-
-export const ChunkKind = {
-  Thinking: "thinking",
-  Response: "response",
-  ToolName: "tool_name",
-  ToolArguments: "tool_arguments",
-  ToolResult: "tool_result",
-} as const;
-export type ChunkKind = (typeof ChunkKind)[keyof typeof ChunkKind];
+export type { MessageRole, MessageStatus, StreamEventKind } from "./types";

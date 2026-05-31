@@ -3,20 +3,18 @@ import useAgentStream from "../hooks/useAgentStream";
 import { FocusProvider } from "../hooks/FocusContext";
 import LockableButton from "./LockableButton";
 import Icon from "./Icon";
-import TranscriptCard from "./TranscriptCard";
+import MessageCard from "./MessageCard";
 import ToolPairCard from "./ToolPairCard";
 import AgentInput from "./AgentInput";
 import EditableUserBubble from "./EditableUserBubble";
 import { pairToolCalls } from "../hooks/pairTools";
-import { getCommitActions, type SessionCache, type CommitInfo } from "../types";
+import { type CommitInfo } from "../types";
 import CommitGraphPanel, { CommitGraphHandle } from "./CommitGraphPanel";
 import "./AgentDemo.css";
 
 interface AgentDemoProps {
   sessionId: string | null;
-  pendingNew: boolean;
-  onSessionCreated: (sid: string) => void;
-  cache: SessionCache;
+  onSessionCreated?: (sid: string) => void;
 }
 
 type CommitAction = "regret" | "restore" | "replay" | null;
@@ -101,42 +99,25 @@ function CommitBadge({
 
 export default function AgentDemo({
   sessionId,
-  pendingNew,
   onSessionCreated,
-  cache,
 }: AgentDemoProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const {
     running,
     interrupting,
-    transcripts,
-    handleRun,
+    messages,
+    send,
+    interrupt,
+    createSession,
     prefillRef,
-    reloadTranscripts,
-    truncateTranscripts,
-    handleInterrupt,
+    reloadMessages,
+    truncateMessages,
     resetRunning,
-    scrollToTranscript,
   } = useAgentStream({
     sessionId,
-    pendingNew,
     onSessionCreated,
-    cache,
     scrollContainerRef: scrollRef,
-    onCommit: (targetTid: string, commitSha: string) => {
-      const t = transcripts.find((item) => item.id === targetTid);
-      const content = t
-        ? String((t.message as Record<string, unknown>).content || "")
-        : "";
-      handleAppend({
-        sha: commitSha,
-        short_sha: commitSha.slice(0, 7),
-        message: content || "(no message)",
-        author_time: Date.now() / 1000,
-        transcript_id: targetTid,
-      });
-    },
   });
 
   const locked = running || interrupting;
@@ -261,7 +242,7 @@ export default function AgentDemo({
     if (atBottomRef.current) {
       scrollToBottom();
     }
-  }, [transcripts, scrollToBottom]);
+  }, [messages, scrollToBottom]);
 
   // Session switch → always smooth (infrequent event)
   useEffect(() => {
@@ -270,14 +251,14 @@ export default function AgentDemo({
   }, [sessionId, scrollToBottom]);
 
   // ── Tool pairing ─────────────────────────────
-  const toolPairs = useMemo(() => pairToolCalls(transcripts, 0), [transcripts]);
+  const toolPairs = useMemo(() => pairToolCalls(messages, 0), [messages]);
 
   const pairsByCallId = useMemo(() => {
     const map = new Map<string, (typeof toolPairs)[number][]>();
     for (const p of toolPairs) {
-      const arr = map.get(p.callTranscriptId) || [];
+      const arr = map.get(p.callMessageId) || [];
       arr.push(p);
-      map.set(p.callTranscriptId, arr);
+      map.set(p.callMessageId, arr);
     }
     return map;
   }, [toolPairs]);
@@ -285,13 +266,13 @@ export default function AgentDemo({
   const pairedResultIds = useMemo(() => {
     const ids = new Set<string>();
     for (const p of toolPairs) {
-      if (p.result) ids.add(p.result.id);
+      if (p.resultMessage) ids.add(p.resultMessage.id);
     }
     return ids;
   }, [toolPairs]);
 
   const latestPairKey = toolPairs.length
-    ? `${toolPairs[toolPairs.length - 1].callTranscriptId}/${toolPairs[toolPairs.length - 1].callIndex}`
+    ? `${toolPairs[toolPairs.length - 1].callMessageId}/${toolPairs[toolPairs.length - 1].callIndex}`
     : null;
 
   // ── Click-to-focus (rainbow glow) ───────────
@@ -300,38 +281,24 @@ export default function AgentDemo({
   // ── Commit checkout ──────────────────────────
   const [checkingOut, setCheckingOut] = useState<string | null>(null);
   const [prefillContent, setPrefillContent] = useState("");
-  // Sync transcript content to commit graph messages
-  useEffect(() => {
-    for (const t of transcripts) {
-      if (!t.commitSha || t.kind !== "user_question") continue;
-      const content = String(
-        (t.message as Record<string, unknown>).content || "",
-      );
-      if (!content) continue;
-      handleUpdateMessage(t.commitSha, content);
-    }
-  }, [transcripts]);
 
   // ── Send handler ─────────────────────────────
+  // 所有编排逻辑已移入 useAgentStream.send()，外部只需一行调用
 
   const handleSend = useCallback(
-    async (question: string) => {
-      if (running && !interrupting) {
-        await handleInterrupt();
-      }
-      handleRun(question);
+    (question: string) => {
+      send(question);
     },
-    [running, interrupting, handleInterrupt, handleRun],
+    [send],
   );
 
-  // ── Unified truncate ──────────────────────────
-  // Mirrors backend POST /checkout: orthogonal commit_sha, truncate_tid, keep_tid.
+  // ── Independent workspace/message rewind ──────
 
   interface TruncateOpts {
     commitSha?: string;
     removeSha?: string;
-    truncateTid: string;
-    keepTid: boolean;
+    truncateTid?: string;
+    keepTid?: boolean;
     sendContent?: string;
   }
 
@@ -340,10 +307,10 @@ export default function AgentDemo({
    * Returns its id, or empty string if none (nothing to truncate).
    */
   const nextUserQId = (tid: string): string => {
-    const idx = transcripts.findIndex((x) => x.id === tid);
+    const idx = messages.findIndex((x) => x.id === tid);
     if (idx < 0) return "";
-    for (let i = idx + 1; i < transcripts.length; i++) {
-      if (transcripts[i].kind === "user_question") return transcripts[i].id;
+    for (let i = idx + 1; i < messages.length; i++) {
+      if (messages[i].role === "user") return messages[i].id;
     }
     return "";
   };
@@ -351,112 +318,87 @@ export default function AgentDemo({
   const applyTruncate = useCallback(
     async (opts: TruncateOpts) => {
       if (!sessionId) return;
-      if (running && !interrupting) {
-        await handleInterrupt();
-      }
+
+      // interrupt() is idempotent — no-op if nothing is running
+      await interrupt();
       resetRunning();
+
       if (opts.commitSha) setCheckingOut(opts.commitSha);
 
       try {
-        await fetch(`/api/session/${sessionId}/checkout`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            commit_sha: opts.commitSha || undefined,
-            truncate_tid: opts.truncateTid,
-            keep_tid: opts.keepTid,
-          }),
-        });
+        if (opts.commitSha) {
+          await fetch(`/api/session/${sessionId}/workspace/restore`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              commit_sha: opts.commitSha,
+              set_head: true,
+            }),
+          });
+        }
+        if (opts.truncateTid) {
+          await fetch(`/api/session/${sessionId}/messages/truncate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message_id: opts.truncateTid,
+              keep: opts.keepTid || false,
+            }),
+          });
+        }
       } catch {}
 
-      truncateTranscripts(opts.truncateTid, opts.keepTid);
+      if (opts.truncateTid) truncateMessages(opts.truncateTid, !!opts.keepTid);
       if (opts.removeSha) handleRemoveFrom(opts.removeSha);
-      if (opts.sendContent) handleRun(opts.sendContent);
+
+      // send() internally handles session creation, interrupt, and streaming
+      if (opts.sendContent && sessionId) {
+        await send(opts.sendContent);
+      }
 
       if (opts.commitSha) setCheckingOut(null);
     },
     [
       sessionId,
-      running,
-      interrupting,
-      handleInterrupt,
+      interrupt,
       resetRunning,
-      truncateTranscripts,
+      truncateMessages,
       handleRemoveFrom,
-      handleRun,
+      send,
     ],
   );
 
   const handleEditSubmit = useCallback(
     (tid: string, content: string) => {
-      const t = transcripts.find((item) => item.id === tid);
-      const { parent } = t?.commitSha
-        ? getCommitActions(commits, t.commitSha)
-        : { parent: null };
       applyTruncate({
-        commitSha: parent?.sha,
-        removeSha: t?.commitSha,
         truncateTid: tid,
         keepTid: false,
         sendContent: content,
       });
     },
-    [transcripts, commits, applyTruncate],
+    [applyTruncate],
   );
 
   // ── Deprecated handlers (kept for CommitGraphPanel) ──
 
   const handleCheckout = useCallback(
-    async (checkoutSha: string, truncateTid?: string, removeSha?: string) => {
+    async (checkoutSha: string, removeSha?: string) => {
       applyTruncate({
         commitSha: checkoutSha,
         removeSha,
-        truncateTid: truncateTid || "",
-        keepTid: false,
       });
     },
     [applyTruncate],
   );
 
   const handleCheckoutKeep = useCallback(
-    async (
-      checkoutSha: string,
-      truncateTid?: string,
-      removeSha?: string,
-      keepTid = false,
-    ) => {
+    async (checkoutSha: string, removeSha?: string) => {
       applyTruncate({
         commitSha: checkoutSha,
         removeSha,
-        truncateTid: truncateTid || "",
-        keepTid,
       });
     },
     [applyTruncate],
-  );
-
-  const handleReplay = useCallback(
-    async (
-      checkoutSha: string,
-      transcriptId?: string,
-      truncateTid?: string,
-      removeSha?: string,
-    ) => {
-      const t = transcriptId
-        ? transcripts.find((x) => x.id === transcriptId)
-        : undefined;
-      const content = t
-        ? String((t.message as Record<string, unknown>).content || "")
-        : "";
-      applyTruncate({
-        commitSha: checkoutSha,
-        removeSha,
-        truncateTid: truncateTid || "",
-        keepTid: false,
-        sendContent: content,
-      });
-    },
-    [transcripts, applyTruncate],
   );
 
   return (
@@ -474,140 +416,75 @@ export default function AgentDemo({
                 }
               }}
             >
-              {transcripts.map((t) => {
+              {messages.map((t) => {
                 if (pairedResultIds.has(t.id)) return null;
                 const pairs = pairsByCallId.get(t.id);
                 if (pairs) {
                   return (
                     <>
-                      {t.kind === "assistant" && (
+                      {t.role === "assistant" && (
                         <div className="assistant-splitter" />
                       )}
-                      <span key={t.id} data-transcript-id={t.id}>
-                        <TranscriptCard transcript={t} hideToolCards />
-                        {pairs.map((pair) => (
-                          <ToolPairCard
-                            key={`${pair.callTranscriptId}/${pair.callIndex}`}
-                            pair={pair}
-                            defaultCollapsed={
-                              latestPairKey !==
-                              `${pair.callTranscriptId}/${pair.callIndex}`
-                            }
-                          />
-                        ))}
+                      <span key={t.id} data-message-id={t.id}>
+                        <MessageCard message={t} hideToolCards />
                       </span>
+                      {pairs.map((pair) => (
+                        <ToolPairCard
+                          key={`${pair.callMessageId}/${pair.callIndex}`}
+                          pair={pair}
+                          defaultCollapsed={
+                            latestPairKey !==
+                            `${pair.callMessageId}/${pair.callIndex}`
+                          }
+                        />
+                      ))}
                     </>
                   );
                 }
-                if (t.kind === "user_question") {
-                  const content = String(
-                    (t.message as Record<string, unknown>).content || "",
-                  );
-                  const commitSha = t.commitSha;
-                  const shortSha = commitSha ? commitSha.slice(0, 7) : null;
+                if (t.role === "user") {
+                  const content = t.content || "";
                   return (
                     <div
                       key={t.id}
                       className="user-bubble-wrapper"
-                      data-transcript-id={t.id}
+                      data-message-id={t.id}
                     >
                       <EditableUserBubble
                         content={content}
                         onEditSubmit={(c) => handleEditSubmit(t.id, c)}
                       />
-                      {(() => {
-                        if (commitSha) {
-                          const { parent, next, tid } = getCommitActions(
-                            commits,
-                            commitSha,
-                          );
-                          const shortSha = commitSha.slice(0, 7);
-                          // tid may be undefined (transcript_id is __init__);
-                          // fall back to the transcript's own id for truncation.
-                          const truncateTid = tid || t.id;
-                          return (
-                            <CommitBadge
-                              shortSha={shortSha}
-                              locked={locked}
-                              onRegret={
-                                parent
-                                  ? () =>
-                                      applyTruncate({
-                                        commitSha: parent.sha,
-                                        removeSha: commitSha,
-                                        truncateTid: truncateTid,
-                                        keepTid: false,
-                                      })
-                                  : () =>
-                                      applyTruncate({
-                                        truncateTid: t.id,
-                                        keepTid: false,
-                                      })
-                              }
-                              onRestore={() => {
-                                const tid = nextUserQId(t.id);
-                                applyTruncate({
-                                  commitSha: commitSha,
-                                  removeSha: next ? next.sha : undefined,
-                                  truncateTid: tid,
-                                  keepTid: false,
-                                });
-                              }}
-                              onReplay={
-                                parent
-                                  ? () =>
-                                      applyTruncate({
-                                        commitSha: parent.sha,
-                                        removeSha: commitSha,
-                                        truncateTid: truncateTid,
-                                        keepTid: false,
-                                        sendContent: content,
-                                      })
-                                  : () =>
-                                      applyTruncate({
-                                        truncateTid: t.id,
-                                        keepTid: false,
-                                        sendContent: content,
-                                      })
-                              }
-                            />
-                          );
+                      <CommitBadge
+                        shortSha=""
+                        locked={locked}
+                        onRegret={() =>
+                          applyTruncate({
+                            truncateTid: t.id,
+                            keepTid: false,
+                          })
                         }
-                        return (
-                          <CommitBadge
-                            shortSha=""
-                            locked={locked}
-                            onRegret={() =>
-                              applyTruncate({
-                                truncateTid: t.id,
-                                keepTid: false,
-                              })
-                            }
-                            onRestore={() =>
-                              applyTruncate({
-                                truncateTid: nextUserQId(t.id),
-                                keepTid: false,
-                              })
-                            }
-                            onReplay={() =>
-                              applyTruncate({
-                                truncateTid: t.id,
-                                keepTid: false,
-                                sendContent: content,
-                              })
-                            }
-                          />
-                        );
-                      })()}
+                        onRestore={() =>
+                          applyTruncate({
+                            truncateTid: nextUserQId(t.id),
+                            keepTid: false,
+                          })
+                        }
+                        onReplay={() =>
+                          applyTruncate({
+                            truncateTid: t.id,
+                            keepTid: false,
+                            sendContent: content,
+                          })
+                        }
+                      />
                     </div>
                   );
                 }
                 return (
-                  <span key={t.id} data-transcript-id={t.id}>
-                    {t.kind === "assistant" && (
+                  <span key={t.id} data-message-id={t.id}>
+                    {t.role === "assistant" && (
                       <div className="assistant-splitter" />
                     )}
-                    <TranscriptCard transcript={t} />
+                    <MessageCard message={t} />
                   </span>
                 );
               })}
@@ -625,7 +502,7 @@ export default function AgentDemo({
         prefillContent={prefillContent}
         onPrefillChange={setPrefillContent}
         onSend={handleSend}
-        onInterrupt={handleInterrupt}
+        onInterrupt={interrupt}
       />
 
       <CommitGraphPanel
@@ -640,8 +517,6 @@ export default function AgentDemo({
         onUpdateMessage={handleUpdateMessage}
         onCheckout={handleCheckout}
         onCheckoutKeep={handleCheckoutKeep}
-        onReplay={handleReplay}
-        onScrollToTranscript={scrollToTranscript}
       />
     </div>
   );

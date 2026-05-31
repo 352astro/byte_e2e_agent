@@ -5,42 +5,40 @@ import type { ToolPair } from "../types";
 // ── Public ───────────────────────────────────────────────
 
 interface ToolPairCardProps {
-    pair: ToolPair;
-    defaultCollapsed?: boolean;
+  pair: ToolPair;
+  defaultCollapsed?: boolean;
 }
 
 const ToolPairCard = React.memo(function ToolPairCard({
-    pair,
-    defaultCollapsed = false,
+  pair,
+  defaultCollapsed = false,
 }: ToolPairCardProps) {
-    const resultContent = pair.result
-        ? String((pair.result.message as Record<string, unknown>).result || "")
-        : undefined;
+  const toolName = pair.toolCall?.function?.name || "unknown";
+  const argumentsStr = pair.toolCall?.function?.arguments || "";
 
-    const bodyContent =
-        pair.toolName === "Write" && pair.arguments
-            ? (() => {
-                  try {
-                      const obj = JSON.parse(pair.arguments);
-                      return obj.content != null
-                          ? String(obj.content)
-                          : undefined;
-                  } catch {
-                      return undefined;
-                  }
-              })()
-            : undefined;
+  const resultContent = pair.resultMessage?.tool_result || undefined;
 
-    return renderToolCard({
-        id: `${pair.callTranscriptId}/${pair.callIndex}`,
-        toolName: pair.toolName,
-        args: pair.arguments,
-        defaultCollapsed,
-        resultContent,
-        bodyContent,
-        focusId: `${pair.callTranscriptId}/${pair.callIndex}`,
-    });
+  const bodyContent =
+    toolName === "Write" && argumentsStr
+      ? (() => {
+          try {
+            const obj = JSON.parse(argumentsStr);
+            return obj.content != null ? String(obj.content) : undefined;
+          } catch {
+            return undefined;
+          }
+        })()
+      : undefined;
+
+  return renderToolCard({
+    id: `${pair.callMessageId}/${pair.callIndex}`,
+    toolName,
+    args: argumentsStr,
+    defaultCollapsed,
+    resultContent,
+    bodyContent,
+    focusId: `${pair.callMessageId}/${pair.callIndex}`,
+  });
 });
 
 export default ToolPairCard;
-

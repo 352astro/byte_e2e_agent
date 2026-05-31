@@ -9,7 +9,6 @@ Pattern adapted from Dulwich-test/demo.py.
 
 from __future__ import annotations
 
-import json
 import os
 import time
 from io import BytesIO
@@ -57,13 +56,12 @@ class ShadowRepo:
     """Per-session shadow git repo for workspace snapshots.
 
     workdir  = project workspace (the user's working directory)
-    repodir  = path to bare repo, e.g. "<workdir>/<TMP_DIR>/.shadow-vcs"
+    repodir  = path to bare repo, e.g. "<workdir>/.byte_agent/.shadow-vcs"
     """
 
     @staticmethod
     def _branch_ref(session_id: str) -> bytes:
         return f"refs/heads/{session_id}".encode()
-    MAP_FILE = "transcript_map.json"
 
     def __init__(self, workdir: str, repodir: str) -> None:
         self._workdir = os.path.abspath(workdir)
@@ -94,12 +92,9 @@ class ShadowRepo:
         self._index_path = os.path.join(self._repodir, "index")
         self._idx = Index(self._index_path)
 
-        # ── lazy transcript map ─────────────────────────
-        self._transcript_map: dict[str, str] | None = None
-
     # ── public API ───────────────────────────────────────
 
-    def snapshot(self, session_id: str, message: str, transcript_id: str) -> str:
+    def snapshot(self, session_id: str, message: str) -> str:
         """Take a snapshot of the current workspace.
 
         Returns the full 40-char commit sha hex string.
@@ -149,7 +144,6 @@ class ShadowRepo:
 
         # ── build commit ────────────────────────────────
         msg = message
-        msg += f"\nTranscript-Id: {transcript_id}"
 
         c = Commit()
         c.tree = tree_id
@@ -168,9 +162,7 @@ class ShadowRepo:
         self._repo.object_store.add_object(c)
         self._repo.refs[self._branch_ref(session_id)] = c.id
 
-        sha = c.id.decode()
-        self._update_transcript_map(transcript_id, sha)
-        return sha
+        return c.id.decode()
 
     def restore(self, commit_sha: str) -> None:
         """Checkout a commit's tree into the workspace, overwriting files."""
@@ -257,7 +249,6 @@ class ShadowRepo:
 
         for entry in Walker(self._repo.object_store, head):
             c = entry.commit
-            tid = self._extract_transcript_id(c)
             sha = c.id.decode()
             result.append(
                 {
@@ -265,7 +256,6 @@ class ShadowRepo:
                     "short_sha": sha[:7],
                     "message": c.message.decode().splitlines()[0],
                     "author_time": c.author_time,
-                    "transcript_id": tid,
                 }
             )
         return result
@@ -280,7 +270,6 @@ class ShadowRepo:
             "short_sha": sha[:7],
             "message": c.message.decode().splitlines()[0],
             "author_time": c.author_time,
-            "transcript_id": self._extract_transcript_id(c),
             "files": sorted(name.decode() for name, _, _ in entries),
         }
 
@@ -321,9 +310,6 @@ class ShadowRepo:
         # Move HEAD to parent
         self._repo.refs[self._branch_ref(session_id)] = parent_sha_bytes
 
-        # Remove stale transcript mapping
-        self._remove_from_transcript_map(commit_sha)
-
         return parent_sha
 
     def set_head(self, session_id: str, commit_sha: str) -> None:
@@ -339,20 +325,10 @@ class ShadowRepo:
             return
         if head is None:
             return
-        for entry in Walker(self._repo.object_store, head):
-            sha = entry.commit.id.decode()
-            self._remove_from_transcript_map(sha)
         try:
             del self._repo.refs[branch]
         except KeyError:
             pass
-
-    def commit_for_transcript(self, transcript_id: str) -> str | None:
-        """O(1) lookup: transcript_id → commit_sha."""
-        if self._transcript_map is None:
-            self._load_transcript_map()
-        assert self._transcript_map is not None
-        return self._transcript_map.get(transcript_id)
 
     # ── internal ─────────────────────────────────────────
 
@@ -361,64 +337,3 @@ class ShadowRepo:
         if not isinstance(obj, Commit):
             raise KeyError(f"Not a commit: {sha}")
         return obj
-
-    def _extract_transcript_id(self, c: Commit) -> str | None:
-        for line in c.message.decode().splitlines():
-            if line.startswith("Transcript-Id:"):
-                return line.split(":", 1)[1].strip()
-        return None
-
-    def _load_transcript_map(self) -> None:
-        tmap: dict[str, str] = {}
-        map_path = os.path.join(self._repodir, self.MAP_FILE)
-        # try disk cache first
-        if os.path.exists(map_path):
-            try:
-                with open(map_path) as f:
-                    tmap = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                pass
-        # rebuild from all branches
-        try:
-            for ref in self._repo.refs.keys():
-                if not ref.startswith(b'refs/heads/'):
-                    continue
-                head = self._repo.refs.read_ref(ref)
-                if head is None:
-                    continue
-                for entry in Walker(self._repo.object_store, head):
-                    c = entry.commit
-                    tid = self._extract_transcript_id(c)
-                    if tid:
-                        tmap.setdefault(tid, c.id.decode())
-        except KeyError:
-            pass
-        self._transcript_map = tmap
-
-    def _update_transcript_map(self, transcript_id: str, sha: str) -> None:
-        if self._transcript_map is None:
-            self._load_transcript_map()
-        assert self._transcript_map is not None
-        self._transcript_map[transcript_id] = sha
-        self._write_transcript_map()
-
-    def _remove_from_transcript_map(self, commit_sha: str) -> None:
-        """Remove all transcript entries pointing to the given commit."""
-        if self._transcript_map is None:
-            self._load_transcript_map()
-        assert self._transcript_map is not None
-        to_remove = [
-            tid for tid, sha in self._transcript_map.items() if sha == commit_sha
-        ]
-        for tid in to_remove:
-            del self._transcript_map[tid]
-        if to_remove:
-            self._write_transcript_map()
-
-    def _write_transcript_map(self) -> None:
-        map_path = os.path.join(self._repodir, self.MAP_FILE)
-        try:
-            with open(map_path, "w") as f:
-                json.dump(self._transcript_map, f, indent=2)
-        except OSError:
-            pass

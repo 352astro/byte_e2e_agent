@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field
+from langchain_core.tools import StructuredTool
+from pydantic import BaseModel, Field
 
-from agent.tools.base import BaseTool
 from app.core.config import TMP_DIR
 
 
-class Glob(BaseTool):
-    """Find files matching a glob pattern and return sorted relative paths."""
+class GlobInput(BaseModel):
+    """Glob 工具输入参数。"""
 
     pattern: str = Field(
         ...,
@@ -28,37 +28,38 @@ class Glob(BaseTool):
         description="Maximum number of results to return.",
     )
 
-    async def execute(
-        self,
-        *,
-        sandbox=None,
-        channel=None,
-        interrupt_event=None,
-        scheduler=None,
-        toolset=None,
-        result_id="",
-    ) -> str:
-        try:
-            workspace = Path(sandbox.resolve_path("."))
-        except Exception:
-            workspace = Path(".")
 
-        try:
-            matches = sorted(
-                str(p.relative_to(workspace)) for p in workspace.rglob(self.pattern)
-            )
-        except Exception as exc:
-            return f"Error: invalid glob pattern '{self.pattern}': {exc}"
+async def glob_handler(pattern: str, max_results: int = 200, *, ws) -> str:
+    """Find files matching a glob pattern and return sorted relative paths."""
+    try:
+        workspace = Path(ws.resolve_path("."))
+    except Exception:
+        workspace = Path(".")
 
-        if not matches:
-            return f"No files matching '{self.pattern}'."
+    try:
+        matches = sorted(
+            str(p.relative_to(workspace)) for p in workspace.rglob(pattern)
+        )
+    except Exception as exc:
+        return f"Error: invalid glob pattern '{pattern}': {exc}"
 
-        total = len(matches)
-        matches = matches[: self.max_results]
+    if not matches:
+        return f"No files matching '{pattern}'."
 
-        lines = [f"{len(matches)} of {total} matches for '{self.pattern}':"]
-        lines.extend(f"  {m}" for m in matches)
-        if total > self.max_results:
-            lines.append(f"  ... ({total - self.max_results} more)")
+    total = len(matches)
+    matches = matches[:max_results]
 
-        return "\n".join(lines)
+    lines = [f"{len(matches)} of {total} matches for '{pattern}':"]
+    lines.extend(f"  {m}" for m in matches)
+    if total > max_results:
+        lines.append(f"  ... ({total - max_results} more)")
+
+    return "\n".join(lines)
+
+
+glob_tool = StructuredTool.from_function(
+    coroutine=glob_handler,
+    name="Glob",
+    description="Find files matching a glob pattern and return sorted relative paths.",
+    args_schema=GlobInput,
+)

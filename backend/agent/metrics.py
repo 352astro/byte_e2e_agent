@@ -13,7 +13,7 @@ from typing import Any
 @dataclass(frozen=True)
 class LLMCallContext:
     session_id: str | None = None
-    transcript_id: str | None = None
+    message_id: str | None = None
     call_type: str = "agent"
 
 
@@ -46,7 +46,7 @@ class SQLiteLLMMetricsStore:
             conn.execute(
                 """
                 INSERT INTO llm_calls (
-                    id, created_at, session_id, transcript_id, call_type, model,
+                    id, created_at, session_id, message_id, call_type, model,
                     status, finish_reason, latency_ms, prompt_tokens,
                     completion_tokens, total_tokens, cost_yuan, error
                 )
@@ -56,7 +56,7 @@ class SQLiteLLMMetricsStore:
                     uuid.uuid4().hex,
                     created_at,
                     context.session_id,
-                    context.transcript_id,
+                    context.message_id,
                     context.call_type,
                     model,
                     "error" if error else "success",
@@ -81,7 +81,7 @@ class SQLiteLLMMetricsStore:
         offset = max(0, offset)
         where, params = _where(session_id)
         columns = """
-            id, created_at, session_id, transcript_id, call_type, model, status,
+            id, created_at, session_id, message_id, call_type, model, status,
             finish_reason, latency_ms, prompt_tokens, completion_tokens,
             total_tokens, cost_yuan, error
         """
@@ -195,7 +195,7 @@ class SQLiteLLMMetricsStore:
                     id TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
                     session_id TEXT,
-                    transcript_id TEXT,
+                    message_id TEXT,
                     call_type TEXT NOT NULL,
                     model TEXT NOT NULL,
                     status TEXT NOT NULL,

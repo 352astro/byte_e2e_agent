@@ -7,84 +7,53 @@ import json
 from pathlib import Path
 from typing import Literal
 
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
-
-from agent.tools.base import BaseTool
-from app.core.config import TMP_DIR
 
 TaskStatus = Literal["pending", "progress", "done"]
 
 
-def task_context_message(sandbox) -> dict:
+def task_context_message(ws, session_id: str = "") -> dict:
     """返回本轮任务列表的系统消息。"""
     try:
-        tasks = _load_tasks_for_context(sandbox)
+        tasks = _load_tasks_for_context(ws, session_id)
         content = _format_task_context(tasks)
     except Exception as exc:
         content = f"## Current Tasks\nTask context unavailable: {exc}"
     return {"role": "system", "content": content}
 
 
-async def reconstruct_tasks(sandbox, transcripts: list) -> None:
-    """Reconstruct task list by replaying TaskRewrite / TaskUpdate from transcripts.
-
-    Call after transcript truncation (checkout) to restore task state consistency.
-    Algorithm:
-      1. Scan transcripts backwards for the last successful TaskRewrite.
-      2. Execute that TaskRewrite as the base state (or start empty if none).
-      3. Replay all TaskUpdate calls after that point (or from the beginning).
-    """
-    # Step 1: find last TaskRewrite (scan backwards)
-    rewrite_index = -1
-    for i in range(len(transcripts) - 1, -1, -1):
-        t = transcripts[i]
-        if t.kind == "assistant":
-            for tc in t.message.get("tool_calls", []):
-                if tc.get("function", {}).get("name") == "TaskRewrite":
-                    rewrite_index = i
-                    break
-        if rewrite_index >= 0:
-            break
-
-    # Step 2: execute the base TaskRewrite (or start empty)
-    if rewrite_index >= 0:
-        base_t = transcripts[rewrite_index]
-        applied = False
-        for tc in base_t.message.get("tool_calls", []):
-            fn = tc.get("function", {})
-            if fn.get("name") == "TaskRewrite":
-                try:
-                    args = json.loads(fn.get("arguments", "{}"))
-                    tool = TaskRewrite(
-                        tasks=[Task(**td) for td in args.get("tasks", [])]
-                    )
-                    await tool.execute(sandbox=sandbox)
-                    applied = True
-                except Exception:
-                    pass
-                break
-        if not applied:
-            await _save_tasks(sandbox, [])
-    else:
-        await _save_tasks(sandbox, [])
-
-    # Step 3: replay TaskUpdate calls from after the rewrite point
-    start = rewrite_index + 1 if rewrite_index >= 0 else 0
-    for i in range(start, len(transcripts)):
-        t = transcripts[i]
-        if t.kind == "assistant":
-            for tc in t.message.get("tool_calls", []):
-                fn = tc.get("function", {})
-                if fn.get("name") == "TaskUpdate":
-                    try:
-                        args = json.loads(fn.get("arguments", "{}"))
-                        tool = TaskUpdate(**args)
-                        await tool.execute(sandbox=sandbox)
-                    except Exception:
-                        pass
+# ═══════════════════════════════════════════════════
+# TaskList
+# ═══════════════════════════════════════════════════
 
 
-class Task(BaseModel):
+class TaskListInput(BaseModel):
+    """TaskList 无参数 — 直接返回当前任务列表。"""
+
+    pass
+
+
+async def task_list_handler(*, ws=None, session_id: str = "", **kwargs) -> str:
+    """Read the current task list."""
+    tasks = await _load_tasks(ws, session_id)
+    return _dump({"tasks": _with_blocked(tasks)})
+
+
+task_list_tool = StructuredTool.from_function(
+    coroutine=task_list_handler,
+    name="TaskList",
+    description="Read the current task list.",
+    args_schema=TaskListInput,
+)
+
+
+# ═══════════════════════════════════════════════════
+# TaskRewrite
+# ═══════════════════════════════════════════════════
+
+
+class TaskItem(BaseModel):
     id: str = Field(..., description="Unique task id.")
     name: str = Field(..., description="Short stable task name.")
     description: str = Field(..., description="Task description.")
@@ -101,33 +70,41 @@ class Task(BaseModel):
     )
 
 
-class TaskList(BaseTool):
-    """Read the current task list."""
+class TaskRewriteInput(BaseModel):
+    """TaskRewrite 工具输入参数。"""
 
-    async def execute(self, *, sandbox=None, channel=None, interrupt_event=None, scheduler=None, toolset=None, result_id="") -> str:
-        tasks = await _load_tasks(sandbox)
-        return _dump({"tasks": _with_blocked(tasks)})
-
-
-class TaskRewrite(BaseTool):
-    """Rewrite the full task list."""
-
-    tasks: list[Task] = Field(
+    tasks: list[TaskItem] = Field(
         ...,
         description="The complete task list after rewrite.",
     )
 
-    async def execute(self, *, sandbox=None, channel=None, interrupt_event=None, scheduler=None, toolset=None, result_id="") -> str:
-        tasks = [task.model_dump() for task in self.tasks]
-        error = _validate_tasks(tasks)
-        if error:
-            return f"Error: {error}"
-        await _save_tasks(sandbox, tasks)
-        return "Task list updated."
+
+async def task_rewrite_handler(
+    tasks: list[dict], *, ws=None, session_id: str = ""
+) -> str:
+    """Rewrite the full task list."""
+    error = _validate_tasks(tasks)
+    if error:
+        return f"Error: {error}"
+    await _save_tasks(ws, tasks, session_id)
+    return "Task list updated."
 
 
-class TaskUpdate(BaseTool):
-    """Update one task status and summary."""
+task_rewrite_tool = StructuredTool.from_function(
+    coroutine=task_rewrite_handler,
+    name="TaskRewrite",
+    description="Rewrite the full task list.",
+    args_schema=TaskRewriteInput,
+)
+
+
+# ═══════════════════════════════════════════════════
+# TaskUpdate
+# ═══════════════════════════════════════════════════
+
+
+class TaskUpdateInput(BaseModel):
+    """TaskUpdate 工具输入参数。"""
 
     id: str = Field(..., description="Task id to update.")
     status: TaskStatus = Field(
@@ -138,55 +115,70 @@ class TaskUpdate(BaseTool):
         description="Task summary. Required when status is done; use empty string for pending.",
     )
 
-    async def execute(self, *, sandbox=None, channel=None, interrupt_event=None, scheduler=None, toolset=None, result_id="") -> str:
-        tasks = await _load_tasks(sandbox)
-        index = _find_task_index(tasks, self.id)
-        if index is None:
-            return f"Error: task id does not exist: {self.id}"
 
-        current = tasks[index]
-        next_task = {
-            **current,
-            "status": self.status,
-            "summary": self.summary,
-        }
+async def task_update_handler(
+    id: str, status: str, summary: str, *, ws=None, session_id: str = ""
+) -> str:
+    """Update one task status and summary."""
+    tasks = await _load_tasks(ws, session_id)
+    index = _find_task_index(tasks, id)
+    if index is None:
+        return f"Error: task id does not exist: {id}"
 
-        next_tasks = [*tasks]
-        next_tasks[index] = next_task
+    current = tasks[index]
+    next_task = {
+        **current,
+        "status": status,
+        "summary": summary,
+    }
 
-        error = _validate_tasks(next_tasks)
-        if error:
-            return f"Error: {error}"
-        if self.status == "done" and not self.summary.strip():
-            return "Error: summary is required when marking a task done."
-        if self.status in ("progress", "done"):
-            unfinished = _unfinished_dependencies(tasks, current)
-            if unfinished:
-                return (
-                    f"Error: cannot mark task {self.status} before dependencies are done: "
-                    + ", ".join(unfinished)
-                )
+    next_tasks = [*tasks]
+    next_tasks[index] = next_task
 
-        await _save_tasks(sandbox, next_tasks)
-        return "Task updated."
+    error = _validate_tasks(next_tasks)
+    if error:
+        return f"Error: {error}"
+    if status == "done" and not summary.strip():
+        return "Error: summary is required when marking a task done."
+    if status in ("progress", "done"):
+        unfinished = _unfinished_dependencies(tasks, current)
+        if unfinished:
+            return (
+                f"Error: cannot mark task {status} before dependencies are done: "
+                + ", ".join(unfinished)
+            )
 
-
-def _tasks_path(sandbox) -> Path:
-    if sandbox is None:
-        raise ValueError("sandbox is required")
-    session_id = sandbox.session_id or "default"
-    return Path(sandbox.resolve_path(f"{TMP_DIR}/{session_id}/tasks.json"))
+    await _save_tasks(ws, next_tasks, session_id)
+    return "Task updated."
 
 
-def _load_tasks_for_context(sandbox) -> list[dict]:
-    path = _tasks_path(sandbox)
+task_update_tool = StructuredTool.from_function(
+    coroutine=task_update_handler,
+    name="TaskUpdate",
+    description="Update one task status and summary.",
+    args_schema=TaskUpdateInput,
+)
+
+
+# ═══════════════════════════════════════════════════
+# Internal helpers
+# ═══════════════════════════════════════════════════
+
+
+def _tasks_path(ws, session_id: str) -> Path:
+    """获取 session 对应的 tasks.json 路径。"""
+    return ws.tasks_path(session_id)
+
+
+def _load_tasks_for_context(ws, session_id: str) -> list[dict]:
+    path = _tasks_path(ws, session_id)
     if not path.exists():
         return []
     return _load_tasks_sync(path)
 
 
-async def _load_tasks(sandbox) -> list[dict]:
-    path = _tasks_path(sandbox)
+async def _load_tasks(ws, session_id: str) -> list[dict]:
+    path = _tasks_path(ws, session_id)
     if not path.exists():
         return []
     return await asyncio.to_thread(_load_tasks_sync, path)
@@ -200,8 +192,8 @@ def _load_tasks_sync(path: Path) -> list[dict]:
     return data
 
 
-async def _save_tasks(sandbox, tasks: list[dict]) -> None:
-    path = _tasks_path(sandbox)
+async def _save_tasks(ws, tasks: list[dict], session_id: str) -> None:
+    path = _tasks_path(ws, session_id)
     await asyncio.to_thread(_save_tasks_sync, path, tasks)
 
 

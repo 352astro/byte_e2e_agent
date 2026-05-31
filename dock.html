@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>macOS Dock</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    background: radial-gradient(ellipse at 50% 0%, #2d2d3a 0%, #1a1a24 60%);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    overflow: hidden;
+  }
+
+  /* The frosted glass dock bar */
+  .dock-shell {
+    position: relative;
+    margin-bottom: 8px;
+    padding: 8px 12px;
+    display: flex;
+    align-items: flex-end;
+    gap: 0;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 24px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    transition: padding 0.15s ease;
+  }
+
+  /* Individual icon slots — JS sets width + height inline; CSS handles the transition */
+  .dock-item {
+    position: relative;
+    flex-shrink: 0;
+    cursor: default;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: width 0.12s ease-out, height 0.12s ease-out, margin 0.12s ease-out;
+  }
+
+  .dock-item img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+  }
+
+  /* Label that pops up above a magnified icon */
+  .dock-label {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.78);
+    color: #fff;
+    font-size: 13px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  .dock-label.visible { opacity: 1; }
+
+  /* Little triangle under the label */
+  .dock-label::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: rgba(0, 0, 0, 0.78);
+  }
+</style>
+</head>
+<body>
+
+<div class="dock-shell" id="dock">
+  <!-- Icons injected by JS -->
+</div>
+
+<script>
+  // ── Configuration ──────────────────────────────────────────────
+  const ICONS = [
+    { src: 'https://cdn-icons-png.flaticon.com/512/5968/5968705.png', label: 'Finder',    alt: 'finder' },
+    { src: 'https://cdn-icons-png.flaticon.com/512/5968/5968756.png', label: 'Safari',    alt: 'safari' },
+    { src: 'https://cdn-icons-png.flaticon.com/512/5968/5968672.png', label: 'Messages',  alt: 'messages' },
+    { src: 'https://cdn-icons-png.flaticon.com/512/5968/5968710.png', label: 'Mail',      alt: 'mail' },
+    { src: 'https://cdn-icons-png.flaticon.com/512/5968/5968680.png', label: 'Photos',    alt: 'photos' },
+    { src: 'https://cdn-icons-png.flaticon.com/512/5968/5968690.png', label: 'Music',     alt: 'music' },
+    { src: 'https://cdn-icons-png.flaticon.com/512/5968/5968525.png', label: 'Calendar',  alt: 'calendar' },
+    { src: 'https://cdn-icons-png.flaticon.com/512/5968/5968535.png', label: 'Notes',     alt: 'notes' },
+    { src: 'https://cdn-icons-png.flaticon.com/512/5968/5968541.png', label: 'Settings',  alt: 'settings' },
+    { src: 'https://cdn-icons-png.flaticon.com/512/5968/5968550.png', label: 'Trash',     alt: 'trash' },
+  ];
+
+  const BASE_SIZE   = 48;   // px — rest-state icon size
+  const MAX_SCALE   = 3.2;  // multiplier at the cursor center
+  const RANGE       = 140;  // px — distance over which magnification decays
+  const EXTRA_GAP   = 18;   // px — extra horizontal gap so magnified icons don't collide
+
+  // ── Build dock ─────────────────────────────────────────────────
+  const dock = document.getElementById('dock');
+  const items = [];
+
+  for (const icon of ICONS) {
+    const el = document.createElement('div');
+    el.className = 'dock-item';
+    el.style.width  = BASE_SIZE + 'px';
+    el.style.height = BASE_SIZE + 'px';
+
+    const img = document.createElement('img');
+    img.src = icon.src;
+    img.alt = icon.alt;
+    img.draggable = false;
+
+    const label = document.createElement('span');
+    label.className = 'dock-label';
+    label.textContent = icon.label;
+
+    el.appendChild(img);
+    el.appendChild(label);
+    dock.appendChild(el);
+
+    items.push({ el, img, label, icon });
+  }
+
+  // ── Magnification engine ───────────────────────────────────────
+  const dockShell = dock; // the dock itself is the .dock-shell
+
+  function layout(cursorX) {
+    const shellRect = dockShell.getBoundingClientRect();
+
+    // 1. Compute each item's target scale & natural width
+    const scales = items.map(item => {
+      const rect = item.el.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const dist = Math.abs(cursorX - cx);
+      // Smoothstep-like falloff: closer = bigger
+      const t = Math.max(0, 1 - dist / RANGE);
+      const scale = 1 + (MAX_SCALE - 1) * t;
+      return { item, scale, naturalW: BASE_SIZE * scale };
+    });
+
+    // 2. The dock must grow wider to make room; compute total width
+    let totalW = 0;
+    for (const s of scales) {
+      totalW += s.naturalW + EXTRA_GAP;
+    }
+    totalW -= EXTRA_GAP; // remove trailing gap
+
+    // 3. Order items left-to-right centered inside the shell
+    const startX = shellRect.left + (shellRect.width - totalW) / 2;
+
+    let x = startX;
+    for (const s of scales) {
+      const w = s.naturalW;
+      s.item.el.style.width  = w + 'px';
+      s.item.el.style.height = (BASE_SIZE * s.scale) + 'px';
+
+      // Push horizontally by setting margin-left (first item gets 0)
+      // Actually we position via the flex layout — simpler to use margin-left on every item.
+      // Reset margins each frame.
+      s.item.el.style.marginLeft = '0px';
+      s.item.el.style.marginRight = '0px';
+
+      x += w + EXTRA_GAP;
+    }
+
+    // 4. Handle label visibility: show only when scale > 1.6
+    for (const s of scales) {
+      s.item.label.classList.toggle('visible', s.scale > 1.6);
+    }
+  }
+
+  // ── Event listeners ────────────────────────────────────────────
+  dockShell.addEventListener('mousemove', e => {
+    layout(e.clientX);
+  });
+
+  dockShell.addEventListener('mouseleave', () => {
+    // Animate back to rest state
+    for (const item of items) {
+      item.el.style.width  = BASE_SIZE + 'px';
+      item.el.style.height = BASE_SIZE + 'px';
+      item.el.style.marginLeft  = '0px';
+      item.el.style.marginRight = '0px';
+      item.label.classList.remove('visible');
+    }
+  });
+
+  // Touch support
+  dockShell.addEventListener('touchmove', e => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    layout(touch.clientX);
+  }, { passive: false });
+
+  dockShell.addEventListener('touchend', () => {
+    for (const item of items) {
+      item.el.style.width  = BASE_SIZE + 'px';
+      item.el.style.height = BASE_SIZE + 'px';
+      item.el.style.marginLeft  = '0px';
+      item.el.style.marginRight = '0px';
+      item.label.classList.remove('visible');
+    }
+  });
+</script>
+</body>
+</html>

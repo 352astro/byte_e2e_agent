@@ -1,53 +1,41 @@
-import type { DisplayTranscript, ToolPair } from "../types";
+import type { Message, ToolPair, ToolCall } from "../types";
 
 /**
- * Pair tool calls (inside assistant transcripts) with their tool_result transcripts.
+ * Pair tool calls inside assistant messages with their tool_result messages.
  *
- * During streaming: `startFrom` limits scanning to recent transcripts.
+ * During streaming: `startFrom` limits scanning to recent messages.
  * During recover: `startFrom` = 0 scans everything.
  */
-export function pairToolCalls(
-  transcripts: DisplayTranscript[],
-  startFrom = 0,
-): ToolPair[] {
-  // Collect all existing pairs first (from previous pairing)
+export function pairToolCalls(messages: Message[], startFrom = 0): ToolPair[] {
   const pairs: ToolPair[] = [];
 
-  // Scan for tool calls in assistant transcripts
-  for (let i = startFrom; i < transcripts.length; i++) {
-    const t = transcripts[i];
-    if (t.kind !== "assistant") continue;
+  for (let i = startFrom; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role !== "assistant") continue;
 
-    const toolCalls = (t.message as Record<string, unknown>)
-      .tool_calls as Array<Record<string, unknown>> | undefined;
-    if (!toolCalls || !Array.isArray(toolCalls)) continue;
+    const toolCalls: ToolCall[] = m.tool_calls || [];
+    if (!toolCalls.length) continue;
 
     for (let ci = 0; ci < toolCalls.length; ci++) {
       const tc = toolCalls[ci];
-      const fn = (tc.function || {}) as Record<string, unknown>;
-      const toolCallId = String(tc.id || "");
-      const toolName = String(fn.name || "");
-      const args = String(fn.arguments || "");
+      const toolCallId = tc.id || "";
 
-      // Find matching tool_result transcript (search forward)
-      let result: DisplayTranscript | undefined;
-      for (let j = i + 1; j < transcripts.length; j++) {
-        const rt = transcripts[j];
-        if (rt.kind !== "tool_result") continue;
-        const rtCallId = (rt.message as Record<string, unknown>).tool_call_id;
-        if (String(rtCallId) === toolCallId) {
-          result = rt;
+      // Find matching tool_result message (search forward)
+      let resultMessage: Message | undefined;
+      for (let j = i + 1; j < messages.length; j++) {
+        const rm = messages[j];
+        if (rm.role !== "tool") continue;
+        if (rm.tool_call_id === toolCallId) {
+          resultMessage = rm;
           break;
         }
       }
 
       pairs.push({
-        callTranscriptId: t.id,
+        callMessageId: m.id,
         callIndex: ci,
-        toolCallId,
-        toolName,
-        arguments: args,
-        result,
+        toolCall: tc,
+        resultMessage,
       });
     }
   }

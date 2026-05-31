@@ -9,4 +9,10 @@ export default defineConfig({
       "/api": "http://localhost:8000",
     },
   },
+  // vitest configuration (merged automatically when running vitest)
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: [],
+  },
 });
