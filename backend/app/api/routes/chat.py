@@ -163,7 +163,7 @@ async def stream_events(
         if driver is None:
             return
 
-        q = driver.subscribe(sid)
+        q = driver.subscribe(sid, replay_buffer=True)
         try:
             while True:
                 ev = await q.get()

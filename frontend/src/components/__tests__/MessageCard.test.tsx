@@ -117,7 +117,7 @@ describe("MessageCard", () => {
     expect(screen.queryByTestId("icon-bulb")).toBeNull();
   });
 
-  it("streaming assistant shows 'thinking...' when empty", () => {
+  it("streaming assistant shows spinner when empty", () => {
     render(
       <MessageCard
         message={makeMsg({
@@ -128,7 +128,8 @@ describe("MessageCard", () => {
         })}
       />,
     );
-    expect(screen.getAllByText("thinking...").length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText("Thinking").length).toBeGreaterThan(0);
+    expect(screen.queryByText("thinking...")).toBeNull();
   });
 
   // ── Tool ────────────────────────────────────────────

@@ -55,7 +55,6 @@ task_list_tool = StructuredTool.from_function(
 class TaskItem(BaseModel):
     id: str = Field(..., description="Unique task id.")
     name: str = Field(..., description="Short stable task name.")
-    description: str = Field(..., description="Task description.")
     status: TaskStatus = Field(
         ..., description="Task status: pending, progress, or done."
     )
@@ -63,6 +62,7 @@ class TaskItem(BaseModel):
         default_factory=list,
         description="Upstream task ids that must be done before this task.",
     )
+    description: str = Field(..., description="Task description.")
     summary: str = Field(
         default="",
         description="Task result summary. Required when status is 'done'; MUST be empty for 'pending' or 'progress'.",

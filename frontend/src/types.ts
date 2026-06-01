@@ -42,6 +42,11 @@ export interface StreamEvent {
 export interface SessionInfo {
   session_id: string;
   workspace: string;
+  session_name?: string;
+  session_kind?: "user" | "subagent" | string;
+  parent_session_id?: string;
+  parent_message_id?: string;
+  parent_tool_call_id?: string;
 }
 
 export interface SessionCache {
@@ -86,6 +91,7 @@ export interface MessageTruncateResponse {
   ok: boolean;
   message_id: string;
   removed: number;
+  deleted_subagents?: number;
 }
 
 // ── Tool pair（前端渲染辅助）───────────────────────────

@@ -26,6 +26,12 @@ _DEFAULT_TIMEOUT_S = 30
 class PyReplInput(BaseModel):
     """PyRepl 工具输入参数。"""
 
+    timeout_ms: int = Field(
+        default=30000,
+        ge=1000,
+        le=60000,
+        description="Timeout in milliseconds.",
+    )
     code: str = Field(
         ...,
         description=(
@@ -33,12 +39,6 @@ class PyReplInput(BaseModel):
             "builtins (int, str, list, dict, sorted, zip, ...). I/O and "
             "imports are blocked."
         ),
-    )
-    timeout_ms: int = Field(
-        default=30000,
-        ge=1000,
-        le=60000,
-        description="Timeout in milliseconds.",
     )
 
 

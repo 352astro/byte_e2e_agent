@@ -37,13 +37,13 @@ def get_platform_hint() -> str:
 class ShellInput(BaseModel):
     """Shell tool input parameters."""
 
-    command: str = Field(..., description="Single-line shell command.")
     timeout_ms: int = Field(
         default=30000,
         ge=1000,
         le=120000,
         description="Timeout in milliseconds.",
     )
+    command: str = Field(..., description="Single-line shell command.")
 
 
 async def shell_handler(

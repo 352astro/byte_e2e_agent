@@ -32,9 +32,6 @@ def _read_lines(path: Path) -> list[str] | None:
 class GrepInput(BaseModel):
     """Grep 工具输入参数。"""
 
-    regex: str = Field(
-        ..., description="Regex pattern to search for (Python re syntax)."
-    )
     include_pattern: str = Field(
         default="**/*",
         description=(
@@ -47,6 +44,9 @@ class GrepInput(BaseModel):
         ge=1,
         le=1000,
         description="Maximum number of matching lines to return.",
+    )
+    regex: str = Field(
+        ..., description="Regex pattern to search for (Python re syntax)."
     )
 
 

@@ -246,6 +246,7 @@ async def execute_one_tool(
                 prompt=args.get("prompt", ""),
                 max_steps=args.get("max_steps", 5),
                 with_skills=args.get("with_skills", []),
+                tool_call_id=tc.get("id", ""),
             )
         else:
             result_str = await run_subagent(

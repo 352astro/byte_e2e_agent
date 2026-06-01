@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import uuid
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -75,6 +76,8 @@ class SessionService:
             if not metadata:
                 write_session_metadata(scope)
                 metadata = read_session_metadata(scope)
+            session_kind = metadata.get("session_kind") or _session_kind(scope)
+            parent_session_id = metadata.get("parent_session_id") or _parent_id(scope)
             mtime = messages_path.stat().st_mtime
             result.append(
                 (
@@ -83,6 +86,12 @@ class SessionService:
                         "session_id": entry.name,
                         "workspace": metadata.get("workspace") or workspace,
                         "session_name": metadata.get("session_name", ""),
+                        "session_kind": session_kind,
+                        "parent_session_id": parent_session_id,
+                        "parent_message_id": metadata.get("parent_message_id", ""),
+                        "parent_tool_call_id": metadata.get(
+                            "parent_tool_call_id", ""
+                        ),
                         "updated_at": datetime.fromtimestamp(
                             mtime, tz=timezone.utc
                         ).isoformat(),
@@ -113,6 +122,7 @@ class SessionService:
     async def delete_session(self, session_id: str) -> None:
         scope = self._locator.resolve(session_id)
         ctx = self._ctx.scoped(scope.workspace)
+        child_scopes = self._child_scopes(scope.workspace, session_id)
         agent = ctx.pop_session(session_id)
         if agent is not None:
             await clear(agent)
@@ -120,9 +130,61 @@ class SessionService:
             ctx.shadow_repo.delete_branch(session_id)
         except Exception:
             pass
+        try:
+            await ctx.memory_store.delete_session(session_id)
+        except Exception:
+            pass
         session_dir = ctx.session_dir(session_id)
         if session_dir.is_dir():
             shutil.rmtree(session_dir)
+        for child_scope in child_scopes:
+            await self.delete_session(child_scope.session_id)
+
+    async def delete_subagents_for_messages(
+        self, workspace: str, parent_message_ids: set[str]
+    ) -> int:
+        if not parent_message_ids:
+            return 0
+        deleted = 0
+        for child_scope in self._child_scopes(workspace):
+            metadata = read_session_metadata(child_scope)
+            if metadata.get("parent_message_id") not in parent_message_ids:
+                continue
+            await self.delete_session(child_scope.session_id)
+            deleted += 1
+        return deleted
+
+    def _child_scopes(
+        self, workspace: str, parent_session_id: str | None = None
+    ) -> list[SessionScope]:
+        sessions_dir = CoreWorkspace(workspace).sessions_dir()
+        if not sessions_dir.is_dir():
+            return []
+        result: list[SessionScope] = []
+        for entry in sessions_dir.iterdir():
+            if not entry.is_dir() or not self._ctx.valid_session_id(entry.name):
+                continue
+            scope = SessionScope(
+                session_id=entry.name,
+                workspace=workspace,
+                session_dir=entry,
+                messages_path=entry / "messages.jsonl",
+                config_path=entry / "config.json",
+                metadata_path=entry / SESSION_META_FILE,
+            )
+            if not scope.messages_path.is_file():
+                continue
+            if (_session_kind(scope) != "subagent") and (
+                read_session_metadata(scope).get("session_kind") != "subagent"
+            ):
+                continue
+            if parent_session_id:
+                metadata = read_session_metadata(scope)
+                parent_id = metadata.get("parent_session_id") or _parent_id(scope)
+                if parent_id != parent_session_id:
+                    continue
+            result.append(scope)
+        return result
 
     def get_session_status(self, session_id: str) -> dict:
         try:
@@ -172,3 +234,39 @@ class SessionService:
 
     async def interrupt_current(self) -> bool:
         return await self._ctx.scheduler.interrupt()
+
+
+def _load_config(scope: SessionScope) -> dict[str, Any]:
+    if not scope.config_path.is_file():
+        return {}
+    try:
+        data = json.loads(scope.config_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _parent_id(scope: SessionScope) -> str:
+    access = _load_config(scope).get("access", {})
+    owner = access.get("owner", {}) if isinstance(access, dict) else {}
+    if not isinstance(owner, dict):
+        return ""
+    if owner.get("kind") != "session":
+        return ""
+    value = owner.get("session_id")
+    return value if isinstance(value, str) else ""
+
+
+def _session_kind(scope: SessionScope) -> str:
+    metadata = read_session_metadata(scope)
+    kind = metadata.get("session_kind")
+    if isinstance(kind, str) and kind:
+        return kind
+    access = _load_config(scope).get("access", {})
+    if isinstance(access, dict):
+        lifecycle = access.get("lifecycle")
+        owner = access.get("owner", {})
+        if lifecycle == "ephemeral" and isinstance(owner, dict):
+            if owner.get("kind") == "session":
+                return "subagent"
+    return "user"

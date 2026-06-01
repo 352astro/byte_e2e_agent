@@ -199,7 +199,7 @@ async def truncate_messages(
 ):
     """Truncate message history without modifying workspace commits."""
     try:
-        return checkpoint_service.truncate_messages(
+        return await checkpoint_service.truncate_messages(
             sid,
             req.message_id,
             keep=req.keep,

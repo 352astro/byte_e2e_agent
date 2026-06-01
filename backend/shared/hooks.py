@@ -121,6 +121,25 @@ class BaseHook(ABC):
     async def on_subagent_end(self, *, result: str, **kwargs: Any) -> None:
         pass
 
+    # ── 上下文注入 ──────────────────────────────────────
+
+    async def on_context_assemble(
+        self,
+        *,
+        turn_id: str,
+        session_id: str,
+        user_question: str,
+        **kwargs: Any,
+    ) -> list[dict]:
+        """在 messages 构建前触发，返回需注入的额外上下文。
+
+        每个 Hook 可返回一组 OpenAI-format dict（如 system message），
+        HookManager 会合并所有 Hook 的返回值并注入到 LLM 上下文。
+
+        典型用途：长期记忆检索、RAG、动态规则注入。
+        """
+        return []
+
 
 # ═══════════════════════════════════════════════════════════
 # HookManager
@@ -170,7 +189,37 @@ class HookManager:
                 logger.exception("Hook %s.%s failed", type(hook).__name__, method)
 
     async def flush(self) -> None:
-        pass  # synchronous dispatch — no pending tasks to flush
+        for hook in self._hooks:
+            fn = getattr(hook, "flush", None)
+            if fn is None:
+                continue
+            try:
+                await fn()
+            except Exception:
+                logger.exception("Hook %s.flush failed", type(hook).__name__)
+
+    # ── 上下文收集 ────────────────────────────────────
+
+    async def gather_context(self, **kwargs: Any) -> list[dict]:
+        """收集所有 Hook 的上下文注入，合并为统一列表。
+
+        每个 Hook.on_context_assemble() 返回一组 OpenAI-format dict，
+        此方法串行调用所有 Hook 并拼接结果。单个 Hook 异常不影响其他。
+        """
+        result: list[dict] = []
+        for hook in self._hooks:
+            try:
+                fn = getattr(hook, "on_context_assemble", None)
+                if fn is None:
+                    continue
+                items = await fn(**kwargs)
+                if items:
+                    result.extend(items)
+            except Exception:
+                logger.exception(
+                    "Hook %s.on_context_assemble failed", type(hook).__name__
+                )
+        return result
 
     # ── 便捷方法 ────────────────────────────────────────
 
@@ -200,3 +249,6 @@ class HookManager:
 
     async def on_subagent_end(self, **kwargs: Any) -> None:
         await self.dispatch("on_subagent_end", **kwargs)
+
+    async def on_context_assemble(self, **kwargs: Any) -> list[dict]:
+        return await self.gather_context(**kwargs)

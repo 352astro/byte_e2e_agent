@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import re
+
 from app.services.context import WorkspaceContext
 from app.services.errors import CommitNotFound, SessionNotFound
 from app.services.session_scope import SessionLocator
+from app.services.session_service import SessionService
+
+
+_SUBAGENT_RESULT_RE = re.compile(r"SubAgent session ([A-Za-z0-9_-]+) completed")
 
 
 class CheckpointService:
@@ -51,7 +57,7 @@ class CheckpointService:
             ctx.shadow_repo.set_head(session_id, commit_sha)
         return {"ok": True, "commit_sha": commit_sha}
 
-    def truncate_messages(
+    async def truncate_messages(
         self, session_id: str, message_id: str, *, keep: bool = False
     ) -> dict:
         try:
@@ -59,9 +65,64 @@ class CheckpointService:
             session = ctx.get_session(session_id)
         except (KeyError, SessionNotFound) as exc:
             raise SessionNotFound(session_id) from exc
+        messages = session.get_messages()
+        removed_messages = _messages_removed_by_truncate(messages, message_id, keep=keep)
+        removed_message_ids = {
+            msg_id
+            for msg in removed_messages
+            if isinstance((msg_id := msg.get("id")), str) and msg_id
+        }
         removed = session.truncate_by_id(message_id, keep=keep)
+        session_service = SessionService(self._ctx)
+        deleted_subagents = await session_service.delete_subagents_for_messages(
+            ctx.workspace,
+            removed_message_ids,
+        )
+        for child_id in _subagent_ids_from_messages(removed_messages):
+            try:
+                await session_service.delete_session(child_id)
+            except SessionNotFound:
+                continue
+            deleted_subagents += 1
         return {
             "ok": True,
             "message_id": message_id,
             "removed": removed,
+            "deleted_subagents": deleted_subagents,
         }
+
+
+def _messages_removed_by_truncate(
+    messages: list[dict],
+    message_id: str,
+    *,
+    keep: bool,
+) -> list[dict]:
+    cutoff = -1
+    for idx, msg in enumerate(messages):
+        if msg.get("id") == message_id:
+            cutoff = idx
+            break
+    if cutoff < 0:
+        return []
+    if keep:
+        cutoff += 1
+    return messages[cutoff:]
+
+
+def _subagent_ids_from_messages(messages: list[dict]) -> set[str]:
+    child_ids: set[str] = set()
+    for msg in messages:
+        result = msg.get("tool_result")
+        if isinstance(result, str):
+            child_ids.update(_SUBAGENT_RESULT_RE.findall(result))
+        for tool_call in msg.get("tool_calls") or []:
+            if not isinstance(tool_call, dict):
+                continue
+            meta = tool_call.get("tool_meta")
+            if not isinstance(meta, dict):
+                continue
+            child_id = meta.get("child_session_id")
+            if isinstance(child_id, str) and child_id:
+                child_ids.add(child_id)
+    return child_ids

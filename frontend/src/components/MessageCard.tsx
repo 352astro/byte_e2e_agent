@@ -103,9 +103,7 @@ const MessageCard = React.memo(function MessageCard({
           title={
             <>
               <Icon name="bulb" size={14} className="thinking-bulb" />
-              <span className="thinking-label">
-                thinking{isStreaming ? "..." : ""}
-              </span>
+              <span className="thinking-label">thinking</span>
             </>
           }
         >
@@ -116,7 +114,7 @@ const MessageCard = React.memo(function MessageCard({
           )}
           {!hasThinking && isStreaming && (
             <div className="thinking-body">
-              <span className="thinking-label">thinking...</span>
+              <span className="message-empty-spinner" aria-label="Thinking" />
             </div>
           )}
         </CollapsibleCard>
@@ -135,7 +133,7 @@ const MessageCard = React.memo(function MessageCard({
       {/* Streaming indicator */}
       {isStreaming && !hasThinking && !hasContent && (
         <div className="transcript-body streaming-indicator">
-          <span className="thinking-label">thinking...</span>
+          <span className="message-empty-spinner" aria-label="Thinking" />
         </div>
       )}
 

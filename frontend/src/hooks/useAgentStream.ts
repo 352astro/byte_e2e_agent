@@ -58,6 +58,36 @@ function emptyTC(): Record<string, unknown> {
   return { id: "", type: "function", function: { name: "", arguments: "" } };
 }
 
+function applyToolMeta(message: Message, raw: string): Message {
+  let meta: Record<string, unknown>;
+  try {
+    meta = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return message;
+  }
+  const tcs = [...(message.tool_calls || [])] as Record<string, any>[];
+  if (!tcs.length) return message;
+
+  const targetToolCallId = String(meta.parent_tool_call_id || "");
+  let idx = targetToolCallId
+    ? tcs.findIndex((tc) => tc.id === targetToolCallId)
+    : -1;
+  if (idx < 0) {
+    idx = tcs.findIndex((tc) => tc.function?.name === "SubAgent");
+  }
+  if (idx < 0) return message;
+
+  const existing = (tcs[idx].tool_meta || {}) as Record<string, unknown>;
+  tcs[idx] = {
+    ...tcs[idx],
+    tool_meta: {
+      ...existing,
+      ...meta,
+    },
+  };
+  return { ...message, tool_calls: tcs as any };
+}
+
 // ── hook ──────────────────────────────────────────────
 
 export default function useAgentStream({
@@ -90,6 +120,7 @@ export default function useAgentStream({
   const lastIdRef = useRef<string | null>(null);
   const prevSidRef = useRef<string | null>(sessionId);
   const completedIdsRef = useRef<Set<string>>(new Set());
+  const pendingToolMetaRef = useRef<Map<string, string[]>>(new Map());
 
   // ═══════════════════════════════════════════════════
   //  Derived
@@ -114,13 +145,25 @@ export default function useAgentStream({
     return genRef.current;
   };
 
+  const applyPendingToolMeta = useCallback((msg: Message) => {
+    const pending = pendingToolMetaRef.current.get(msg.id);
+    if (!pending?.length) return msg;
+    let next = msg;
+    for (const raw of pending) {
+      next = applyToolMeta(next, raw);
+    }
+    pendingToolMetaRef.current.delete(msg.id);
+    return next;
+  }, []);
+
   const appendCompleted = useCallback((msg: Message) => {
     setCompleted((prev) => {
-      if (prev.some((m) => m.id === msg.id)) return prev;
-      completedIdsRef.current.add(msg.id);
-      return [...prev, msg];
+      const nextMsg = applyPendingToolMeta(msg);
+      if (prev.some((m) => m.id === nextMsg.id)) return prev;
+      completedIdsRef.current.add(nextMsg.id);
+      return [...prev, nextMsg];
     });
-  }, []);
+  }, [applyPendingToolMeta]);
 
   useEffect(() => {
     completedIdsRef.current = new Set(completed.map((m) => m.id));
@@ -260,6 +303,22 @@ export default function useAgentStream({
           if (genRef.current !== gen) return;
           const { field, full_content } = ev;
           if (field === "tool_calls") break;
+          if (field === "tool_meta") {
+            const pending = pendingToolMetaRef.current.get(ev.message_id) || [];
+            pending.push(full_content);
+            pendingToolMetaRef.current.set(ev.message_id, pending);
+            setCompleted((prev) =>
+              prev.map((msg) =>
+                msg.id === ev.message_id ? applyToolMeta(msg, full_content) : msg,
+              ),
+            );
+            setActive((prev) =>
+              prev && prev.id === ev.message_id
+                ? applyToolMeta(prev, full_content)
+                : prev,
+            );
+            break;
+          }
           setActive((prev) => {
             if (!prev || prev.id !== ev.message_id) return prev;
             return { ...prev, [field]: full_content };

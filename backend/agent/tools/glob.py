@@ -11,6 +11,12 @@ from pydantic import BaseModel, Field
 class GlobInput(BaseModel):
     """Glob 工具输入参数。"""
 
+    max_results: int = Field(
+        default=200,
+        ge=1,
+        le=1000,
+        description="Maximum number of results to return.",
+    )
     pattern: str = Field(
         ...,
         description=(
@@ -18,12 +24,6 @@ class GlobInput(BaseModel):
             "Hint: avoid scanning the agent session storage directory — it contains "
             "session metadata and is not part of the user's codebase."
         ),
-    )
-    max_results: int = Field(
-        default=200,
-        ge=1,
-        le=1000,
-        description="Maximum number of results to return.",
     )
 
 

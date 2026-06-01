@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import Icon from "./Icon";
 import type { SessionInfo } from "../types";
 
 interface SessionSidebarProps {
@@ -8,6 +9,7 @@ interface SessionSidebarProps {
   onSelect: (sid: string) => void;
   onNew: () => void;
   onDelete?: (sid: string) => void;
+  onOpenSettings: () => void;
 }
 
 function workspaceLabel(path: string): string {
@@ -23,6 +25,7 @@ export default function SessionSidebar({
   onSelect,
   onNew,
   onDelete,
+  onOpenSettings,
 }: SessionSidebarProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -42,11 +45,13 @@ export default function SessionSidebar({
         sessions: Array<SessionInfo | string>;
       } = await res.json();
       setSessions(
-        (data.sessions || []).map((item) =>
-          typeof item === "string"
-            ? { session_id: item, workspace: data.workspace || "" }
-            : item,
-        ),
+        (data.sessions || [])
+          .map((item) =>
+            typeof item === "string"
+              ? { session_id: item, workspace: data.workspace || "" }
+              : item,
+          )
+          .filter((session) => session.session_kind !== "subagent"),
       );
       setError(null);
     } catch (err) {
@@ -282,6 +287,17 @@ export default function SessionSidebar({
             })}
           </div>
         ))}
+      </div>
+      <div className="sidebar-footer">
+        <button
+          className="sidebar-settings-btn"
+          type="button"
+          onClick={onOpenSettings}
+          title="Settings"
+        >
+          <Icon name="settings" size={17} />
+          <span>Settings</span>
+        </button>
       </div>
     </div>
   );

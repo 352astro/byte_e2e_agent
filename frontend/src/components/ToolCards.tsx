@@ -10,7 +10,6 @@ import Icon from "./Icon";
 import CollapsibleCard from "./CollapsibleCard";
 import HighlightCode from "./HighlightCode";
 import FileContent from "./FileContent";
-import Markdown from "./Markdown";
 import { extractArg, extractToolMeta } from "../utils";
 import { useCollapsible } from "../hooks/useCollapsible";
 
@@ -337,16 +336,19 @@ export function ToolResultCard({
       id={`${toolName}-result`}
       collapsed={collapsed}
       onToggle={toggle}
-      headerClassName="tool-default-header"
       title={
         <>
-          <Icon name="tool" size={13} className="tool-default-icon" />
-          <span className="tool-default-label">{toolName}</span>
+          <Icon name="tool" size={13} className="tool-icon" />
+          <span className="tool-label">{toolName}</span>
         </>
       }
     >
-      <div className="tool-default-body">
-        <Markdown text={result} />
+      <div className="tool-paired-body">
+        <div className="tool-code-block">
+          <pre>
+            <code>{result || "\u2026"}</code>
+          </pre>
+        </div>
       </div>
     </CollapsibleCard>
   );

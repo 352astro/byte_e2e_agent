@@ -17,6 +17,7 @@ from agent.hook.persistence_hook import PersistenceHook
 from agent.hook.shadow_commit_hook import ShadowCommitHook
 from agent.hook.stream_driver import StreamDriverHook
 from agent.llm import get_model_id
+from agent.memory import MemoryHook, SQLiteMemoryStore
 from agent.metrics import SQLiteLLMMetricsStore
 from agent.runtime import AgentRuntime
 from agent.session import Session, load_session
@@ -37,9 +38,13 @@ class WorkspaceContext:
     ) -> None:
         self._workspace = self._normalize(workspace)
         self._metrics_db_path = metrics_db_path
+        from app.core.config import get_settings
+
+        self._settings = get_settings()
         self._sessions: dict[str, Session] = {}
         self._runtime: AgentRuntime | None = None
         self._shadow_repo: ShadowRepo | None = None
+        self._memory_store: SQLiteMemoryStore | None = None
         self._scoped_contexts = (
             _shared_contexts if _shared_contexts is not None else {}
         )
@@ -61,6 +66,12 @@ class WorkspaceContext:
         if self._shadow_repo is None:
             self._shadow_repo = ShadowRepo(self._workspace)
         return self._shadow_repo
+
+    @property
+    def memory_store(self) -> SQLiteMemoryStore:
+        if self._memory_store is None:
+            self._memory_store = SQLiteMemoryStore(self._workspace)
+        return self._memory_store
 
     @property
     def scheduler(self) -> AgentRuntime:
@@ -94,6 +105,7 @@ class WorkspaceContext:
         self._sessions.clear()
         self._runtime = None
         self._shadow_repo = None
+        self._memory_store = None
         self.ensure_storage_ready()
 
     def resolve_workspace(self, path: str | None = None) -> str:
@@ -166,15 +178,24 @@ class WorkspaceContext:
         return SQLiteLLMMetricsStore(metrics_path)
 
     def _build_runtime(self) -> AgentRuntime:
-        hooks = HookManager(
-            [
-                StreamDriverHook(),
-                MetricsHook(self.metrics_store, model_id=self._model_id),
-                PersistenceHook(self._workspace),
-                ShadowCommitHook(self.shadow_repo),
-                LoggingHook(verbose=True),
-            ]
-        )
+        hook_list = [
+            StreamDriverHook(),
+            MetricsHook(self.metrics_store, model_id=self._model_id),
+            PersistenceHook(self._workspace),
+            ShadowCommitHook(self.shadow_repo),
+        ]
+        if self._settings.memory_enabled:
+            hook_list.append(
+                MemoryHook(
+                    self.memory_store,
+                    workspace=self._workspace,
+                    top_k=self._settings.memory_top_k,
+                    recall_top_k=self._settings.memory_recall_top_k,
+                    llm_timeout=self._settings.memory_llm_timeout,
+                )
+            )
+        hook_list.append(LoggingHook(verbose=True))
+        hooks = HookManager(hook_list)
         return AgentRuntime(CoreWorkspace(self._workspace), hooks)
 
     def _any_runtime_busy(self) -> bool:

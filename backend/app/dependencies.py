@@ -5,6 +5,7 @@ from app.services.chat_service import ChatService
 from app.services.checkpoint_service import CheckpointService
 from app.services.context import WorkspaceContext
 from app.services.metrics_service import MetricsService
+from app.services.memory_service import MemoryService
 from app.services.session_service import SessionService
 from app.services.workspace_service import WorkspaceService
 
@@ -36,3 +37,7 @@ def get_checkpoint_service() -> CheckpointService:
 
 def get_metrics_service() -> MetricsService:
     return MetricsService(get_context())
+
+
+def get_memory_service() -> MemoryService:
+    return MemoryService(get_context())

@@ -72,6 +72,7 @@ class MessageTruncateResponse(BaseModel):
     ok: bool
     message_id: str
     removed: int = 0
+    deleted_subagents: int = 0
 
 
 class InterruptResponse(BaseModel):

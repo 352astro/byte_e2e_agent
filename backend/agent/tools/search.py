@@ -14,9 +14,9 @@ from pydantic import BaseModel, Field
 class WebSearchInput(BaseModel):
     """WebSearch 工具输入参数。"""
 
-    query: str = Field(..., description="Search query keywords")
     gl: str = Field(default="cn", description="Country code")
     hl: str = Field(default="zh-cn", description="Language code")
+    query: str = Field(..., description="Search query keywords")
 
 
 def _do_serpapi_search(query: str, gl: str, hl: str) -> dict:
@@ -89,13 +89,13 @@ web_search_tool = StructuredTool.from_function(
 class WebFetchInput(BaseModel):
     """WebFetch 工具输入参数。"""
 
-    url: str = Field(..., description="Full URL to fetch (https://...)")
     max_bytes: int = Field(
         default=50_000,
         ge=1000,
         le=500_000,
         description="Maximum bytes to read from the response body.",
     )
+    url: str = Field(..., description="Full URL to fetch (https://...)")
 
 
 async def web_fetch_handler(

@@ -7,12 +7,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 
 from shared.hooks import BaseHook
 from shared.types import Message, StreamEvent, StreamEventKind
 
 logger = logging.getLogger(__name__)
+
+_MAX_BUFFERED_EVENTS_PER_SESSION = 2000
 
 
 class StreamDriverHook(BaseHook):
@@ -28,16 +31,23 @@ class StreamDriverHook(BaseHook):
     def __init__(self) -> None:
         self._subscribers: list[asyncio.Queue[StreamEvent | None]] = []
         self._subscriber_sessions: dict[int, str | None] = {}
+        self._event_buffers: dict[str, list[StreamEvent]] = {}
         self._closed: bool = False
 
     # ── 订阅管理 ────────────────────────────────────────
 
     def subscribe(
-        self, session_id: str | None = None
+        self,
+        session_id: str | None = None,
+        *,
+        replay_buffer: bool = False,
     ) -> asyncio.Queue[StreamEvent | None]:
         q: asyncio.Queue[StreamEvent | None] = asyncio.Queue()
         self._subscribers.append(q)
         self._subscriber_sessions[id(q)] = session_id
+        if replay_buffer and session_id:
+            for event in self._event_buffers.get(session_id, []):
+                q.put_nowait(event)
         if self._closed:
             q.put_nowait(None)
         return q
@@ -71,6 +81,12 @@ class StreamDriverHook(BaseHook):
     # ── 内部广播 ─────────────────────────────────────────
 
     def _broadcast(self, event: StreamEvent) -> None:
+        if event.session_id:
+            buffer = self._event_buffers.setdefault(event.session_id, [])
+            buffer.append(event)
+            if len(buffer) > _MAX_BUFFERED_EVENTS_PER_SESSION:
+                del buffer[: len(buffer) - _MAX_BUFFERED_EVENTS_PER_SESSION]
+
         dead: list[asyncio.Queue[StreamEvent | None]] = []
         for q in self._subscribers:
             session_id = self._subscriber_sessions.get(id(q))
@@ -82,6 +98,10 @@ class StreamDriverHook(BaseHook):
                 dead.append(q)
         for q in dead:
             self.unsubscribe(q)
+
+    def _clear_buffer(self, session_id: str | None) -> None:
+        if session_id:
+            self._event_buffers.pop(session_id, None)
 
     # ═══════════════════════════════════════════════════════
     # BaseHook 实现 — 直接透传 Message 字段名
@@ -100,10 +120,6 @@ class StreamDriverHook(BaseHook):
     ) -> None:
         if not delta or not msg.id:
             return
-
-        print(
-            f"\n>>>> on_chunk_delta {msg.id} | {field} | {delta} | {tool_name} | {kwargs}"
-        )
         tool_index = kwargs.get("tool_index", -1)
         sub_field = kwargs.get("sub_field", "")
         session_id = kwargs.get("session_id", "")
@@ -160,6 +176,7 @@ class StreamDriverHook(BaseHook):
                 )
             )
             self.close_subscribers(session_id=session_id)
+            self._clear_buffer(session_id)
 
     async def on_message_error(
         self, *, msg: Message, error: Exception, **kwargs
@@ -167,3 +184,52 @@ class StreamDriverHook(BaseHook):
         session_id = kwargs.get("session_id", "")
         self._broadcast(StreamEvent.interrupted(str(error), session_id=session_id))
         self.close_subscribers(session_id=session_id)
+        self._clear_buffer(session_id)
+
+    async def on_subagent_start(self, **kwargs) -> None:
+        parent_session_id = kwargs.get("parent_session_id", "")
+        parent_message_id = kwargs.get("parent_message_id", "")
+        parent_tool_call_id = kwargs.get("parent_tool_call_id", "")
+        child_session_id = kwargs.get("child_session_id", "")
+        if not parent_session_id or not parent_message_id or not child_session_id:
+            return
+        payload = {
+            "type": "subagent",
+            "status": "running",
+            "child_session_id": child_session_id,
+            "parent_tool_call_id": parent_tool_call_id,
+            "task": kwargs.get("task", ""),
+            "max_steps": kwargs.get("max_steps", 0),
+        }
+        self._broadcast(
+            StreamEvent.chunk_complete(
+                parent_message_id,
+                "tool_meta",
+                json.dumps(payload, ensure_ascii=False),
+                tool_name="SubAgent",
+                session_id=parent_session_id,
+            )
+        )
+
+    async def on_subagent_end(self, **kwargs) -> None:
+        parent_session_id = kwargs.get("parent_session_id", "")
+        parent_message_id = kwargs.get("parent_message_id", "")
+        parent_tool_call_id = kwargs.get("parent_tool_call_id", "")
+        child_session_id = kwargs.get("child_session_id", "")
+        if not parent_session_id or not parent_message_id or not child_session_id:
+            return
+        payload = {
+            "type": "subagent",
+            "status": "complete",
+            "child_session_id": child_session_id,
+            "parent_tool_call_id": parent_tool_call_id,
+        }
+        self._broadcast(
+            StreamEvent.chunk_complete(
+                parent_message_id,
+                "tool_meta",
+                json.dumps(payload, ensure_ascii=False),
+                tool_name="SubAgent",
+                session_id=parent_session_id,
+            )
+        )

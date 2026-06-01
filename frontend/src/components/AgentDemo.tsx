@@ -1,4 +1,11 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import {
+  Fragment,
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+} from "react";
 import useAgentStream from "../hooks/useAgentStream";
 import { FocusProvider } from "../hooks/FocusContext";
 import LockableButton from "./LockableButton";
@@ -396,7 +403,7 @@ export default function AgentDemo({
                 const pairs = pairsByCallId.get(t.id);
                 if (pairs) {
                   return (
-                    <>
+                    <Fragment key={t.id}>
                       {t.role === "assistant" && (
                         <div className="assistant-splitter" />
                       )}
@@ -413,7 +420,7 @@ export default function AgentDemo({
                           }
                         />
                       ))}
-                    </>
+                    </Fragment>
                   );
                 }
                 if (t.role === "user") {

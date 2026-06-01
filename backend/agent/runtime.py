@@ -14,7 +14,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid as _uuid
+from datetime import datetime, timezone
 
 from agent.actions import (
     execute_one_tool,
@@ -26,10 +28,10 @@ from agent.core.workspace import Workspace
 from agent.errors import InterruptedError
 from agent.session.entry import SessionEntry
 from agent.session.status import RuntimeStatus, SessionStatus
+from agent.tools import tool_registry
 from agent.tools.shell import get_platform_hint
 from agent.tools.skill import skill_context_message
 from agent.tools.task import task_context_message
-from agent.tools import tool_registry
 from agent.tools.toolset import ToolSet
 from app.core.config import TMP_DIR
 from shared.hooks import BaseHook, HookManager
@@ -127,6 +129,7 @@ class AgentRuntime:
         sid = session_id or _uuid.uuid4().hex[:12]
         self._workspace.ensure_dirs(sid)
         self._workspace.save_session_config(sid, config)
+        self._workspace.messages_path(sid).touch(exist_ok=True)
 
         entry = SessionEntry(
             id=sid,
@@ -238,6 +241,8 @@ class AgentRuntime:
         task: str,
         *,
         max_turns: int | None = None,
+        parent_message_id: str = "",
+        parent_tool_call_id: str = "",
     ) -> str:
         """Agent 调用另一个 Agent Session。
 
@@ -282,6 +287,9 @@ class AgentRuntime:
             await self._hooks.on_subagent_start(
                 task=task,
                 parent_session_id=caller_id,
+                child_session_id=target.id,
+                parent_message_id=parent_message_id,
+                parent_tool_call_id=parent_tool_call_id,
                 max_steps=max_turns or 10,
             )
             self._running_session_id = target.id
@@ -293,7 +301,13 @@ class AgentRuntime:
                 top_level=False,
             )
             self._running_session_id = previous_running
-            await self._hooks.on_subagent_end(result=result)
+            await self._hooks.on_subagent_end(
+                result=result,
+                parent_session_id=caller_id,
+                child_session_id=target.id,
+                parent_message_id=parent_message_id,
+                parent_tool_call_id=parent_tool_call_id,
+            )
             return result
         finally:
             self._running_session_id = previous_running
@@ -311,6 +325,8 @@ class AgentRuntime:
         *,
         max_steps: int = 5,
         with_skills: list[str] | None = None,
+        parent_message_id: str = "",
+        parent_tool_call_id: str = "",
     ) -> str:
         """Create an ephemeral child session and invoke it from caller_id."""
         openai_client, model_id = self._get_llm()
@@ -341,11 +357,21 @@ class AgentRuntime:
             llm_client=openai_client,
             ws=Workspace(str(self._workspace.root)),
         )
+        _write_subagent_metadata(
+            self._workspace,
+            child_id,
+            parent_id=caller_id,
+            parent_message_id=parent_message_id,
+            parent_tool_call_id=parent_tool_call_id,
+            task=task,
+        )
         result = await self.invoke_agent(
             caller_id,
             child_id,
             task,
             max_turns=max_steps,
+            parent_message_id=parent_message_id,
+            parent_tool_call_id=parent_tool_call_id,
         )
         return f"SubAgent session {child_id} completed.\n\n{result}"
 
@@ -425,6 +451,13 @@ class AgentRuntime:
             await self._hooks.on_message_finish(msg=user_msg, session_id=sid)
             await asyncio.sleep(0)
 
+            # 收集 Hook 注入的上下文（长期记忆 / RAG 等）— 仅一次
+            injected_context = await self._hooks.gather_context(
+                turn_id=turn_id,
+                session_id=sid,
+                user_question=question,
+            )
+
             for step in range(max_steps):
                 if intr.is_set():
                     raise InterruptedError("Interrupted by user")
@@ -466,6 +499,10 @@ class AgentRuntime:
 
                 session = load_session(str(ws.root), sid, ws=ws)
                 messages.extend(session.get_llm_context())
+
+                # 注入 Hook 上下文（已在上方 gather 一次，复用）
+                if injected_context:
+                    messages.extend(injected_context)
 
                 assistant_id = _uuid.uuid4().hex
                 tool_names = entry.config.tool_names()
@@ -543,13 +580,18 @@ class AgentRuntime:
                     }
 
                     async def invoke_child_agent(
-                        prompt, max_steps=5, with_skills=None
+                        prompt,
+                        max_steps=5,
+                        with_skills=None,
+                        tool_call_id="",
                     ):
                         return await self.invoke_subagent(
                             sid,
                             prompt,
                             max_steps=max_steps,
                             with_skills=with_skills,
+                            parent_message_id=assistant_msg.id,
+                            parent_tool_call_id=tool_call_id,
                         )
 
                     try:
@@ -669,6 +711,41 @@ def _entry_id(entry: SessionEntry) -> str:
     if isinstance(legacy_value, str) and legacy_value:
         return legacy_value
     return str(value)
+
+
+def _write_subagent_metadata(
+    workspace: Workspace,
+    session_id: str,
+    *,
+    parent_id: str,
+    parent_message_id: str,
+    parent_tool_call_id: str,
+    task: str,
+) -> None:
+    path = workspace.session_dir(session_id) / "session.json"
+    now = datetime.now(timezone.utc).isoformat()
+    existing = {}
+    if path.is_file():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+    payload = {
+        **existing,
+        "session_id": session_id,
+        "workspace": str(workspace.root),
+        "session_kind": "subagent",
+        "parent_session_id": parent_id,
+        "parent_message_id": parent_message_id,
+        "parent_tool_call_id": parent_tool_call_id,
+        "task": task,
+        "created_at": existing.get("created_at") or now,
+        "updated_at": now,
+    }
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _extract_usage(msg: Message | None) -> dict:

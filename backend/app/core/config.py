@@ -35,6 +35,10 @@ class Settings:
     cors_allow_origin_regex: str
     cors_allow_credentials: bool
     llm_metrics_db_path: str
+    memory_enabled: bool
+    memory_top_k: int
+    memory_recall_top_k: int
+    memory_llm_timeout: float
 
 
 @lru_cache
@@ -50,4 +54,29 @@ def get_settings() -> Settings:
         llm_metrics_db_path=(
             os.environ.get("LLM_METRICS_DB_PATH") or DEFAULT_LLM_METRICS_DB_PATH
         ),
+        memory_enabled=_env_bool("MEMORY_ENABLED", default=False),
+        memory_top_k=_env_int("MEMORY_TOP_K", default=5),
+        memory_recall_top_k=_env_int("MEMORY_RECALL_TOP_K", default=30),
+        memory_llm_timeout=_env_float("MEMORY_LLM_TIMEOUT", default=10.0),
     )
+
+
+def _env_bool(name: str, *, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, *, default: int) -> int:
+    try:
+        return int(os.environ.get(name, ""))
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, *, default: float) -> float:
+    try:
+        return float(os.environ.get(name, ""))
+    except ValueError:
+        return default

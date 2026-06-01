@@ -1,12 +1,14 @@
 import { useState, useCallback } from "react";
 import AgentDemo from "./components/AgentDemo";
 import SessionSidebar from "./components/SessionSidebar";
+import SettingsWindow from "./components/SettingsWindow";
 import "./App.css";
 
 
 export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const handleSelect = useCallback((sid: string) => {
     setSessionId(sid);
@@ -43,6 +45,7 @@ export default function App() {
         onSelect={handleSelect}
         onNew={handleNew}
         onDelete={handleDelete}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
       <div className="app-main">
         <AgentDemo
@@ -50,6 +53,12 @@ export default function App() {
           onSessionCreated={handleSessionCreated}
         />
       </div>
+      {settingsOpen && (
+        <SettingsWindow
+          workspace={workspace}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </div>
   );
 }

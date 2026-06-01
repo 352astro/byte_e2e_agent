@@ -144,11 +144,11 @@ browser_open_tool = StructuredTool.from_function(
 class BrowserActInput(BaseModel):
     """BrowserAct 工具输入参数。"""
 
-    selector: str = Field(..., description="CSS selector of the element to act on.")
     action: Literal["click", "type", "key"] = Field(
         ...,
         description="Action: 'click' to click, 'type' to fill text, 'key' to press a keyboard key.",
     )
+    selector: str = Field(..., description="CSS selector of the element to act on.")
     value: str = Field(
         default="",
         description="Text to type (for 'type') or key name (for 'key', e.g. 'Enter', 'Escape').",
