@@ -34,6 +34,7 @@ Return strict JSON only:
       "scope": "session|workspace",
       "kind": "fact|preference|decision|todo|summary",
       "content": "one concise sentence",
+      "feature": "short recall feature; keywords and meaning in under 16 words",
       "confidence": 0.0
     }}
   ]
@@ -48,10 +49,10 @@ Conversation:
 _RERANK_PROMPT = """\
 Current question: {question}
 
-Past memories:
+Memory feature index:
 {candidates}
 
-Which memories are relevant to the current question?
+Pick memories whose feature is semantically relevant to the current question.
 Return ONLY numbers like "1, 3, 5". Return "none" if none are relevant.
 Relevant:"""
 
@@ -62,7 +63,7 @@ _SECRET_RE = re.compile(
 
 
 class MemoryHook(BaseHook):
-    """Long-term memory hook using structured extraction + FTS5 recall."""
+    """Long-term memory hook using structured extraction + LLM feature recall."""
 
     def __init__(
         self,
@@ -100,17 +101,20 @@ class MemoryHook(BaseHook):
         if not user_question.strip():
             return []
         try:
-            candidates = await self._store.search(
-                user_question,
-                top_k=self._recall_top_k,
-                session_id=session_id,
+            candidates = await self._store.list(
                 workspace=self._workspace or None,
                 scopes=("workspace", "session"),
                 kinds=("fact", "preference", "decision", "todo", "summary"),
+                limit=max(self._recall_top_k, self._top_k),
             )
         except Exception:
-            logger.exception("MemoryHook: search failed")
+            logger.exception("MemoryHook: list failed")
             return []
+        candidates = [
+            rec
+            for rec in candidates
+            if rec.scope != "session" or rec.session_id == session_id
+        ]
         print(
             "[MemoryHook] recall "
             f"workspace={self._workspace} session={session_id} "
@@ -120,12 +124,14 @@ class MemoryHook(BaseHook):
         if not candidates:
             return []
 
-        selected = candidates
-        if len(candidates) > self._top_k:
-            selected = await self._rerank(user_question, candidates)
+        selected = await self._rerank(user_question, candidates)
         selected = selected[: self._top_k]
         if not selected:
             return []
+        try:
+            await self._store.mark_used([rec.id for rec in selected])
+        except Exception:
+            logger.exception("MemoryHook: mark_used failed")
 
         grouped: dict[str, list[str]] = {}
         for rec in selected:
@@ -215,6 +221,9 @@ class MemoryHook(BaseHook):
             content = str(item.get("content", "")).strip()
             if not content or _looks_sensitive(content):
                 continue
+            feature = str(item.get("feature", "")).strip() or content
+            if _looks_sensitive(feature):
+                feature = content
             scope = str(item.get("scope", "workspace")).strip().lower()
             kind = str(item.get("kind", "summary")).strip().lower()
             confidence = _as_float(item.get("confidence"), default=1.0)
@@ -239,6 +248,7 @@ class MemoryHook(BaseHook):
                 scope=scope,
                 kind=kind,
                 content=content,
+                feature=feature,
                 confidence=confidence,
                 created_at=now,
                 updated_at=now,
@@ -250,7 +260,7 @@ class MemoryHook(BaseHook):
                     "[MemoryHook] store "
                     f"workspace={self._workspace} session={session_id} "
                     f"scope={scope} kind={kind} confidence={confidence:.2f} "
-                    f"content={content[:120]!r}",
+                    f"feature={feature[:80]!r} content={content[:120]!r}",
                     flush=True,
                 )
             except Exception:
@@ -275,7 +285,7 @@ class MemoryHook(BaseHook):
         self, question: str, candidates: list[MemoryRecord]
     ) -> list[MemoryRecord]:
         lines = [
-            f"{i}. [{rec.kind}/{rec.scope}] {rec.content}"
+            f"{i}. [{rec.kind}/{rec.scope}] {_memory_feature(rec)}"
             for i, rec in enumerate(candidates, 1)
         ]
         prompt = _RERANK_PROMPT.format(
@@ -348,3 +358,8 @@ def _as_float(value: object, *, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _memory_feature(record: MemoryRecord) -> str:
+    feature = (record.feature or record.content).strip()
+    return feature[:160] + "..." if len(feature) > 160 else feature

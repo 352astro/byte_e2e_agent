@@ -222,11 +222,11 @@ Services
 长期记忆默认关闭，通过 `MEMORY_ENABLED=1` 开启。实现位于 `backend/agent/memory/`：
 
 - `SQLiteMemoryStore` 存储在 `{workspace}/.byte_agent/memory.db`
-- SQLite FTS5 做 BM25 全文检索，不依赖 embedding 或向量数据库
-- `MemoryHook` 在 turn 结束时用 side-query LLM 提取结构化记忆
-- 记忆字段包括 `scope`、`kind`、`confidence`、`content_hash`
+- SQLite 负责持久化、scope/kind 粗筛和去重，不依赖 embedding 或向量数据库
+- `MemoryHook` 在 turn 结束时用 side-query LLM 提取结构化记忆和简短 `feature`
+- 记忆字段包括 `scope`、`kind`、`confidence`、`content`、`feature`、`content_hash`
 - 当前支持 `workspace` 和 `session` scope；删除 session 时只清理 session-scope memory
-- 召回时按 workspace/session 过滤，注入为 `## Long-term Memory` system context
+- 召回时按 workspace/session 过滤候选，把短 `feature` 列表交给 side-query LLM 选择，再注入为 `## Long-term Memory` system context
 
 记忆提取会过滤常见 secret/token/password 内容。side-query LLM 可用 `SIDE_LLM_*` 单独配置；未配置时回退到 `LLM_*`。
 
@@ -265,7 +265,7 @@ SubAgent 当前是 invoke 式独立 session：父 agent 调用后进入等待，
 | `LLM_METRICS_DB_PATH` | `.byte_agent/ai_metrics.sqlite3` | 指标数据库；相对路径按 workspace 解析 |
 | `MEMORY_ENABLED` | `0` | 是否启用长期记忆 |
 | `MEMORY_TOP_K` | `5` | 注入上下文的记忆数量 |
-| `MEMORY_RECALL_TOP_K` | `30` | FTS5 粗召回数量 |
+| `MEMORY_RECALL_TOP_K` | `30` | 交给 side-query LLM 挑选的候选记忆上限 |
 | `MEMORY_LLM_TIMEOUT` | `10` | side-query LLM 超时，秒 |
 | `SIDE_LLM_API_KEY` | `LLM_API_KEY` | 长期记忆 side-query API key |
 | `SIDE_LLM_BASE_URL` | `LLM_BASE_URL` | 长期记忆 side-query endpoint |

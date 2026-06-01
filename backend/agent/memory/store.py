@@ -29,6 +29,7 @@ class MemoryRecord:
     scope: str = "workspace"
     kind: str = "summary"
     content: str = ""
+    feature: str = ""
     confidence: float = 1.0
     content_hash: str = ""
     created_at: float = field(default_factory=time.time)
@@ -61,6 +62,11 @@ class MemoryStore(ABC):
     @abstractmethod
     async def delete(self, memory_id: str, *, workspace: str | None = None) -> bool:
         """Delete one memory by id."""
+        ...
+
+    @abstractmethod
+    async def mark_used(self, memory_ids: list[str]) -> None:
+        """Mark selected memories as used."""
         ...
 
     @abstractmethod
@@ -159,6 +165,7 @@ CREATE TABLE IF NOT EXISTS memories (
     scope TEXT NOT NULL DEFAULT 'workspace',
     kind TEXT NOT NULL DEFAULT 'summary',
     content TEXT NOT NULL,
+    feature TEXT NOT NULL DEFAULT '',
     confidence REAL NOT NULL DEFAULT 1.0,
     content_hash TEXT NOT NULL DEFAULT '',
     created_at REAL NOT NULL,
@@ -234,6 +241,7 @@ class SQLiteMemoryStore(MemoryStore):
             "scope": "TEXT NOT NULL DEFAULT 'workspace'",
             "kind": "TEXT NOT NULL DEFAULT 'summary'",
             "confidence": "REAL NOT NULL DEFAULT 1.0",
+            "feature": "TEXT NOT NULL DEFAULT ''",
             "content_hash": "TEXT NOT NULL DEFAULT ''",
             "updated_at": "REAL NOT NULL DEFAULT 0",
             "last_used_at": "REAL",
@@ -257,6 +265,7 @@ class SQLiteMemoryStore(MemoryStore):
                 "UPDATE memories SET content_hash = ? WHERE id = ?",
                 (memory_content_hash(_unsplit_cjk(row["content"])), row["id"]),
             )
+        conn.execute("UPDATE memories SET feature = content WHERE feature = ''")
         conn.execute(
             "UPDATE memories SET scope = 'workspace' "
             "WHERE scope = 'session' "
@@ -270,6 +279,7 @@ class SQLiteMemoryStore(MemoryStore):
         content = record.content.strip()
         if not content:
             return
+        feature = (record.feature or content).strip()
         scope = record.scope if record.scope in MEMORY_SCOPES else "workspace"
         kind = record.kind if record.kind in MEMORY_KINDS else "summary"
         workspace = record.workspace or self._workspace_root
@@ -285,11 +295,13 @@ class SQLiteMemoryStore(MemoryStore):
             if existing:
                 conn.execute(
                     "UPDATE memories SET session_id = ?, turn_id = ?, content = ?, "
-                    "confidence = ?, updated_at = ?, use_count = ? WHERE id = ?",
+                    "feature = ?, confidence = ?, updated_at = ?, use_count = ? "
+                    "WHERE id = ?",
                     (
                         record.session_id,
                         record.turn_id,
                         _split_cjk(content),
+                        _split_cjk(feature),
                         record.confidence,
                         now,
                         int(existing["use_count"] or 0) + 1,
@@ -300,9 +312,9 @@ class SQLiteMemoryStore(MemoryStore):
                 conn.execute(
                     "INSERT INTO memories ("
                     "id, workspace, session_id, turn_id, scope, kind, content, "
-                    "confidence, content_hash, created_at, updated_at, "
+                    "feature, confidence, content_hash, created_at, updated_at, "
                     "last_used_at, use_count, archived"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         record.id,
                         workspace,
@@ -311,6 +323,7 @@ class SQLiteMemoryStore(MemoryStore):
                         scope,
                         kind,
                         _split_cjk(content),
+                        _split_cjk(feature),
                         record.confidence,
                         content_hash,
                         record.created_at or now,
@@ -361,7 +374,7 @@ class SQLiteMemoryStore(MemoryStore):
         params.append(top_k)
         sql = (
             "SELECT m.id, m.workspace, m.session_id, m.turn_id, m.scope, "
-            "m.kind, m.content, m.confidence, m.content_hash, m.created_at, "
+            "m.kind, m.content, m.feature, m.confidence, m.content_hash, m.created_at, "
             "m.updated_at, m.last_used_at, m.use_count, m.archived, "
             "bm25(memories_fts) AS score "
             "FROM memories_fts "
@@ -409,7 +422,7 @@ class SQLiteMemoryStore(MemoryStore):
             params.extend(kinds)
         params.append(limit)
         sql = (
-            "SELECT id, workspace, session_id, turn_id, scope, kind, content, "
+            "SELECT id, workspace, session_id, turn_id, scope, kind, content, feature, "
             "confidence, content_hash, created_at, updated_at, last_used_at, "
             "use_count, archived FROM memories "
             f"WHERE {' AND '.join(where)} "
@@ -437,6 +450,22 @@ class SQLiteMemoryStore(MemoryStore):
         except Exception:
             logger.exception("SQLiteMemoryStore: delete failed")
             return False
+
+    async def mark_used(self, memory_ids: list[str]) -> None:
+        ids = [memory_id for memory_id in memory_ids if memory_id]
+        if not ids:
+            return
+        conn = self._get_conn()
+        now = time.time()
+        try:
+            conn.executemany(
+                "UPDATE memories SET last_used_at = ?, use_count = use_count + 1 "
+                "WHERE id = ? AND archived = 0",
+                [(now, memory_id) for memory_id in ids],
+            )
+            conn.commit()
+        except Exception:
+            logger.exception("SQLiteMemoryStore: mark_used failed")
 
     async def delete_session(self, session_id: str) -> None:
         conn = self._get_conn()
@@ -477,6 +506,7 @@ def _record_from_row(row: sqlite3.Row) -> MemoryRecord:
         scope=row["scope"],
         kind=row["kind"],
         content=_unsplit_cjk(row["content"]),
+        feature=_unsplit_cjk(row["feature"]),
         confidence=float(row["confidence"]),
         content_hash=row["content_hash"],
         created_at=float(row["created_at"]),
@@ -571,6 +601,16 @@ class InMemoryMemoryStore(MemoryStore):
             )
         ]
         return len(self._records) != before
+
+    async def mark_used(self, memory_ids: list[str]) -> None:
+        ids = {memory_id for memory_id in memory_ids if memory_id}
+        if not ids:
+            return
+        now = time.time()
+        for rec in self._records:
+            if rec.id in ids and not rec.archived:
+                rec.last_used_at = now
+                rec.use_count += 1
 
     async def delete_session(self, session_id: str) -> None:
         self._records = [

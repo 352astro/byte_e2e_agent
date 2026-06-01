@@ -110,12 +110,14 @@ class ExtractingMemoryHook(MemoryHook):
                         "scope": "session",
                         "kind": "preference",
                         "content": "User prefers concise engineering answers.",
+                        "feature": "answer style preference: concise engineering answers",
                         "confidence": 0.9,
                     },
                     {
                         "scope": "workspace",
                         "kind": "fact",
                         "content": "API key sk-secret must never be stored.",
+                        "feature": "sensitive credential that must be skipped",
                         "confidence": 0.99,
                     },
                 ]
@@ -138,3 +140,39 @@ async def test_memory_hook_extracts_structured_memory_and_skips_secrets():
     assert results[0].kind == "preference"
     assert results[0].scope == "workspace"
     assert "concise" in results[0].content
+    assert "concise engineering" in results[0].feature
+
+
+class PickingMemoryHook(MemoryHook):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.pick_prompt = ""
+
+    async def _llm_call(self, prompt: str, max_tokens: int = 120) -> str:
+        self.pick_prompt = prompt
+        return "1"
+
+
+@pytest.mark.asyncio
+async def test_memory_hook_recalls_by_llm_feature_pick_without_keyword_search():
+    store = InMemoryMemoryStore()
+    await store.add(
+        MemoryRecord(
+            workspace="/repo",
+            session_id="s1",
+            scope="workspace",
+            kind="preference",
+            content="用户最爱喝芒果味奶昔。",
+            feature="饮品偏好：最爱芒果味奶昔",
+        )
+    )
+    hook = PickingMemoryHook(store, workspace="/repo", top_k=1, recall_top_k=20)
+
+    injected = await hook.on_context_assemble(
+        turn_id="t2",
+        session_id="s2",
+        user_question="我平时喜欢什么饮品？",
+    )
+
+    assert "饮品偏好" in hook.pick_prompt
+    assert "用户最爱喝芒果味奶昔。" in injected[0]["content"]
