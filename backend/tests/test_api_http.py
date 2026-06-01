@@ -200,12 +200,15 @@ class TestSessionEndpoints:
 
         status = client.get(f"/api/session/{sid}/status")
         assert status.status_code == 200
-        assert status.json() == {"running": False}
+        status_body = status.json()
+        assert status_body["running"] is False
+        assert status_body["runtime_busy"] is False
 
         recover = client.get(f"/api/session/{sid}/recover")
         assert recover.status_code == 200
         recover_body = recover.json()
         assert recover_body["running"] is False
+        assert recover_body["runtime_busy"] is False
         assert isinstance(recover_body["transcripts"], list)
 
         commits = client.get(f"/api/session/{sid}/commits")

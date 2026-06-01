@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 
 interface AgentInputProps {
     running: boolean;
+    runtimeBusy: boolean;
     interrupting: boolean;
     prefillRef: React.MutableRefObject<string>;
     prefillContent: string;
@@ -12,6 +13,7 @@ interface AgentInputProps {
 
 export default function AgentInput({
     running,
+    runtimeBusy,
     interrupting,
     prefillRef,
     prefillContent,
@@ -56,6 +58,7 @@ export default function AgentInput({
             onInterrupt();
             return;
         }
+        if (runtimeBusy) return;
         if (prefillContent.trim()) {
             prefillRef.current = prefillContent.trim();
             onPrefillChange("");
@@ -129,12 +132,19 @@ export default function AgentInput({
                         onClick={handleSendClick}
                         disabled={
                             interrupting ||
+                            (!running && runtimeBusy) ||
                             (!running &&
                                 !question.trim() &&
                                 !prefillContent.trim())
                         }
                     >
-                        {interrupting ? "Stopping…" : running ? "Stop" : "Send"}
+                        {interrupting
+                            ? "Stopping…"
+                            : running
+                              ? "Stop"
+                              : runtimeBusy
+                                ? "Busy"
+                                : "Send"}
                     </button>
                 </div>
             </div>

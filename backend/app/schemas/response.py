@@ -39,11 +39,13 @@ class RecoverResponse(BaseModel):
     session: dict
     messages: list[Message]
     running: bool = False
+    runtime_busy: bool = False
     current_message: Message | None = None
 
 
 class StatusResponse(BaseModel):
     running: bool
+    runtime_busy: bool = False
 
 
 class CommitInfo(BaseModel):

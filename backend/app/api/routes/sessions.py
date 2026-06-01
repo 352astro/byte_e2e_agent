@@ -19,7 +19,7 @@ from app.schemas.response import (
     WorkspaceRestoreResponse,
 )
 from app.services.checkpoint_service import CheckpointService
-from app.services.errors import CommitNotFound, SessionNotFound
+from app.services.errors import AmbiguousSession, CommitNotFound, SessionNotFound
 from app.services.session_service import SessionService
 from app.services.workspace_service import WorkspaceService
 
@@ -75,6 +75,8 @@ async def delete_session(
         await session_service.delete_session(sid)
     except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
+    except AmbiguousSession as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     return {"ok": True}
 
 
@@ -88,6 +90,8 @@ def get_history(
         history = session_service.get_history(sid)
     except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
+    except AmbiguousSession as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     return {"session": info, "history": history}
 
 
@@ -101,6 +105,8 @@ async def session_status(
         return session_service.get_session_status(sid)
     except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
+    except AmbiguousSession as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.get("/status", response_model=StatusResponse)
@@ -121,6 +127,8 @@ async def recover_session(
         return session_service.get_recovery_state(sid)
     except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
+    except AmbiguousSession as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.get("/session/{sid}/commits", response_model=CommitsResponse)
@@ -133,6 +141,8 @@ async def list_commits(
         return {"commits": checkpoint_service.list_commits(sid)}
     except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
+    except AmbiguousSession as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.get("/session/{sid}/commits/{sha}", response_model=CommitDetail)
@@ -144,8 +154,12 @@ async def get_commit(
     """Return metadata for a specific commit."""
     try:
         return checkpoint_service.get_commit(sid, sha)
+    except SessionNotFound:
+        raise HTTPException(status_code=404, detail="Session not found")
     except CommitNotFound:
         raise HTTPException(status_code=404, detail=f"Commit not found: {sha}")
+    except AmbiguousSession as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.post(
@@ -170,6 +184,8 @@ async def restore_commit(
         raise HTTPException(
             status_code=404, detail=f"Commit not found: {req.commit_sha}"
         )
+    except AmbiguousSession as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.post(
@@ -190,6 +206,8 @@ async def truncate_messages(
         )
     except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
+    except AmbiguousSession as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.post("/session/{sid}/interrupt", response_model=InterruptResponse)
@@ -202,6 +220,8 @@ async def interrupt_session(
         ok = await session_service.interrupt_session(sid)
     except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
+    except AmbiguousSession as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     return {"ok": ok}
 
 

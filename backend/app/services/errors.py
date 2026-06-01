@@ -17,6 +17,14 @@ class SessionNotFound(ServiceError):
         super().__init__(f"Session not found: {session_id}")
 
 
+class AmbiguousSession(ServiceError):
+    def __init__(self, session_id: str, workspaces: list[str]) -> None:
+        self.session_id = session_id
+        self.workspaces = workspaces
+        joined = ", ".join(workspaces)
+        super().__init__(f"Session id is ambiguous: {session_id} ({joined})")
+
+
 class CommitNotFound(ServiceError):
     def __init__(self, sha: str) -> None:
         self.sha = sha

@@ -90,6 +90,7 @@ export default function AgentDemo({
 
   const {
     running,
+    runtimeBusy,
     interrupting,
     messages,
     send,
@@ -107,7 +108,7 @@ export default function AgentDemo({
     scrollContainerRef: scrollRef,
   });
 
-  const locked = running || interrupting;
+  const locked = running || runtimeBusy || interrupting;
   const [graphVersion, setGraphVersion] = useState(0);
   const graphRef = useRef<CommitGraphHandle>(null);
 
@@ -478,6 +479,7 @@ export default function AgentDemo({
 
       <AgentInput
         running={running}
+        runtimeBusy={runtimeBusy}
         interrupting={interrupting}
         prefillRef={prefillRef}
         prefillContent={prefillContent}

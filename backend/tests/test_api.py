@@ -94,6 +94,8 @@ class TestSessionCRUD:
         assert isinstance(data["messages"], list)
         assert "running" in data
         assert data["running"] is False
+        assert "runtime_busy" in data
+        assert data["runtime_busy"] is False
 
     def test_status_returns_global_runtime_state(self):
         r = client.get("/api/status")
@@ -101,6 +103,10 @@ class TestSessionCRUD:
         data = r.json()
         assert "running" in data
         assert data["running"] is False
+        assert "runtime_busy" in data
+        assert data["runtime_busy"] is False
+        assert "runtime_busy" in data
+        assert data["runtime_busy"] is False
 
     def test_legacy_session_status_returns_global_runtime_state(self):
         r = client.post("/api/session")

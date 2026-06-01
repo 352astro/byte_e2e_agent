@@ -11,7 +11,12 @@ from app.api.sse import sse_response
 from app.dependencies import get_chat_service
 from app.schemas.chat import ChatRequest, RespondRequest
 from app.services.chat_service import ChatService
-from app.services.errors import AgentBusy, PendingRequestNotFound, SessionNotFound
+from app.services.errors import (
+    AgentBusy,
+    AmbiguousSession,
+    PendingRequestNotFound,
+    SessionNotFound,
+)
 from shared.types import StreamEvent, StreamEventKind
 
 router = APIRouter(prefix="/api/session/{sid}")
@@ -112,6 +117,8 @@ async def chat(
         stream = chat_service.start_chat(sid, req.question, req.max_steps)
     except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
+    except AmbiguousSession as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     except AgentBusy as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
@@ -142,6 +149,8 @@ async def stream_events(
         stream = chat_service.get_stream(sid)
     except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
+    except AmbiguousSession as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
     driver = stream.driver
     session = stream.session
@@ -176,7 +185,11 @@ async def respond(
     chat_service: ChatService = Depends(get_chat_service),
 ):
     try:
-        await chat_service.respond_to_pending(req.message_id, req.response)
+        await chat_service.respond_to_pending(sid, req.message_id, req.response)
+    except SessionNotFound:
+        raise HTTPException(status_code=404, detail="Session not found")
+    except AmbiguousSession as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     except PendingRequestNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"ok": True}

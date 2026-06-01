@@ -55,6 +55,7 @@ export interface RecoverData {
   session: Record<string, unknown>;
   messages: Message[];
   running: boolean;
+  runtime_busy?: boolean;
 }
 
 // ── Commit ──────────────────────────────────────────────

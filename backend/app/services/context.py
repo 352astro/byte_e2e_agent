@@ -28,12 +28,22 @@ from shared.hooks import HookManager
 class WorkspaceContext:
     """One workspace scope shared by all app services."""
 
-    def __init__(self, workspace: str, metrics_db_path: str) -> None:
+    def __init__(
+        self,
+        workspace: str,
+        metrics_db_path: str,
+        *,
+        _shared_contexts: dict[str, "WorkspaceContext"] | None = None,
+    ) -> None:
         self._workspace = self._normalize(workspace)
         self._metrics_db_path = metrics_db_path
         self._sessions: dict[str, Session] = {}
         self._runtime: AgentRuntime | None = None
         self._shadow_repo: ShadowRepo | None = None
+        self._scoped_contexts = (
+            _shared_contexts if _shared_contexts is not None else {}
+        )
+        self._scoped_contexts[self._workspace] = self
         self._model_id = get_model_id()
         self.metrics_store = self._build_metrics_store()
         self.ensure_storage_ready()
@@ -49,8 +59,7 @@ class WorkspaceContext:
     @property
     def shadow_repo(self) -> ShadowRepo:
         if self._shadow_repo is None:
-            repodir = str(self.core_workspace.agent_dir() / ".shadow-vcs")
-            self._shadow_repo = ShadowRepo(self._workspace, repodir)
+            self._shadow_repo = ShadowRepo(self._workspace)
         return self._shadow_repo
 
     @property
@@ -74,9 +83,13 @@ class WorkspaceContext:
         _probe_writable(self.core_workspace.agent_dir(), "Agent storage")
 
     def set_workspace(self, path: str) -> None:
-        if self._runtime is not None and self._runtime.status.value != "idle":
+        if self._any_runtime_busy():
             raise AgentBusy("Cannot switch workspace while an agent task is running")
+        old_workspace = self._workspace
+        if self._scoped_contexts.get(old_workspace) is self:
+            del self._scoped_contexts[old_workspace]
         self._workspace = self._normalize(path)
+        self._scoped_contexts[self._workspace] = self
         self.metrics_store = self._build_metrics_store()
         self._sessions.clear()
         self._runtime = None
@@ -87,6 +100,20 @@ class WorkspaceContext:
         if path is None or not path.strip():
             return self._workspace
         return self._normalize(path)
+
+    def scoped(self, workspace: str) -> "WorkspaceContext":
+        resolved = self._normalize(workspace)
+        existing = self._scoped_contexts.get(resolved)
+        if existing is not None:
+            return existing
+        return WorkspaceContext(
+            resolved,
+            self._metrics_db_path,
+            _shared_contexts=self._scoped_contexts,
+        )
+
+    def any_runtime_running(self) -> bool:
+        return self._any_runtime_busy()
 
     def create_runtime_session_entry(self, session_id: str):
         from agent.core.config import SessionConfig
@@ -149,6 +176,13 @@ class WorkspaceContext:
             ]
         )
         return AgentRuntime(CoreWorkspace(self._workspace), hooks)
+
+    def _any_runtime_busy(self) -> bool:
+        for ctx in set(self._scoped_contexts.values()):
+            runtime = ctx._runtime
+            if runtime is not None and runtime.status.value != "idle":
+                return True
+        return False
 
     @staticmethod
     def _normalize(path: str) -> str:

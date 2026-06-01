@@ -14,6 +14,7 @@ const BUSY_MESSAGE = "系统正在繁忙，请稍后再试";
 export interface UseAgentStreamReturn {
   // ── 只读状态 ──
   running: boolean;
+  runtimeBusy: boolean;
   interrupting: boolean;
   messages: Message[];
   activeMessage: Message | null;
@@ -69,6 +70,7 @@ export default function useAgentStream({
   // ═══════════════════════════════════════════════════
 
   const [running, _setRunning] = useState(false);
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [completed, setCompleted] = useState<Message[]>([]);
   const [active, setActive] = useState<Message | null>(null);
   const [interrupting, setInterrupting] = useState(false);
@@ -161,9 +163,12 @@ export default function useAgentStream({
         setCompleted(msgs);
         setActive(null);
         lastIdRef.current = msgs.length ? msgs[msgs.length - 1].id : null;
+        setRuntimeBusy(Boolean(data.runtime_busy ?? data.running));
         if (data.running) {
           setRunning(true);
           streamSidRef.current = sid;
+        } else {
+          setRunning(false);
         }
       } catch {
         // network error, ignore
@@ -282,6 +287,7 @@ export default function useAgentStream({
             return null;
           });
           setRunning(false);
+          setRuntimeBusy(false);
           break;
         }
       }
@@ -342,6 +348,7 @@ export default function useAgentStream({
         return null;
       });
       setRunning(false);
+      setRuntimeBusy(false);
       setInterrupting(false);
     },
     [appendCompleted],
@@ -406,6 +413,7 @@ export default function useAgentStream({
         }
 
         setRunning(true);
+        setRuntimeBusy(true);
         setInterrupting(false);
         streamSidRef.current = sid!;
         chatStreamActiveRef.current = true;
@@ -444,6 +452,9 @@ export default function useAgentStream({
           if (genRef.current === gen && runningRef.current) {
             setRunning(false);
           }
+          if (genRef.current === gen) {
+            setRuntimeBusy(false);
+          }
         }
       } finally {
         opGuardRef.current = false;
@@ -464,6 +475,7 @@ export default function useAgentStream({
 
   const resetRunning = useCallback(() => {
     setRunning(false);
+    setRuntimeBusy(false);
     setInterrupting(false);
   }, []);
 
@@ -503,6 +515,7 @@ export default function useAgentStream({
       completedIdsRef.current = new Set();
       setActive(null);
       setRunning(false);
+      setRuntimeBusy(false);
       streamSidRef.current = null;
       return;
     }
@@ -520,6 +533,7 @@ export default function useAgentStream({
     completedIdsRef.current = new Set();
     setActive(null);
     setRunning(false);
+    setRuntimeBusy(false);
     streamSidRef.current = null;
     reloadMessagesInternal(sessionId, gen);
   }, [sessionId, reloadMessagesInternal]);
@@ -555,6 +569,9 @@ export default function useAgentStream({
         if (genRef.current === gen && runningRef.current) {
           setRunning(false);
         }
+        if (genRef.current === gen) {
+          setRuntimeBusy(false);
+        }
       }
     })();
 
@@ -567,6 +584,7 @@ export default function useAgentStream({
 
   return {
     running,
+    runtimeBusy,
     interrupting,
     messages,
     activeMessage: active,

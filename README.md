@@ -1,88 +1,57 @@
 # Byte E2E Agent
 
-ReAct 智能体 + FastAPI 后端 + React (Vite) 前端。
+ReAct 智能体 + FastAPI 后端 + React/Vite 前端。后端以 Message 为核心数据模型，通过 Hook 系统把模型流、工具调用、持久化、指标和 SSE 广播串起来。
 
 ## 项目结构
 
-```
+```text
 byte_e2e_agent/
 ├── start.sh                   # 一键启动前后端
 ├── docs/                      # 架构文档与变更记录
 ├── backend/
-│   ├── main.py                # FastAPI app factory + uvicorn 入口
+│   ├── main.py                # FastAPI app + uvicorn 入口
 │   ├── .python-version        # Python 3.14
 │   ├── .env.example           # 环境变量模板
-│   ├── pyproject.toml         # 依赖（uv 管理）
-│   ├── requirements.txt       # 依赖（pip 兼容）
-│   ├── uv.lock                # 锁定文件
+│   ├── pyproject.toml         # Python 依赖，uv 管理
+│   ├── uv.lock                # Python 锁定文件
 │   ├── shared/                # 前后端共享类型 + Hook 基础设施
-│   │   ├── types.py           # Message / StreamEvent / ToolCall / Turn
-│   │   └── hooks.py           # BaseHook / HookManager
-│   ├── app/                   # FastAPI 应用层
-│   │   ├── api/
-│   │   │   ├── router.py      # 路由聚合
-│   │   │   ├── sse.py         # SSE 辅助
-│   │   │   └── routes/        # sessions / chat / metrics
+│   ├── app/
+│   │   ├── api/               # FastAPI routes / SSE helper
 │   │   ├── core/              # 配置 / CORS
-│   │   ├── schemas/           # 请求模型
-│   │   ├── services/
-│   │   │   └── project.py     # Project 编排（Workspace + Session + Runtime）
+│   │   ├── schemas/           # 请求和响应模型
+│   │   ├── services/          # 业务层：chat/session/checkpoint/workspace/metrics
+│   │   │   ├── context.py     # WorkspaceContext：runtime、hooks、shadow repo、metrics
+│   │   │   └── session_scope.py # session_id -> workspace 解析
 │   │   └── dependencies.py    # 依赖注入
 │   └── agent/
-│       ├── actions.py         # model_call / execute_one_tool / run_subagent
-│       ├── runtime.py         # AgentRuntime：多 Session 管理 + ReAct 主循环
-│       ├── llm_lc.py          # LangChain ChatOpenAI 工厂
-│       ├── shadow_repo.py     # Git 工作区快照（Dulwich）
-│       ├── metrics.py         # SQLite LLM 调用追踪
-│       ├── tools/             # 工具系统（LangChain StructuredTool）
-│       │   ├── registry.py    # ToolRegistry 注册表 + OpenAI schema 生成
-│       │   ├── toolset.py     # ToolSet 按名称构建子集
-│       │   ├── shell.py       # Shell 命令执行
-│       │   ├── read.py        # 文件读取
-│       │   ├── write.py       # 文件写入
-│       │   ├── edit.py        # 查找替换编辑
-│       │   ├── grep.py        # 正则搜索
-│       │   ├── glob.py        # 文件匹配
-│       │   ├── search.py      # WebSearch / WebFetch
-│       │   ├── subagent.py    # 子智能体
-│       │   ├── browser.py     # 浏览器交互（Playwright）
-│       │   ├── task.py        # 任务管理
-│       │   ├── skill.py       # Skill 加载
-│       │   └── pyrepl.py      # 安全 Python REPL
-│       ├── core/
-│       │   ├── workspace.py   # Workspace：路径管理 + 纯 I/O
-│       │   ├── config.py      # SessionConfig / AgentConfig / AccessPolicy
-│       │   ├── hooks.py       # re-export（from shared.hooks）
-│       │   ├── types.py       # re-export（from shared.types）
-│       │   └── prompts.py     # 系统提示词
-│       ├── hook/              # Hook 实现
-│       │   ├── stream_driver.py  # SSE 广播
-│       │   ├── metrics_hook.py   # SQLite 指标写入
-│       │   └── logging_hook.py   # 控制台输出
+│       ├── runtime.py         # AgentRuntime：Session 管理 + ReAct 主循环
+│       ├── actions.py         # model_call / execute_one_tool / subagent invoke
+│       ├── core/              # Workspace / SessionConfig / prompts
+│       ├── hook/              # StreamDriver / Metrics / Persistence / ShadowCommit
 │       ├── session/           # Session 数据容器 + JSONL 持久化
-│       ├── skills/            # Skill Markdown 模块
-│       ├── errors/            # InterruptedError / 消息修复管线
-│       └── persistence/       # SQLite schema
+│       ├── tools/             # Shell / file I/O / grep / browser / task / skill
+│       ├── shadow_repo.py     # Dulwich shadow git repo
+│       └── metrics.py         # SQLite LLM 指标
 ├── frontend/
 │   ├── src/
-│   │   ├── main.tsx           # React 入口
-│   │   ├── App.tsx            # 应用根组件
-│   │   ├── components/        # AgentDemo / Markdown / SessionSidebar
-│   │   ├── hooks/             # useAgentStream（SSE 消费）
-│   │   └── types.ts           # 前端 Message 类型（镜像 shared/types.py）
+│   │   ├── components/        # AgentDemo / MessageCard / SessionSidebar
+│   │   ├── hooks/             # useAgentStream / reducer / pairing
+│   │   ├── types.ts           # 前端手写协议类型
+│   │   └── types.generated.ts # OpenAPI 生成类型
 │   ├── package.json
-│   └── vite.config.ts         # 含 /api 开发代理
-└── .gitignore
+│   └── package-lock.json
+└── README.md
 ```
 
 ## 环境要求
 
-| 工具 | 最低版本 | 检查 |
-|------|----------|------|
-| Python | 3.14 | `python --version` |
-| Node.js | 20 | `node --version` |
-| npm | 10 | `npm --version` |
-| Chromium | — | Playwright 自动下载 |
+| 工具 | 版本 | 检查 |
+|------|------|------|
+| Python | 3.14+ | `python --version` |
+| uv | 最新稳定版 | `uv --version` |
+| Node.js | 20+ | `node --version` |
+| npm | 10+ | `npm --version` |
+| Chromium | Playwright 安装 | `uv run playwright install chromium` |
 
 ## 快速开始
 
@@ -90,23 +59,27 @@ byte_e2e_agent/
 
 ```bash
 cp backend/.env.example backend/.env
-# 编辑 backend/.env，必填：
-#   LLM_API_KEY     — API 密钥
-#   LLM_BASE_URL    — API 端点
-#   LLM_MODEL_ID    — 模型 ID
 ```
 
-### 2. 一键启动（推荐）
+至少需要配置：
+
+```text
+LLM_API_KEY=...
+LLM_BASE_URL=...
+LLM_MODEL_ID=...
+```
+
+### 2. 一键启动
 
 ```bash
 ./start.sh
 ```
 
-前后端同时启动。`http://localhost:5173` 打开前端，`http://localhost:8000/docs` 查看 API 文档。
+前端默认在 `http://localhost:5173`，后端 API 文档在 `http://localhost:8000/docs`。
 
 ### 3. 分别启动
 
-**后端**
+后端：
 
 ```bash
 cd backend
@@ -114,7 +87,7 @@ uv sync
 uv run uvicorn main:app --reload --port 8000
 ```
 
-**前端**
+前端：
 
 ```bash
 cd frontend
@@ -122,16 +95,63 @@ npm install
 npm run dev
 ```
 
-### 4. Playwright 浏览器（可选）
-
-BrowserOpen / BrowserAct / BrowserInspect 依赖 Playwright：
+### 4. Playwright 浏览器工具
 
 ```bash
 cd backend
 uv run playwright install chromium
 ```
 
-有头模式（需要 X Server）：在 `.env` 中设置 `BROWSER_HEADLESS=0`。
+有头模式需要可用图形环境，并在 `.env` 中设置：
+
+```text
+BROWSER_HEADLESS=0
+```
+
+## 依赖管理
+
+后端使用 `uv`：
+
+```bash
+cd backend
+uv lock --upgrade
+uv sync
+```
+
+前端使用 npm：
+
+```bash
+cd frontend
+npm update --save
+npm install
+```
+
+注意：`openapi-typescript@7.x` 的 peer dependency 要求 TypeScript 5.x，因此前端当前保持 `typescript@^5.9.3`，不是 6.x。
+
+## 数据和路径
+
+项目有两个内部存储层：
+
+```text
+PROJECT_ROOT/.agent/workspaces.json
+```
+
+保存已注册 workspace 列表。
+
+```text
+{workspace}/.byte_agent/
+  sessions/{session_id}/
+    session.json
+    config.json
+    messages.jsonl
+    tasks.json
+  .shadow-vcs/
+  ai_metrics.sqlite3
+```
+
+保存每个 workspace 自己的 session、消息、shadow repo 和默认指标库。
+
+`session.json` 持久化 session 所属 workspace。后端收到 `/api/session/{sid}/...` 请求时会先通过 `SessionLocator` 解析真实 workspace，再使用对应的 scoped `WorkspaceContext` 执行工具、路径检查、消息读取和快照操作。
 
 ## API 端点
 
@@ -139,101 +159,119 @@ uv run playwright install chromium
 |------|------|------|
 | `GET` | `/` | Hello World |
 | `GET` | `/api/hello` | Hello World |
-| `GET` | `/api/workspace` | 当前工作区 |
-| `POST` | `/api/workspace/set` | 切换工作区 |
-| `GET` | `/api/sessions/all` | 全部已注册工作区下的会话列表 |
-| `POST` | `/api/session` | 创建 Session |
-| `GET` | `/api/sessions` | 列出 Session |
-| `DELETE` | `/api/session/{sid}` | 删除 Session |
+| `GET` | `/api/workspace` | 当前 workspace |
+| `POST` | `/api/workspace/set` | 切换当前 workspace |
+| `POST` | `/api/session` | 在当前 workspace 创建 session |
+| `GET` | `/api/sessions` | 当前 workspace 的 session |
+| `GET` | `/api/sessions/all` | 已注册 workspace 下的全部 session |
+| `DELETE` | `/api/session/{sid}` | 删除 session |
 | `GET` | `/api/session/{sid}/history` | 获取历史消息 |
-| `POST` | `/api/session/{sid}/chat` | 启动 Agent，SSE 流式返回 |
-| `GET` | `/api/session/{sid}/stream` | 断线重连 SSE |
-| `GET` | `/api/session/{sid}/recover` | 恢复 Session 状态 |
-| `GET` | `/api/status` | 全局运行状态 |
-| `GET` | `/api/session/{sid}/status` | 全局运行状态（历史兼容） |
-| `POST` | `/api/session/{sid}/respond` | 响应权限确认 |
-| `GET` | `/api/session/{sid}/commits` | Git 快照列表 |
-| `POST` | `/api/session/{sid}/checkout` | 回退到历史快照 |
-| `POST` | `/api/session/{sid}/interrupt` | 中断 Agent |
+| `POST` | `/api/session/{sid}/chat` | 启动 Agent，返回 SSE |
+| `GET` | `/api/session/{sid}/stream` | SSE 断线重连 |
+| `GET` | `/api/session/{sid}/recover` | 恢复消息和运行状态 |
+| `GET` | `/api/status` | runtime busy 状态 |
+| `GET` | `/api/session/{sid}/status` | session running + runtime busy 状态 |
+| `POST` | `/api/session/{sid}/respond` | 响应 pending 请求 |
+| `GET` | `/api/session/{sid}/commits` | shadow commit 列表 |
+| `GET` | `/api/session/{sid}/commits/{sha}` | shadow commit 详情 |
+| `POST` | `/api/session/{sid}/workspace/restore` | 恢复 workspace 到指定 commit |
+| `POST` | `/api/session/{sid}/messages/truncate` | 截断消息历史 |
+| `POST` | `/api/session/{sid}/interrupt` | 中断指定 session |
+| `POST` | `/api/interrupt` | 中断当前运行任务 |
 | `GET` | `/api/metrics/llm/calls` | LLM 调用明细 |
 | `GET` | `/api/metrics/llm/summary` | LLM 调用汇总 |
 | `GET` | `/api/metrics/llm/dashboard` | LLM 仪表盘 |
 
+状态字段语义：
+
+- `running`：在 session 相关接口中表示该 session 是否正在运行；在 `/api/status` 中为兼容字段，等同 `runtime_busy`。
+- `runtime_busy`：任意 scoped runtime 是否正在运行。
+
 ## 核心架构
 
-```
-前端 (React + TypeScript)
-  ↕ SSE（StreamEvent） + REST
-FastAPI (app/)
+```text
+React frontend
+  ↕ REST + SSE(StreamEvent)
+FastAPI routes
   ↕
-AgentRuntime (agent/runtime.py)         ← ReAct 主循环，多 Session 管理
-  ↕
-actions (agent/actions.py)              ← model_call / execute_one_tool
-  ↕                    ↕
-LangChain LLM         HookManager (shared/hooks.py)
-(agent/llm_lc.py)     ├─ StreamDriverHook → SSE 广播
-                      ├─ MetricsHook     → SQLite 指标
-                      └─ LoggingHook     → 控制台输出
-  ↕
-Message (shared/types.py) ← 前后端唯一的消息类型（Pydantic）
-  ↕
-Workspace (agent/core/workspace.py) ← 路径管理 + I/O 代理
-  ├─ run_shell()    临时子进程
-  ├─ read_file()    Path 封装
-  ├─ write_file()   Path 封装
-  └─ resolve()      路径越界防护
+Services
+  ├─ SessionLocator / SessionScope
+  └─ WorkspaceContext
+       ├─ AgentRuntime
+       ├─ HookManager
+       │   ├─ StreamDriverHook      -> SSE
+       │   ├─ PersistenceHook       -> messages.jsonl
+       │   ├─ MetricsHook           -> SQLite metrics
+       │   └─ ShadowCommitHook      -> shadow commits
+       ├─ ShadowRepo
+       └─ CoreWorkspace
+            ├─ resolve()            -> path traversal guard
+            ├─ run_shell()
+            └─ file I/O
 ```
 
-### 关键设计
+### 分层职责
 
-- **Message 唯一真相源**：同为后端存储、SSE 协议、前端渲染的数据载体。`msg[field] += delta` 字段名即协议。
-- **Hook 系统**：BaseHook 12 个生命周期方法，HookManager 并行分发，单 hook 异常不影响主循环。
-- **Tool 架构**：每个工具 = async handler + LangChain `StructuredTool.from_function()`，OpenAI schema 自动生成。17 个工具全局注册，按名分发。
-- **Workspace 纯 I/O**：无状态，不持终端，不做安全检查。Shell 执行用 `asyncio.create_subprocess_shell` 临时子进程。
-- **Session JSONL 持久化**：Message 同步顺序落盘，加载时兼容多种旧格式。
-- **SubAgent 原地分发**：`execute_one_tool` 按名称识别 SubAgent/BrowserInspect，启动独立 ReAct 循环。
+- `routes/` 只处理 HTTP 参数、响应模型、SSE response 和 HTTP status 映射。
+- `services/` 处理业务动作，例如 chat、session recovery、checkpoint restore。
+- `WorkspaceContext` 持有 workspace 级运行时状态：runtime、hooks、shadow repo、metrics store。
+- `AgentRuntime` 拥有 ReAct 主循环、tool execution、subagent invoke、interrupt/pending 状态。
 
-### SSE 事件流
+## Message 和 SSE
 
+`shared/types.py` 中的 `Message` 是后端持久化、SSE 协议和前端渲染的共同数据模型。
+
+SSE 事件顺序：
+
+```text
+message_start
+chunk_delta
+chunk_complete
+message_finish
+turn_complete
+interrupted
 ```
-message_start       → 新 Message 开始
-chunk_delta         → msg[field] += delta（前端直接 +=）
-chunk_complete      → 结构化字段一次性完成（tool_calls / tool_result）
-message_finish      → Message 完成
-turn_complete       → Turn 结束，含 token 统计
-interrupted         → 中断通知
-```
+
+前端 `useAgentStream` 对 `chunk_delta` 直接执行字段追加，对 `chunk_complete` 做结构化字段收束。
+
+## 工具和 SubAgent
+
+工具由 async handler + LangChain `StructuredTool.from_function()` 包装，并注册进 `ToolRegistry`。运行时会把 `ws`、`session_id`、`interrupt_event` 注入支持这些参数的工具。
+
+SubAgent 当前是 invoke 式独立 session：父 agent 调用后进入等待，子 session 完成后把结果作为 tool result 返回父 agent。
 
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `LLM_API_KEY` | — | API 密钥（必填） |
-| `LLM_BASE_URL` | — | API 端点（必填） |
-| `LLM_MODEL_ID` | — | 模型 ID（必填） |
-| `LLM_TIMEOUT` | `60` | 请求超时（秒） |
-| `AGENT_WORKSPACE` | 当前目录 | 工作区路径 |
+| `LLM_API_KEY` | — | API 密钥 |
+| `LLM_BASE_URL` | — | API 端点 |
+| `LLM_MODEL_ID` | — | 模型 ID |
+| `LLM_TIMEOUT` | `60` | 请求超时，秒 |
+| `AGENT_WORKSPACE` | repo 根目录 | 默认 workspace |
+| `LLM_METRICS_DB_PATH` | `.byte_agent/ai_metrics.sqlite3` | 指标数据库；相对路径按 workspace 解析 |
 | `BROWSER_HEADLESS` | `1` | `0` 为有头模式 |
-| `SERPAPI_KEY` | — | WebSearch 用 |
-| `LLM_METRICS_DB_PATH` | `.byte_agent/ai_metrics.sqlite3` | 指标数据库 |
-| `LLM_INPUT_COST_YUAN_PER_1M_TOKENS` | `3` | 输入成本 |
-| `LLM_OUTPUT_COST_YUAN_PER_1M_TOKENS` | `6` | 输出成本 |
+| `SERPAPI_KEY` | — | WebSearch |
+| `LLM_INPUT_COST_YUAN_PER_1M_TOKENS` | `3` | 输入 token 成本 |
+| `LLM_OUTPUT_COST_YUAN_PER_1M_TOKENS` | `6` | 输出 token 成本 |
+
+## 常用检查
+
+```bash
+cd backend
+python -m py_compile app/services/context.py app/services/session_scope.py app/services/session_service.py
+```
+
+```bash
+cd frontend
+npm run build
+```
 
 ## Skill 扩展
 
 ```bash
 mkdir -p backend/agent/skills/my_skill
-vim backend/agent/skills/my_skill/SKILL.md
-# 下一次 step 自动扫描并注入摘要到系统消息
+$EDITOR backend/agent/skills/my_skill/SKILL.md
 ```
 
-也可通过 `SubAgent(with_skills=["my_skill"])` 在启动子智能体时直接注入。
-
-## 调试
-
-子智能体控制台输出（`agent/actions.py`）：
-
-```python
-_SUBAGENT_DEBUG = True   # 开启实时打印 subagent 流式输出
-_SUBAGENT_DEBUG = False  # 关闭
-```
+也可以通过 `SubAgent(with_skills=["my_skill"])` 在启动子智能体时注入 skill。
