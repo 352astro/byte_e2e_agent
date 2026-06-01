@@ -141,6 +141,7 @@ uv run playwright install chromium
 | `GET` | `/api/hello` | Hello World |
 | `GET` | `/api/workspace` | 当前工作区 |
 | `POST` | `/api/workspace/set` | 切换工作区 |
+| `GET` | `/api/sessions/all` | 全部已注册工作区下的会话列表 |
 | `POST` | `/api/session` | 创建 Session |
 | `GET` | `/api/sessions` | 列出 Session |
 | `DELETE` | `/api/session/{sid}` | 删除 Session |

@@ -7,8 +7,6 @@ from pathlib import Path
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from app.core.config import TMP_DIR
-
 
 class GlobInput(BaseModel):
     """Glob 工具输入参数。"""
@@ -17,7 +15,7 @@ class GlobInput(BaseModel):
         ...,
         description=(
             "Glob pattern (e.g. '**/*.py', 'src/**/*.ts'). "
-            "Hint: avoid scanning the " + TMP_DIR + "/ directory — it contains "
+            "Hint: avoid scanning the agent session storage directory — it contains "
             "session metadata and is not part of the user's codebase."
         ),
     )

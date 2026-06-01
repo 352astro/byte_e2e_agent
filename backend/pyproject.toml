@@ -18,12 +18,20 @@ dependencies = [
     "langchain-openai>=0.2.0",
 ]
 
+[dependency-groups]
+dev = [
+    "httpx>=0.28.0",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
 [tool.uv.workspace]
 members = [
     "double_pendulum_simulation",
 ]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 markers = [
     "unit: fast unit tests without external dependencies",
     "integration: tests that require real LLM or shell",

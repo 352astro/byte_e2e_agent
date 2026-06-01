@@ -8,8 +8,6 @@ from pathlib import Path
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from app.core.config import TMP_DIR
-
 _MAX_FILE_BYTES = 1_048_576  # 1 MiB
 
 
@@ -41,7 +39,7 @@ class GrepInput(BaseModel):
         default="**/*",
         description=(
             "Glob to filter which files to search (e.g. '**/*.py'). "
-            "Hint: exclude " + TMP_DIR + "/ to avoid scanning session metadata."
+            "Hint: exclude the agent session storage directory to avoid scanning metadata."
         ),
     )
     max_results: int = Field(

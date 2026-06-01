@@ -19,6 +19,14 @@ TMP_DIR = AGENT_DIR
 DEFAULT_LLM_METRICS_DB_PATH = f"{AGENT_DIR}/ai_metrics.sqlite3"
 
 
+def resolve_agent_workspace(path: str) -> str:
+    """Resolve workspace path; relative paths are anchored at PROJECT_ROOT."""
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        p = PROJECT_ROOT / p
+    return str(p.resolve())
+
+
 @dataclass(frozen=True)
 class Settings:
     app_title: str
@@ -33,7 +41,9 @@ class Settings:
 def get_settings() -> Settings:
     return Settings(
         app_title="Byte E2E Agent Backend",
-        agent_workspace=os.environ.get("AGENT_WORKSPACE", str(PROJECT_ROOT)),
+        agent_workspace=resolve_agent_workspace(
+            os.environ.get("AGENT_WORKSPACE", str(PROJECT_ROOT))
+        ),
         cors_allow_origins=("http://localhost:5173",),
         cors_allow_origin_regex=r"http://localhost:\d+",
         cors_allow_credentials=True,

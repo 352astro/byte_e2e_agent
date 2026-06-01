@@ -1,24 +1,29 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.dependencies import get_project
+from app.dependencies import get_workspace_service
 from app.schemas.workspace import SetWorkspaceRequest
-from app.services.project import Project
+from app.services.errors import AgentBusy
+from app.services.workspace_service import WorkspaceService
 
 router = APIRouter(prefix="/api/workspace")
 
 
 @router.get("")
-def get_workspace(project: Project = Depends(get_project)) -> dict:
-    return {"workspace": project.workspace}
+def get_workspace(
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+) -> dict:
+    return {"workspace": workspace_service.get_workspace()}
 
 
 @router.post("/set")
 def set_workspace(
     req: SetWorkspaceRequest,
-    project: Project = Depends(get_project),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
 ) -> dict:
     try:
-        project.set_workspace(req.path)
+        workspace_service.set_workspace(req.path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return {"workspace": project.workspace}
+    except AgentBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"workspace": workspace_service.get_workspace()}

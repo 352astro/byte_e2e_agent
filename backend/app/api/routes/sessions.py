@@ -1,8 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from agent.session.status import RuntimeStatus
-from app.dependencies import get_project
+from app.dependencies import (
+    get_checkpoint_service,
+    get_session_service,
+    get_workspace_service,
+)
 from app.schemas.response import (
     CommitDetail,
     CommitsResponse,
@@ -15,7 +18,10 @@ from app.schemas.response import (
     StatusResponse,
     WorkspaceRestoreResponse,
 )
-from app.services.project import Project
+from app.services.checkpoint_service import CheckpointService
+from app.services.errors import CommitNotFound, SessionNotFound
+from app.services.session_service import SessionService
+from app.services.workspace_service import WorkspaceService
 
 router = APIRouter(prefix="/api")
 
@@ -31,79 +37,114 @@ class MessageTruncateRequest(BaseModel):
 
 
 @router.post("/session", response_model=CreateSessionResponse)
-def create_session(project: Project = Depends(get_project)) -> dict:
-    return project.create_session()
+def create_session(
+    session_service: SessionService = Depends(get_session_service),
+) -> dict:
+    return session_service.create_session()
 
 
 @router.get("/sessions", response_model=ListSessionsResponse)
-def list_sessions(project: Project = Depends(get_project)) -> dict:
-    return {"workspace": project.workspace, "sessions": project.list_sessions()}
+def list_sessions(
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+    session_service: SessionService = Depends(get_session_service),
+) -> dict:
+    return {
+        "workspace": workspace_service.get_workspace(),
+        "sessions": session_service.list_sessions(),
+    }
+
+
+@router.get("/sessions/all")
+def list_all_sessions(
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+    session_service: SessionService = Depends(get_session_service),
+) -> dict:
+    return {
+        "workspace": workspace_service.get_workspace(),
+        "workspaces": workspace_service.list_registered_workspaces(),
+        "sessions": session_service.list_all_sessions(),
+    }
 
 
 @router.delete("/session/{sid}")
-async def delete_session(sid: str, project: Project = Depends(get_project)):
+async def delete_session(
+    sid: str,
+    session_service: SessionService = Depends(get_session_service),
+):
     try:
-        project.get_session(sid)  # raises KeyError if not found
-    except KeyError:
+        await session_service.delete_session(sid)
+    except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
-    await project.delete_session(sid)
     return {"ok": True}
 
 
 @router.get("/session/{sid}/history", response_model=HistoryResponse)
-def get_history(sid: str, project: Project = Depends(get_project)) -> dict:
+def get_history(
+    sid: str,
+    session_service: SessionService = Depends(get_session_service),
+) -> dict:
     try:
-        info = project.get_info(sid)
-        history = project.get_history(sid)
-    except KeyError:
+        info = session_service.get_info(sid)
+        history = session_service.get_history(sid)
+    except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"session": info, "history": history}
 
 
 @router.get("/session/{sid}/status", response_model=StatusResponse)
-async def session_status(sid: str, project: Project = Depends(get_project)):
-    """Legacy status route. The returned state is global runtime state."""
-    return runtime_status(project)
+async def session_status(
+    sid: str,
+    session_service: SessionService = Depends(get_session_service),
+):
+    """Legacy session status route."""
+    try:
+        return session_service.get_session_status(sid)
+    except SessionNotFound:
+        raise HTTPException(status_code=404, detail="Session not found")
 
 
 @router.get("/status", response_model=StatusResponse)
-def runtime_status(project: Project = Depends(get_project)):
+def runtime_status(
+    session_service: SessionService = Depends(get_session_service),
+):
     """Lightweight check: is the global runtime currently running?"""
-    return {"running": project.scheduler.status != RuntimeStatus.IDLE}
+    return session_service.get_runtime_status()
 
 
 @router.get("/session/{sid}/recover", response_model=RecoverResponse)
-async def recover_session(sid: str, project: Project = Depends(get_project)):
+async def recover_session(
+    sid: str,
+    session_service: SessionService = Depends(get_session_service),
+):
     """Return full session state for frontend recovery after refresh."""
     try:
-        return project.get_recovery_state(sid)
-    except KeyError:
+        return session_service.get_recovery_state(sid)
+    except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
-
-
-# ── Shadow repo / commit routes ──────────────────────────
 
 
 @router.get("/session/{sid}/commits", response_model=CommitsResponse)
-async def list_commits(sid: str, project: Project = Depends(get_project)):
+async def list_commits(
+    sid: str,
+    checkpoint_service: CheckpointService = Depends(get_checkpoint_service),
+):
     """Return all shadow commits for this workspace."""
     try:
-        project.get_session(sid)
-    except KeyError:
+        return {"commits": checkpoint_service.list_commits(sid)}
+    except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
-    return {"commits": project.shadow_repo.list_commits(sid)}
 
 
 @router.get("/session/{sid}/commits/{sha}", response_model=CommitDetail)
-async def get_commit(sid: str, sha: str, project: Project = Depends(get_project)):
+async def get_commit(
+    sid: str,
+    sha: str,
+    checkpoint_service: CheckpointService = Depends(get_checkpoint_service),
+):
     """Return metadata for a specific commit."""
     try:
-        project.get_session(sid)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Session not found")
-    try:
-        return project.shadow_repo.get_commit(sha)
-    except KeyError:
+        return checkpoint_service.get_commit(sid, sha)
+    except CommitNotFound:
         raise HTTPException(status_code=404, detail=f"Commit not found: {sha}")
 
 
@@ -114,22 +155,21 @@ async def get_commit(sid: str, sha: str, project: Project = Depends(get_project)
 async def restore_commit(
     sid: str,
     req: WorkspaceRestoreRequest,
-    project: Project = Depends(get_project),
+    checkpoint_service: CheckpointService = Depends(get_checkpoint_service),
 ):
     """Restore workspace to a shadow commit without modifying messages."""
     try:
-        project.get_session(sid)
-    except KeyError:
+        return checkpoint_service.restore_workspace(
+            sid,
+            req.commit_sha,
+            set_head=req.set_head,
+        )
+    except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
-    try:
-        project.shadow_repo.restore(req.commit_sha)
-    except KeyError:
+    except CommitNotFound:
         raise HTTPException(
             status_code=404, detail=f"Commit not found: {req.commit_sha}"
         )
-    if req.set_head:
-        project.shadow_repo.set_head(sid, req.commit_sha)
-    return {"ok": True, "commit_sha": req.commit_sha}
 
 
 @router.post(
@@ -139,34 +179,36 @@ async def restore_commit(
 async def truncate_messages(
     sid: str,
     req: MessageTruncateRequest,
-    project: Project = Depends(get_project),
+    checkpoint_service: CheckpointService = Depends(get_checkpoint_service),
 ):
     """Truncate message history without modifying workspace commits."""
     try:
-        session = project.get_session(sid)
-    except KeyError:
+        return checkpoint_service.truncate_messages(
+            sid,
+            req.message_id,
+            keep=req.keep,
+        )
+    except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
-    removed = session.truncate_by_id(req.message_id, keep=req.keep)
-    return {
-        "ok": True,
-        "message_id": req.message_id,
-        "removed": removed,
-    }
 
 
 @router.post("/session/{sid}/interrupt", response_model=InterruptResponse)
-async def interrupt_session(sid: str, project: Project = Depends(get_project)):
+async def interrupt_session(
+    sid: str,
+    session_service: SessionService = Depends(get_session_service),
+):
     """Interrupt the running agent loop for this session."""
     try:
-        project.get_session(sid)
-    except KeyError:
+        ok = await session_service.interrupt_session(sid)
+    except SessionNotFound:
         raise HTTPException(status_code=404, detail="Session not found")
-    ok = await project.scheduler.interrupt()
     return {"ok": ok}
 
 
 @router.post("/interrupt", response_model=InterruptResponse)
-async def interrupt_global(project: Project = Depends(get_project)):
+async def interrupt_global(
+    session_service: SessionService = Depends(get_session_service),
+):
     """Interrupt whatever session is currently running (no session ID needed)."""
-    ok = await project.scheduler.interrupt()
+    ok = await session_service.interrupt_current()
     return {"ok": ok}
