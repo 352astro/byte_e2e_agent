@@ -15,7 +15,8 @@ from app.schemas.response import (
     ListSessionsResponse,
     MessageTruncateResponse,
     RecoverResponse,
-    StatusResponse,
+    RuntimeStatusResponse,
+    SessionStatusResponse,
     WorkspaceRestoreResponse,
 )
 from app.services.checkpoint_service import CheckpointService
@@ -95,12 +96,12 @@ def get_history(
     return {"session": info, "history": history}
 
 
-@router.get("/session/{sid}/status", response_model=StatusResponse)
+@router.get("/session/{sid}/status", response_model=SessionStatusResponse)
 async def session_status(
     sid: str,
     session_service: SessionService = Depends(get_session_service),
 ):
-    """Legacy session status route."""
+    """Return status for one session plus global runtime busy state."""
     try:
         return session_service.get_session_status(sid)
     except SessionNotFound:
@@ -109,11 +110,11 @@ async def session_status(
         raise HTTPException(status_code=409, detail=str(exc))
 
 
-@router.get("/status", response_model=StatusResponse)
+@router.get("/status", response_model=RuntimeStatusResponse)
 def runtime_status(
     session_service: SessionService = Depends(get_session_service),
 ):
-    """Lightweight check: is the global runtime currently running?"""
+    """Lightweight check: is any runtime currently busy?"""
     return session_service.get_runtime_status()
 
 

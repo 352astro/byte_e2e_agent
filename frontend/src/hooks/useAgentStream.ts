@@ -206,8 +206,8 @@ export default function useAgentStream({
         setCompleted(msgs);
         setActive(null);
         lastIdRef.current = msgs.length ? msgs[msgs.length - 1].id : null;
-        setRuntimeBusy(Boolean(data.runtime_busy ?? data.running));
-        if (data.running) {
+        setRuntimeBusy(Boolean(data.runtime_busy));
+        if (data.session_running) {
           setRunning(true);
           streamSidRef.current = sid;
         } else {

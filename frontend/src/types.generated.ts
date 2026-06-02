@@ -126,6 +126,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List All Sessions */
+        get: operations["list_all_sessions_api_sessions_all_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session/{sid}": {
         parameters: {
             query?: never;
@@ -169,7 +186,7 @@ export interface paths {
         };
         /**
          * Session Status
-         * @description Legacy status route. The returned state is global runtime state.
+         * @description Return status for one session plus global runtime busy state.
          */
         get: operations["session_status_api_session__sid__status_get"];
         put?: never;
@@ -189,7 +206,7 @@ export interface paths {
         };
         /**
          * Runtime Status
-         * @description Lightweight check: is the global runtime currently running?
+         * @description Lightweight check: is any runtime currently busy?
          */
         get: operations["runtime_status_api_status_get"];
         put?: never;
@@ -351,9 +368,7 @@ export interface paths {
         put?: never;
         /**
          * Chat
-         * @description 启动执行，返回 SSE 流。
-         *
-         *     subscribe-before-start: driver 先订阅，再启动 runtime。
+         * @description Start a chat turn and return its SSE stream.
          */
         post: operations["chat_api_session__sid__chat_post"];
         delete?: never;
@@ -371,7 +386,7 @@ export interface paths {
         };
         /**
          * Stream Events
-         * @description SSE 重连。先回放历史消息，再订阅直播。
+         * @description SSE reconnect. Replay persisted messages, then subscribe to live events.
          */
         get: operations["stream_events_api_session__sid__stream_get"];
         put?: never;
@@ -450,10 +465,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Memories */
+        get: operations["list_memories_api_memory_get"];
+        put?: never;
+        /** Add Memory */
+        post: operations["add_memory_api_memory_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/memory/{memory_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Memory */
+        delete: operations["delete_memory_api_memory__memory_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AddMemoryRequest */
+        AddMemoryRequest: {
+            /** Content */
+            content: string;
+            /**
+             * Kind
+             * @default fact
+             */
+            kind: string;
+        };
         /** ChatRequest */
         ChatRequest: {
             /**
@@ -612,6 +672,11 @@ export interface components {
              * @default 0
              */
             removed: number;
+            /**
+             * Deleted Subagents
+             * @default 0
+             */
+            deleted_subagents: number;
         };
         /** RecoverResponse */
         RecoverResponse: {
@@ -622,10 +687,16 @@ export interface components {
             /** Messages */
             messages: components["schemas"]["Message"][];
             /**
-             * Running
+             * Session Running
              * @default false
              */
-            running: boolean;
+            session_running: boolean;
+            /**
+             * Runtime Busy
+             * @default false
+             */
+            runtime_busy: boolean;
+            current_message?: components["schemas"]["Message"] | null;
         };
         /** RespondRequest */
         RespondRequest: {
@@ -642,6 +713,18 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** RuntimeStatusResponse */
+        RuntimeStatusResponse: {
+            /** Runtime Busy */
+            runtime_busy: boolean;
+        };
+        /** SessionStatusResponse */
+        SessionStatusResponse: {
+            /** Session Running */
+            session_running: boolean;
+            /** Runtime Busy */
+            runtime_busy: boolean;
+        };
         /** SetWorkspaceRequest */
         SetWorkspaceRequest: {
             /**
@@ -649,11 +732,6 @@ export interface components {
              * @description Absolute or relative path to new workspace
              */
             path: string;
-        };
-        /** StatusResponse */
-        StatusResponse: {
-            /** Running */
-            running: boolean;
         };
         /**
          * StreamEventKind
@@ -667,6 +745,11 @@ export interface components {
          */
         StreamEventSchema: {
             kind: components["schemas"]["StreamEventKind"];
+            /**
+             * Session Id
+             * @default
+             */
+            session_id: string;
             /**
              * Message Id
              * @default
@@ -956,6 +1039,28 @@ export interface operations {
             };
         };
     };
+    list_all_sessions_api_sessions_all_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     delete_session_api_session__sid__delete: {
         parameters: {
             query?: never;
@@ -1035,7 +1140,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["SessionStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1064,7 +1169,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["RuntimeStatusResponse"];
                 };
             };
         };
@@ -1461,6 +1566,96 @@ export interface operations {
             };
             header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_memories_api_memory_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    add_memory_api_memory_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddMemoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_memory_api_memory__memory_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memory_id: string;
+            };
             cookie?: never;
         };
         requestBody?: never;

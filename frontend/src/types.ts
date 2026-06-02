@@ -59,8 +59,8 @@ export interface SessionCache {
 export interface RecoverData {
   session: Record<string, unknown>;
   messages: Message[];
-  running: boolean;
-  runtime_busy?: boolean;
+  session_running: boolean;
+  runtime_busy: boolean;
 }
 
 // ── Commit ──────────────────────────────────────────────

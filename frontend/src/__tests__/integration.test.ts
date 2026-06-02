@@ -142,7 +142,9 @@ describe("full session trace", () => {
     const data = await g(`/api/session/${sid}/recover`);
     expect(data.messages).toBeInstanceOf(Array);
     const msgs = data.messages as Record<string, unknown>[];
-    console.log(`Recover: ${msgs.length} messages, running=${data.running}`);
+    console.log(
+      `Recover: ${msgs.length} messages, session_running=${data.session_running}`,
+    );
 
     expect(msgs.length).toBeGreaterThanOrEqual(4);
 
@@ -157,9 +159,9 @@ describe("full session trace", () => {
     expect(assistants.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("recover: running is false", async () => {
+  it("recover: session_running is false", async () => {
     const data = await g(`/api/session/${sid}/recover`);
-    expect(data.running).toBe(false);
+    expect(data.session_running).toBe(false);
   });
 
   it(
@@ -194,7 +196,7 @@ describe("full session trace", () => {
           );
           break;
         }
-        if (!data.running) {
+        if (!data.session_running) {
           console.log(`  chat finished before capturing streaming message`);
           break;
         }
@@ -224,7 +226,7 @@ describe("full session trace", () => {
 
   it("recover: current_message is null after turn completes", async () => {
     const data = await g(`/api/session/${sid}/recover`);
-    expect(data.running).toBe(false);
+    expect(data.session_running).toBe(false);
     expect(data.current_message).toBeNull();
   });
 

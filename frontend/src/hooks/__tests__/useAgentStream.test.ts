@@ -12,7 +12,8 @@ describe("useAgentStream", () => {
         Promise.resolve({
           session: {},
           messages: [],
-          running: false,
+          session_running: false,
+          runtime_busy: false,
         }),
     } as Response);
   });

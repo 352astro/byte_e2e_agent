@@ -38,14 +38,18 @@ class HistoryResponse(BaseModel):
 class RecoverResponse(BaseModel):
     session: dict
     messages: list[Message]
-    running: bool = False
+    session_running: bool = False
     runtime_busy: bool = False
     current_message: Message | None = None
 
 
-class StatusResponse(BaseModel):
-    running: bool
-    runtime_busy: bool = False
+class SessionStatusResponse(BaseModel):
+    session_running: bool
+    runtime_busy: bool
+
+
+class RuntimeStatusResponse(BaseModel):
+    runtime_busy: bool
 
 
 class CommitInfo(BaseModel):

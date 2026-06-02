@@ -195,13 +195,12 @@ class SessionService:
             raise SessionNotFound(session_id) from exc
         session_running = ctx.scheduler.is_running_session(session_id)
         return {
-            "running": session_running,
+            "session_running": session_running,
             "runtime_busy": self._ctx.any_runtime_running(),
         }
 
     def get_runtime_status(self) -> dict:
-        runtime_busy = self._ctx.any_runtime_running()
-        return {"running": runtime_busy, "runtime_busy": runtime_busy}
+        return {"runtime_busy": self._ctx.any_runtime_running()}
 
     def get_recovery_state(self, session_id: str) -> dict:
         try:
@@ -216,7 +215,7 @@ class SessionService:
         return {
             "session": ctx.get_info(session_id),
             "messages": session.get_messages(),
-            "running": is_running,
+            "session_running": is_running,
             "runtime_busy": self._ctx.any_runtime_running(),
             "current_message": current_msg.model_dump(mode="json")
             if current_msg
