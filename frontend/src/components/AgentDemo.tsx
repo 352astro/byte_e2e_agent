@@ -271,6 +271,14 @@ export default function AgentDemo({
     return ids;
   }, [toolPairs]);
 
+  const pairedResultToolCallIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const p of toolPairs) {
+      if (p.resultMessage && p.toolCall.id) ids.add(p.toolCall.id);
+    }
+    return ids;
+  }, [toolPairs]);
+
   const latestPairKey = toolPairs.length
     ? `${toolPairs[toolPairs.length - 1].callMessageId}/${toolPairs[toolPairs.length - 1].callIndex}`
     : null;
@@ -405,6 +413,13 @@ export default function AgentDemo({
             >
               {messages.map((t) => {
                 if (pairedResultIds.has(t.id)) return null;
+                if (
+                  t.role === "tool" &&
+                  t.tool_call_id &&
+                  pairedResultToolCallIds.has(t.tool_call_id)
+                ) {
+                  return null;
+                }
                 const pairs = pairsByCallId.get(t.id);
                 if (pairs) {
                   return (

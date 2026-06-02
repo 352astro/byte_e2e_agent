@@ -127,7 +127,10 @@ def load_session(
 
     msgs = _load_messages(messages_path)
     if msgs:
-        session.replace_messages(msgs, persist=False)
+        from agent.errors import repair_messages
+
+        msgs = repair_messages(msgs)
+        session.replace_messages(msgs, persist=True)
     return session
 
 

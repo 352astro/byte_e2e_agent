@@ -80,6 +80,7 @@ def _tool_to_openai(tool: StructuredTool) -> dict:
             "name": tool.name,
             "description": (tool.description or "").strip(),
             "parameters": params,
+            "strict": True,
         },
     }
 

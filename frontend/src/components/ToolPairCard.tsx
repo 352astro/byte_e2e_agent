@@ -226,6 +226,13 @@ function SubAgentTranscript({
     }
     return ids;
   }, [pairs]);
+  const pairedResultToolCallIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const p of pairs) {
+      if (p.resultMessage && p.toolCall.id) ids.add(p.toolCall.id);
+    }
+    return ids;
+  }, [pairs]);
 
   return (
     <div className="subagent-transcript">
@@ -239,6 +246,13 @@ function SubAgentTranscript({
       )}
       {transcriptMessages.map((msg) => {
         if (pairedResultIds.has(msg.id)) return null;
+        if (
+          msg.role === "tool" &&
+          msg.tool_call_id &&
+          pairedResultToolCallIds.has(msg.tool_call_id)
+        ) {
+          return null;
+        }
         const childPairs = pairsByCallId.get(msg.id);
         if (childPairs) {
           return (

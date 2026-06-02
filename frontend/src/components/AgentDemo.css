@@ -16,7 +16,7 @@
 }
 
 .agent-scroll-center {
-    max-width: 860px;
+    max-width: 920px;
     margin: 0 auto;
     overflow: visible;
 }
@@ -24,11 +24,11 @@
 .agent-scroll-inner {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 0;
 }
 
 .agent-bottom-spacer {
-    height: 20vh;
+    height: 10vh;
     flex-shrink: 0;
 }
 
@@ -83,7 +83,7 @@
 }
 
 .agent-input-bar-inner {
-    max-width: 860px;
+    max-width: 920px;
     width: 100%;
     margin: 0 auto;
     display: flex;
@@ -212,14 +212,20 @@
     padding: 14px 18px;
     max-width: 100%;
     margin-right: 0;
-    box-shadow: 0 0 24px rgba(0,0,0,0.10);
+    box-shadow: 0 0 24px rgba(0, 0, 0, 0.1);
     animation: bubble-in var(--anim-fast);
     transition: width var(--anim-fast);
 }
 
 @keyframes bubble-in {
-    from { opacity: 0; transform: scale(0.92); }
-    to   { opacity: 1; transform: scale(1); }
+    from {
+        opacity: 0;
+        transform: scale(0.92);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
 }
 
 .user-bubble-label {
@@ -398,7 +404,6 @@
 .tool-card.thinking-block {
     margin: 0 0 8px 0;
     border-radius: 6px;
-
 }
 
 .tool-card.thinking-block--done {
@@ -485,7 +490,7 @@
 /* ── Tool cards (streaming & complete) ──────── */
 
 .tool-card {
-    margin: 4px 0;
+    margin: 2px 0;
     border-radius: 0;
 }
 
@@ -563,7 +568,7 @@
 .tool-paired-body {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
 }
 
 .tool-paired-body .tool-code-block pre,
@@ -600,7 +605,7 @@
 /* ── SubAgent recursive card ─────────────────── */
 
 .tool-card--subagent {
-    margin: 4px 0;
+    margin: 2px 0;
     transition: box-shadow var(--anim-fast) ease;
 }
 
@@ -731,7 +736,9 @@
     color: #333;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    font: 0.8rem/1.45 ui-monospace, monospace;
+    font:
+        0.8rem/1.45 ui-monospace,
+        monospace;
 }
 
 /* ── Legacy step cards (kept for backward compat) ── */
@@ -1342,8 +1349,6 @@
     max-width: 90%;
 }
 
-
-
 .message-actions {
     position: absolute;
     left: calc(100% + 3px);
@@ -1422,7 +1427,7 @@
 }
 
 .agent-prefill-inner {
-    max-width: 860px;
+    max-width: 920px;
     margin: 0 auto;
     display: flex;
     gap: 8px;
@@ -1482,7 +1487,9 @@
 .user-bubble:hover,
 .user-bubble--editing {
     cursor: default;
-    box-shadow: 0 0 24px rgba(0,0,0,0.10), 0 0 0 2px #fad5db;
+    box-shadow:
+        0 0 24px rgba(0, 0, 0, 0.1),
+        0 0 0 2px #fad5db;
 }
 
 .user-bubble--editing {
@@ -1490,8 +1497,19 @@
 }
 
 @keyframes edit-glow {
-    0%, 100% { box-shadow: 0 0 24px rgba(0,0,0,0.10), 0 0 0 2px #fad5db, 0 0 0 0 rgba(255, 180, 190, 0); }
-    50%      { box-shadow: 0 0 24px rgba(0,0,0,0.10), 0 0 0 2px #fad5db, 0 0 20px 6px rgba(255, 180, 190, 0.25); }
+    0%,
+    100% {
+        box-shadow:
+            0 0 24px rgba(0, 0, 0, 0.1),
+            0 0 0 2px #fad5db,
+            0 0 0 0 rgba(255, 180, 190, 0);
+    }
+    50% {
+        box-shadow:
+            0 0 24px rgba(0, 0, 0, 0.1),
+            0 0 0 2px #fad5db,
+            0 0 20px 6px rgba(255, 180, 190, 0.25);
+    }
 }
 
 .user-bubble-edit {

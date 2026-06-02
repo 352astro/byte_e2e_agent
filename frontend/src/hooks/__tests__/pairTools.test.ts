@@ -96,6 +96,27 @@ describe("pairToolCalls", () => {
     expect(pairs[0].resultMessage).toBeUndefined();
   });
 
+  it("pairs by result order when tool_call_id is missing", () => {
+    const msgs: Message[] = [
+      makeMsg({
+        id: "a1",
+        role: "assistant",
+        tool_calls: [makeToolCall("tc1", "Shell")],
+      }),
+      makeMsg({
+        id: "r1",
+        role: "tool",
+        tool_call_id: "",
+        tool_name: "Shell",
+        tool_result: "ok",
+      }),
+    ];
+
+    const pairs = pairToolCalls(msgs);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].resultMessage?.id).toBe("r1");
+  });
+
   it("pairs multiple tool_calls with their results", () => {
     const msgs: Message[] = [
       makeMsg({
