@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field
 
 
 class EditOpModel(BaseModel):
-    old_text: str = Field(..., description="Exact text to find.")
-    new_text: str = Field(..., description="Replacement text.")
+    old_string: str = Field(..., description="Exact text to find.")
+    new_string: str = Field(..., description="Replacement text.")
 
 
 class EditInput(BaseModel):
@@ -19,7 +19,7 @@ class EditInput(BaseModel):
 async def edit_handler(path: str, edits: list[dict], *, ws) -> str:
     """Apply ordered find-and-replace edits to a file."""
     # StructuredTool will parse edits as list of dicts from the LLM JSON
-    ops = [{"old_text": e["old_text"], "new_text": e["new_text"]} for e in edits]
+    ops = [{"old_text": e["old_string"], "new_text": e["new_string"]} for e in edits]
     return await ws.edit_file(path, ops)
 
 
