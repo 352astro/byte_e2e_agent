@@ -1,4 +1,7 @@
 import { useState, useRef } from "react";
+import SessionCustomizePanel from "./SessionCustomizePanel";
+import Icon from "./Icon";
+import type { CreateSessionRequest } from "../types";
 
 interface AgentInputProps {
     running: boolean;
@@ -9,6 +12,10 @@ interface AgentInputProps {
     onPrefillChange: (v: string) => void;
     onSend: (question: string) => void;
     onInterrupt: () => void;
+    sessionConfig?: CreateSessionRequest;
+    onSessionConfigChange?: (next: CreateSessionRequest) => void;
+    showCustomize?: boolean;
+    customizeReadonly?: boolean;
 }
 
 export default function AgentInput({
@@ -20,9 +27,14 @@ export default function AgentInput({
     onPrefillChange,
     onSend,
     onInterrupt,
+    sessionConfig,
+    onSessionConfigChange,
+    showCustomize = false,
+    customizeReadonly = false,
 }: AgentInputProps) {
     const [question, setQuestion] = useState("");
     const [rows, setRows] = useState(1);
+    const [customizeOpen, setCustomizeOpen] = useState(true);
     const composingRef = useRef(false);
     const MAX_ROWS = 10;
 
@@ -34,6 +46,7 @@ export default function AgentInput({
     };
 
     const doSend = (content: string) => {
+        if (runtimeBusy && !running) return;
         if (!content.trim()) return;
         setQuestion("");
         setRows(1);
@@ -107,6 +120,28 @@ export default function AgentInput({
             {/* Main input bar */}
             <div className="agent-input-bar">
                 <div className="agent-input-bar-inner">
+                    {showCustomize && sessionConfig && onSessionConfigChange && (
+                        <div className="agent-customize-slot">
+                            <button
+                                className={`agent-customize-toggle${customizeOpen ? " active" : ""}`}
+                                type="button"
+                                onClick={() => setCustomizeOpen((v) => !v)}
+                                title="Customize session"
+                            >
+                                <Icon name="palette" size={22} />
+                            </button>
+                            <div
+                                className={`agent-customize-popover${customizeOpen ? " open" : ""}`}
+                            >
+                                <SessionCustomizePanel
+                                    value={sessionConfig}
+                                    onChange={onSessionConfigChange}
+                                    mode="create"
+                                    readonly={customizeReadonly}
+                                />
+                            </div>
+                        </div>
+                    )}
                     <textarea
                         className="agent-textarea"
                         placeholder="Ask the agent something… (Enter to send, Ctrl/Shift+Enter for newline)"

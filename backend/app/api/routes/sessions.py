@@ -19,6 +19,7 @@ from app.schemas.response import (
     SessionStatusResponse,
     WorkspaceRestoreResponse,
 )
+from app.schemas.session import CreateSessionRequest
 from app.services.checkpoint_service import CheckpointService
 from app.services.errors import AmbiguousSession, CommitNotFound, SessionNotFound
 from app.services.session_service import SessionService
@@ -39,9 +40,10 @@ class MessageTruncateRequest(BaseModel):
 
 @router.post("/session", response_model=CreateSessionResponse)
 def create_session(
+    req: CreateSessionRequest,
     session_service: SessionService = Depends(get_session_service),
 ) -> dict:
-    return session_service.create_session()
+    return session_service.create_session(req)
 
 
 @router.get("/sessions", response_model=ListSessionsResponse)

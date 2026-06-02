@@ -18,6 +18,7 @@ from shared.types import (  # noqa: F401
 
 class CreateSessionResponse(BaseModel):
     session_id: str
+    workspace: str
 
 
 class ListSessionsResponse(BaseModel):

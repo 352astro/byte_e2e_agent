@@ -12,10 +12,14 @@ import { describe, it, expect, beforeAll } from "vitest";
 const BASE = "http://localhost:8000";
 
 async function post(endpoint: string, body?: Record<string, unknown>) {
+  const payload =
+    endpoint === "/api/session" && body === undefined
+      ? { name: "", preamble: "", rules: [], preloaded_skills: [] }
+      : body;
   const r = await fetch(`${BASE}${endpoint}`, {
     method: "POST",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
   });
   return r.json();
 }

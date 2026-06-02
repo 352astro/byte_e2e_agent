@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 import Icon from "./Icon";
+import SessionCustomizePanel from "./SessionCustomizePanel";
 
 interface MemoryRecord {
   id: string;
   kind: string;
   content: string;
+  feature?: string;
   created_at: number;
   updated_at: number;
   use_count: number;
@@ -41,6 +43,9 @@ export default function SettingsWindow({
   const [error, setError] = useState<string | null>(null);
   const [content, setContent] = useState("");
   const [kind, setKind] = useState("fact");
+  const [activeTab, setActiveTab] = useState<
+    "memory" | "rules" | "skills" | "preamble"
+  >("memory");
 
   const loadMemories = useCallback(async () => {
     setLoading(true);
@@ -149,85 +154,124 @@ export default function SettingsWindow({
 
       <div className="settings-body">
         <aside className="settings-nav">
-          <button className="settings-nav-item active" type="button">
+          <button
+            className={`settings-nav-item ${activeTab === "memory" ? "active" : ""}`}
+            type="button"
+            onClick={() => setActiveTab("memory")}
+          >
             Long-term Memory
+          </button>
+          <button
+            className={`settings-nav-item ${activeTab === "rules" ? "active" : ""}`}
+            type="button"
+            onClick={() => setActiveTab("rules")}
+          >
+            Rules
+          </button>
+          <button
+            className={`settings-nav-item ${activeTab === "skills" ? "active" : ""}`}
+            type="button"
+            onClick={() => setActiveTab("skills")}
+          >
+            Skills
+          </button>
+          <button
+            className={`settings-nav-item ${activeTab === "preamble" ? "active" : ""}`}
+            type="button"
+            onClick={() => setActiveTab("preamble")}
+          >
+            Preamble
           </button>
         </aside>
 
         <main className="settings-content">
-          <div className="memory-panel-head">
-            <div>
-              <h2>Long-term Memory</h2>
-              <div className="memory-workspace" title={workspace}>
-                {workspace || "Current workspace"}
-              </div>
-            </div>
-            <button
-              className="memory-refresh-btn"
-              type="button"
-              onClick={() => void loadMemories()}
-              disabled={loading}
-            >
-              {loading ? "Loading" : "Refresh"}
-            </button>
-          </div>
-
-          <div className="memory-add-row">
-            <select
-              className="memory-kind-select"
-              value={kind}
-              onChange={(e) => setKind(e.target.value)}
-            >
-              {memoryKinds.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-            <textarea
-              className="memory-input"
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Add a memory for this workspace"
-              rows={3}
-            />
-            <button
-              className="memory-add-btn"
-              type="button"
-              onClick={() => void addMemory()}
-              disabled={saving || !content.trim()}
-            >
-              Add
-            </button>
-          </div>
-
-          {error && <div className="memory-error">{error}</div>}
-
-          <div className="memory-list">
-            {memories.length === 0 && !loading && (
-              <div className="memory-empty">No memory yet.</div>
-            )}
-            {memories.map((memory) => (
-              <div className="memory-item" key={memory.id}>
-                <div className="memory-item-main">
-                  <div className="memory-meta">
-                    <span>{memory.kind}</span>
-                    <span>{formatTime(memory.updated_at)}</span>
-                    {memory.use_count > 0 && <span>used {memory.use_count}</span>}
+          {activeTab === "memory" ? (
+            <>
+              <div className="memory-panel-head">
+                <div>
+                  <h2>Long-term Memory</h2>
+                  <div className="memory-workspace" title={workspace}>
+                    {workspace || "Current workspace"}
                   </div>
-                  <div className="memory-content">{memory.content}</div>
                 </div>
                 <button
-                  className="memory-delete-btn"
+                  className="memory-refresh-btn"
                   type="button"
-                  title="Delete memory"
-                  onClick={() => void deleteMemory(memory.id)}
+                  onClick={() => void loadMemories()}
+                  disabled={loading}
                 >
-                  <Icon name="trash" size={15} />
+                  {loading ? "Loading" : "Refresh"}
                 </button>
               </div>
-            ))}
-          </div>
+
+              <div className="memory-add-row">
+                <select
+                  className="memory-kind-select"
+                  value={kind}
+                  onChange={(e) => setKind(e.target.value)}
+                >
+                  {memoryKinds.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+                <textarea
+                  className="memory-input"
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder="Add a memory for this workspace"
+                  rows={3}
+                />
+                <button
+                  className="memory-add-btn"
+                  type="button"
+                  onClick={() => void addMemory()}
+                  disabled={saving || !content.trim()}
+                >
+                  Add
+                </button>
+              </div>
+
+              {error && <div className="memory-error">{error}</div>}
+
+              <div className="memory-list">
+                {memories.length === 0 && !loading && (
+                  <div className="memory-empty">No memory yet.</div>
+                )}
+                {memories.map((memory) => (
+                  <div className="memory-item" key={memory.id}>
+                    <div className="memory-item-main">
+                      <div className="memory-meta">
+                        <span>{memory.kind}</span>
+                        <span>{formatTime(memory.updated_at)}</span>
+                        {memory.use_count > 0 && (
+                          <span>used {memory.use_count}</span>
+                        )}
+                      </div>
+                      <div className="memory-content">{memory.content}</div>
+                      {memory.feature && memory.feature !== memory.content && (
+                        <div className="memory-feature">{memory.feature}</div>
+                      )}
+                    </div>
+                    <button
+                      className="memory-delete-btn"
+                      type="button"
+                      title="Delete memory"
+                      onClick={() => void deleteMemory(memory.id)}
+                    >
+                      <Icon name="trash" size={15} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <SessionCustomizePanel
+              mode="settings"
+              section={activeTab}
+            />
+          )}
         </main>
       </div>
     </div>

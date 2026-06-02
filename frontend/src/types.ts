@@ -15,6 +15,10 @@ export type ToolCallFunction = components["schemas"]["ToolCallFunction"];
 export type MessageRole = components["schemas"]["MessageRole"];
 export type MessageStatus = components["schemas"]["MessageStatus"];
 export type StreamEventKind = components["schemas"]["StreamEventKind"];
+export type CreateSessionRequest = components["schemas"]["CreateSessionRequest"];
+export type SessionSettings = components["schemas"]["SessionSettings"];
+export type SessionRule = components["schemas"]["SessionRule"];
+export type SkillInfoResponse = components["schemas"]["SkillInfoResponse"];
 
 // ── StreamEvent（SSE 协议，手写保持与 shared/types.py 一致）──
 

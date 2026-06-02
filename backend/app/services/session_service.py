@@ -8,8 +8,11 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from agent.core.config import SessionConfig
 from agent.core.workspace import Workspace as CoreWorkspace
+from agent.llm import get_model_id
 from agent.session import clear
+from app.schemas.session import CreateSessionRequest
 from app.services.context import WorkspaceContext
 from app.services.errors import SessionNotFound
 from app.services.session_scope import (
@@ -27,15 +30,31 @@ class SessionService:
         self._ctx = ctx
         self._locator = SessionLocator(ctx)
 
-    def create_session(self) -> dict[str, Any]:
+    def create_session(self, req: CreateSessionRequest) -> dict[str, Any]:
         self._ctx.ensure_storage_ready()
         register_workspace(self._ctx.workspace)
         session_id = uuid.uuid4().hex[:12]
         messages_path = self._ctx.messages_path(session_id)
         messages_path.parent.mkdir(parents=True, exist_ok=True)
         messages_path.touch()
+        config = SessionConfig.user_main(
+            name=req.name.strip() or session_id,
+            model_id=get_model_id(),
+            preamble=req.preamble.strip(),
+            preloaded_skills=[
+                item.strip() for item in req.preloaded_skills if item.strip()
+            ],
+            rules=[item.strip() for item in req.rules if item.strip()],
+        )
+        CoreWorkspace(self._ctx.workspace).save_session_config(session_id, config)
         scope = self._locator.resolve(session_id, workspace_hint=self._ctx.workspace)
         write_session_metadata(scope)
+        metadata = read_session_metadata(scope)
+        metadata["session_name"] = config.name
+        scope.metadata_path.write_text(
+            json.dumps(metadata, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
         return {"session_id": session_id, "workspace": self._ctx.workspace}
 
     def list_sessions(self) -> list[dict[str, Any]]:

@@ -1,5 +1,10 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import type { Message, StreamEvent, RecoverData } from "../types";
+import type {
+  CreateSessionRequest,
+  Message,
+  RecoverData,
+  StreamEvent,
+} from "../types";
 
 // ── types ────────────────────────────────────────────
 
@@ -20,7 +25,7 @@ export interface UseAgentStreamReturn {
   activeMessage: Message | null;
 
   // ── 命令（异步）──
-  send: (question: string) => Promise<void>;
+  send: (question: string, sessionConfig?: CreateSessionRequest) => Promise<void>;
   interrupt: () => Promise<void>;
   reloadMessages: () => Promise<void>;
 
@@ -29,7 +34,7 @@ export interface UseAgentStreamReturn {
   resetRunning: () => void;
 
   // ── 工具 ──
-  createSession: () => Promise<string>;
+  createSession: (config: CreateSessionRequest) => Promise<string>;
   prefillRef: React.MutableRefObject<string>;
   scrollToMessage: (id: string) => void;
   runError: string | null;
@@ -183,12 +188,19 @@ export default function useAgentStream({
   //  createSession
   // ═══════════════════════════════════════════════════
 
-  const createSession = useCallback(async (): Promise<string> => {
-    const res = await fetch("/api/session", { method: "POST" });
-    if (!res.ok) throw new Error(`Server returned ${res.status}`);
-    const data = await res.json();
-    return data.session_id as string;
-  }, []);
+  const createSession = useCallback(
+    async (config: CreateSessionRequest): Promise<string> => {
+      const res = await fetch("/api/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+      });
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      const data = await res.json();
+      return data.session_id as string;
+    },
+    [],
+  );
 
   // ═══════════════════════════════════════════════════
   //  reloadMessagesInternal (private, with gen gate)
@@ -440,7 +452,15 @@ export default function useAgentStream({
   // ═══════════════════════════════════════════════════
 
   const send = useCallback(
-    async (question: string): Promise<void> => {
+    async (
+      question: string,
+      sessionConfig: CreateSessionRequest = {
+        name: "",
+        preamble: "",
+        rules: [],
+        preloaded_skills: [],
+      },
+    ): Promise<void> => {
       if (opGuardRef.current) return;
       opGuardRef.current = true;
       const gen = bumpGen();
@@ -456,7 +476,7 @@ export default function useAgentStream({
         let sid = sessionId;
         let selfStarted = false;
         if (!sid) {
-          sid = await createSession();
+          sid = await createSession(sessionConfig);
           // CRITICAL: set runningRef + streamSidRef *before* onSessionCreated,
           // so the session-switch useEffect sees them and bails out instead of
           // bumping gen / clearing messages / reloading.
@@ -479,6 +499,7 @@ export default function useAgentStream({
 
         const controller = new AbortController();
         abortRef.current = controller;
+        let keepRuntimeBusy = false;
 
         try {
           const streamRes = await fetch(`/api/session/${sid}/chat`, {
@@ -492,6 +513,9 @@ export default function useAgentStream({
           });
           if (!streamRes.ok) {
             if (streamRes.status === 409) {
+              setRunning(false);
+              setRuntimeBusy(true);
+              keepRuntimeBusy = true;
               setRunError(BUSY_MESSAGE);
               return;
             }
@@ -511,7 +535,7 @@ export default function useAgentStream({
           if (genRef.current === gen && runningRef.current) {
             setRunning(false);
           }
-          if (genRef.current === gen) {
+          if (genRef.current === gen && !keepRuntimeBusy) {
             setRuntimeBusy(false);
           }
         }

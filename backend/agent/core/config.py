@@ -242,6 +242,8 @@ class SessionConfig:
         name: str,
         model_id: str,
         preamble: str = "",
+        preloaded_skills: list[str] | None = None,
+        rules: list[str] | None = None,
     ) -> "SessionConfig":
         """用户主 Session 的工厂方法。"""
         return cls(
@@ -249,6 +251,8 @@ class SessionConfig:
             model_id=model_id,
             preamble=preamble,
             tool_set_preset=ToolSetPreset.ALL,
+            preloaded_skills=list(preloaded_skills or []),
+            rules=list(rules or []),
             access=AccessPolicy.user_default(),
         )
 

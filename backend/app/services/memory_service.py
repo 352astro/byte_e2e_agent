@@ -2,10 +2,30 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import time
 
 from agent.memory.store import MEMORY_KINDS, MemoryRecord
 from app.services.context import WorkspaceContext
+
+logger = logging.getLogger(__name__)
+
+_FEATURE_PROMPT = """\
+Create a short recall feature for this manually added memory.
+
+The feature is an internal semantic index used to decide whether this memory
+is relevant to a future user question.
+
+Rules:
+- Keep it under 16 words.
+- Preserve important entities, preferences, decisions, and keywords.
+- Do not add facts not present in the memory.
+- Return the feature text only.
+
+Kind: {kind}
+Memory: {content}
+Feature:"""
 
 
 class MemoryService:
@@ -27,6 +47,8 @@ class MemoryService:
         normalized_kind = kind.strip().lower()
         if normalized_kind not in MEMORY_KINDS:
             normalized_kind = "fact"
+        trimmed = content.strip()
+        feature = await _generate_feature(trimmed, normalized_kind)
         now = time.time()
         record = MemoryRecord(
             workspace=self._ctx.workspace,
@@ -34,8 +56,8 @@ class MemoryService:
             turn_id="__manual__",
             scope="workspace",
             kind=normalized_kind,
-            content=content.strip(),
-            feature=content.strip(),
+            content=trimmed,
+            feature=feature or trimmed,
             confidence=1.0,
             created_at=now,
             updated_at=now,
@@ -73,3 +95,38 @@ def _memory_to_dict(record: MemoryRecord) -> dict:
         "last_used_at": record.last_used_at,
         "use_count": record.use_count,
     }
+
+
+async def _generate_feature(content: str, kind: str) -> str:
+    if not content:
+        return ""
+    try:
+        from agent.memory._side_client import create_side_client, get_side_model_id
+
+        client = create_side_client()
+        model = get_side_model_id()
+        prompt = _FEATURE_PROMPT.format(kind=kind, content=content[:2000])
+
+        def _sync_call() -> str:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=48,
+                temperature=0.0,
+            )
+            return resp.choices[0].message.content or ""
+
+        raw = await asyncio.wait_for(asyncio.to_thread(_sync_call), timeout=8.0)
+    except Exception as exc:
+        logger.warning("MemoryService: feature generation failed: %s", exc)
+        return content
+    feature = _clean_feature(raw)
+    return feature or content
+
+
+def _clean_feature(text: str) -> str:
+    feature = text.strip()
+    if feature.startswith("```"):
+        feature = feature.strip("`").strip()
+    feature = feature.strip("\"' \n\t")
+    return " ".join(feature.split())[:200]

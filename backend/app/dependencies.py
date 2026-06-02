@@ -6,6 +6,7 @@ from app.services.checkpoint_service import CheckpointService
 from app.services.context import WorkspaceContext
 from app.services.metrics_service import MetricsService
 from app.services.memory_service import MemoryService
+from app.services.settings_service import SettingsService
 from app.services.session_service import SessionService
 from app.services.workspace_service import WorkspaceService
 
@@ -41,3 +42,7 @@ def get_metrics_service() -> MetricsService:
 
 def get_memory_service() -> MemoryService:
     return MemoryService(get_context())
+
+
+def get_settings_service() -> SettingsService:
+    return SettingsService(get_context())

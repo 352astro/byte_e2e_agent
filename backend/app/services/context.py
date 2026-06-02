@@ -128,13 +128,12 @@ class WorkspaceContext:
         return self._any_runtime_busy()
 
     def create_runtime_session_entry(self, session_id: str):
-        from agent.core.config import SessionConfig
-
         entry = self.scheduler.get_session(session_id)
         if entry is not None:
             return entry
+        config = self._load_session_config(session_id)
         return self.scheduler.create_session(
-            SessionConfig.user_main(name=session_id, model_id=self._model_id),
+            config,
             session_id=session_id,
             ws=CoreWorkspace(self._workspace),
         )
@@ -198,6 +197,24 @@ class WorkspaceContext:
         hooks = HookManager(hook_list)
         return AgentRuntime(CoreWorkspace(self._workspace), hooks)
 
+    def _load_session_config(self, session_id: str):
+        from agent.core.config import SessionConfig, ToolSetPreset
+
+        raw = self.core_workspace.load_session_config(session_id) or {}
+        try:
+            tool_set_preset = ToolSetPreset(raw.get("tool_set_preset", "all"))
+        except ValueError:
+            tool_set_preset = ToolSetPreset.ALL
+        return SessionConfig(
+            name=str(raw.get("name") or session_id),
+            model_id=str(raw.get("model_id") or self._model_id),
+            preamble=str(raw.get("preamble") or ""),
+            tool_set_preset=tool_set_preset,
+            custom_tools=_string_list(raw.get("custom_tools")),
+            preloaded_skills=_string_list(raw.get("preloaded_skills")),
+            rules=_string_list(raw.get("rules")),
+        )
+
     def _any_runtime_busy(self) -> bool:
         for ctx in set(self._scoped_contexts.values()):
             runtime = ctx._runtime
@@ -225,3 +242,9 @@ def _probe_writable(directory: Path, label: str) -> None:
         probe.unlink(missing_ok=True)
     except OSError as exc:
         raise ValueError(f"{label} not writable: {directory} ({exc})") from exc
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]

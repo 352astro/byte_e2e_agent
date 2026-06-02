@@ -15,7 +15,7 @@ import ToolPairCard from "./ToolPairCard";
 import AgentInput from "./AgentInput";
 import EditableUserBubble from "./EditableUserBubble";
 import { pairToolCalls } from "../hooks/pairTools";
-import { type CommitInfo } from "../types";
+import { type CommitInfo, type CreateSessionRequest } from "../types";
 import CommitGraphPanel, { CommitGraphHandle } from "./CommitGraphPanel";
 import "./AgentDemo.css";
 
@@ -102,7 +102,6 @@ export default function AgentDemo({
     messages,
     send,
     interrupt,
-    createSession,
     prefillRef,
     reloadMessages,
     truncateMessages,
@@ -116,6 +115,12 @@ export default function AgentDemo({
   });
 
   const locked = running || runtimeBusy || interrupting;
+  const [sessionConfig, setSessionConfig] = useState<CreateSessionRequest>({
+    name: "",
+    preamble: "",
+    rules: [],
+    preloaded_skills: [],
+  });
   const [graphVersion, setGraphVersion] = useState(0);
   const graphRef = useRef<CommitGraphHandle>(null);
 
@@ -282,9 +287,9 @@ export default function AgentDemo({
 
   const handleSend = useCallback(
     (question: string) => {
-      send(question);
+      send(question, sessionId ? undefined : sessionConfig);
     },
-    [send],
+    [send, sessionId, sessionConfig],
   );
 
   // ── Independent workspace/message rewind ──────
@@ -493,6 +498,10 @@ export default function AgentDemo({
         onPrefillChange={setPrefillContent}
         onSend={handleSend}
         onInterrupt={interrupt}
+        sessionConfig={sessionConfig}
+        onSessionConfigChange={setSessionConfig}
+        showCustomize
+        customizeReadonly={!!sessionId || messages.length > 0}
       />
 
       <CommitGraphPanel

@@ -482,6 +482,13 @@ class AgentRuntime:
                     skill_context_message(),
                     task_context_message(ws, session_id=sid),
                 ]
+                preloaded_skill_context = _build_preloaded_skills_context(
+                    entry.config.preloaded_skills
+                )
+                if preloaded_skill_context:
+                    messages.append(
+                        {"role": "system", "content": preloaded_skill_context}
+                    )
                 if entry.config.preamble:
                     messages.append(
                         {"role": "system", "content": entry.config.preamble}
@@ -770,11 +777,19 @@ def _build_subagent_preamble(with_skills: list[str]) -> str:
             "parent conversation; rely only on the task and your own tool results."
         )
     ]
+    skill_context = _build_preloaded_skills_context(with_skills)
+    if skill_context:
+        parts.append(skill_context)
+    return "\n\n".join(parts)
+
+
+def _build_preloaded_skills_context(with_skills: list[str]) -> str:
     if not with_skills:
-        return "\n\n".join(parts)
+        return ""
 
     from agent.tools.skill import get_skill
 
+    parts: list[str] = []
     for skill_name in with_skills:
         skill = get_skill(skill_name)
         if skill is None:

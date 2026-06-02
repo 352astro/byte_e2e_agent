@@ -90,7 +90,7 @@ class TestFullSessionTrace:
         client = Client(base_url=BACKEND)
 
         # ── Create session ──────────────────────────
-        r = client.post("/api/session")
+        r = client.post("/api/session", json={"name": "", "preamble": "", "rules": [], "preloaded_skills": []})
         assert r.status_code == 200
         sid = r.json()["session_id"]
         assert sid

@@ -357,6 +357,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Skills */
+        get: operations["list_skills_api_skills_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/session-defaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Session Settings */
+        get: operations["get_session_settings_api_settings_session_defaults_get"];
+        /** Update Session Settings */
+        put: operations["update_session_settings_api_settings_session_defaults_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/session-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Session Rule */
+        post: operations["add_session_rule_api_settings_session_rules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/session-rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Session Rule */
+        delete: operations["delete_session_rule_api_settings_session_rules__rule_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session/{sid}/chat": {
         parameters: {
             query?: never;
@@ -514,6 +583,11 @@ export interface components {
              */
             kind: string;
         };
+        /** AddRuleRequest */
+        AddRuleRequest: {
+            /** Content */
+            content: string;
+        };
         /** ChatRequest */
         ChatRequest: {
             /**
@@ -557,10 +631,29 @@ export interface components {
             /** Commits */
             commits: components["schemas"]["CommitInfo"][];
         };
+        /** CreateSessionRequest */
+        CreateSessionRequest: {
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Preamble
+             * @default
+             */
+            preamble: string;
+            /** Rules */
+            rules?: string[];
+            /** Preloaded Skills */
+            preloaded_skills?: string[];
+        };
         /** CreateSessionResponse */
         CreateSessionResponse: {
             /** Session Id */
             session_id: string;
+            /** Workspace */
+            workspace: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -718,6 +811,27 @@ export interface components {
             /** Runtime Busy */
             runtime_busy: boolean;
         };
+        /** SessionRule */
+        SessionRule: {
+            /** Id */
+            id: string;
+            /** Content */
+            content: string;
+        };
+        /** SessionSettings */
+        SessionSettings: {
+            /**
+             * Preamble
+             * @default
+             */
+            preamble: string;
+            /** Rules */
+            rules?: components["schemas"]["SessionRule"][];
+            /** Default Rule Ids */
+            default_rule_ids?: string[];
+            /** Default Skill Names */
+            default_skill_names?: string[];
+        };
         /** SessionStatusResponse */
         SessionStatusResponse: {
             /** Session Running */
@@ -732,6 +846,18 @@ export interface components {
              * @description Absolute or relative path to new workspace
              */
             path: string;
+        };
+        /** SkillInfoResponse */
+        SkillInfoResponse: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+        };
+        /** SkillListResponse */
+        SkillListResponse: {
+            /** Skills */
+            skills: components["schemas"]["SkillInfoResponse"][];
         };
         /**
          * StreamEventKind
@@ -1006,7 +1132,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSessionRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -1015,6 +1145,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreateSessionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -1385,6 +1524,143 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InterruptResponse"];
+                };
+            };
+        };
+    };
+    list_skills_api_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillListResponse"];
+                };
+            };
+        };
+    };
+    get_session_settings_api_settings_session_defaults_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionSettings"];
+                };
+            };
+        };
+    };
+    update_session_settings_api_settings_session_defaults_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionSettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_session_rule_api_settings_session_rules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddRuleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionSettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_session_rule_api_settings_session_rules__rule_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionSettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -18,11 +18,18 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from app.dependencies import get_project
+from app.dependencies import get_chat_service
 from main import app
 from shared.types import Message, MessageRole, MessageStatus, ToolCall, ToolCallFunction
 
 client = TestClient(app)
+
+
+def create_session():
+    return client.post(
+        "/api/session",
+        json={"name": "", "preamble": "", "rules": [], "preloaded_skills": []},
+    )
 
 
 # ═══════════════════════════════════════════════════════════
@@ -32,7 +39,7 @@ client = TestClient(app)
 
 class TestSessionCRUD:
     def test_create_session_returns_session_id(self):
-        r = client.post("/api/session")
+        r = create_session()
         assert r.status_code == 200
         data = r.json()
         assert "session_id" in data
@@ -40,7 +47,7 @@ class TestSessionCRUD:
         assert len(data["session_id"]) > 0
 
     def test_list_sessions_includes_created(self):
-        r = client.post("/api/session")
+        r = create_session()
         sid = r.json()["session_id"]
 
         r = client.get("/api/sessions")
@@ -51,7 +58,7 @@ class TestSessionCRUD:
         assert any(s["session_id"] == sid for s in data["sessions"])
 
     def test_delete_session_removes(self):
-        r = client.post("/api/session")
+        r = create_session()
         sid = r.json()["session_id"]
 
         r = client.delete(f"/api/session/{sid}")
@@ -68,7 +75,7 @@ class TestSessionCRUD:
         assert r.status_code == 404
 
     def test_history_returns_session_and_messages(self):
-        r = client.post("/api/session")
+        r = create_session()
         sid = r.json()["session_id"]
 
         r = client.get(f"/api/session/{sid}/history")
@@ -82,8 +89,8 @@ class TestSessionCRUD:
         r = client.get("/api/session/nonexistent/history")
         assert r.status_code == 404
 
-    def test_recover_returns_messages_and_running(self):
-        r = client.post("/api/session")
+    def test_recover_returns_messages_and_session_running(self):
+        r = create_session()
         sid = r.json()["session_id"]
 
         r = client.get(f"/api/session/{sid}/recover")
@@ -92,8 +99,8 @@ class TestSessionCRUD:
         assert "session" in data
         assert "messages" in data
         assert isinstance(data["messages"], list)
-        assert "running" in data
-        assert data["running"] is False
+        assert "session_running" in data
+        assert data["session_running"] is False
         assert "runtime_busy" in data
         assert data["runtime_busy"] is False
 
@@ -101,27 +108,23 @@ class TestSessionCRUD:
         r = client.get("/api/status")
         assert r.status_code == 200
         data = r.json()
-        assert "running" in data
-        assert data["running"] is False
-        assert "runtime_busy" in data
-        assert data["runtime_busy"] is False
         assert "runtime_busy" in data
         assert data["runtime_busy"] is False
 
-    def test_legacy_session_status_returns_global_runtime_state(self):
-        r = client.post("/api/session")
+    def test_session_status_returns_session_and_runtime_state(self):
+        r = create_session()
         sid = r.json()["session_id"]
 
         r = client.get(f"/api/session/{sid}/status")
         assert r.status_code == 200
         data = r.json()
-        assert "running" in data
-        assert data["running"] is False
+        assert "session_running" in data
+        assert data["session_running"] is False
+        assert data["runtime_busy"] is False
 
-    def test_legacy_session_status_does_not_require_existing_session(self):
+    def test_session_status_requires_existing_session(self):
         r = client.get("/api/session/nonexistent/status")
-        assert r.status_code == 200
-        assert "running" in r.json()
+        assert r.status_code == 404
 
 
 # ═══════════════════════════════════════════════════════════
@@ -131,7 +134,7 @@ class TestSessionCRUD:
 
 class TestInterrupt:
     def test_interrupt_session_returns_ok(self):
-        r = client.post("/api/session")
+        r = create_session()
         sid = r.json()["session_id"]
 
         r = client.post(f"/api/session/{sid}/interrupt")
@@ -212,7 +215,7 @@ class TestOpenAPISchema:
 
 class TestChatSSE:
     def test_chat_requires_body(self):
-        r = client.post("/api/session")
+        r = create_session()
         sid = r.json()["session_id"]
 
         # Missing body → validation error (fastapi returns 422 for invalid body)
@@ -221,7 +224,7 @@ class TestChatSSE:
 
     def test_chat_accepts_valid_request(self):
         """Chat endpoint accepts valid JSON and returns 200 (starts streaming)."""
-        r = client.post("/api/session")
+        r = create_session()
         sid = r.json()["session_id"]
 
         # Mock the stream creation to avoid real LLM calls
@@ -232,8 +235,8 @@ class TestChatSSE:
         mock_stream.driver = MagicMock()
         mock_stream.driver.unsubscribe = MagicMock()
 
-        mock_project = MagicMock(start_chat=MagicMock(return_value=mock_stream))
-        app.dependency_overrides[get_project] = lambda: mock_project
+        mock_chat_service = MagicMock(start_chat=MagicMock(return_value=mock_stream))
+        app.dependency_overrides[get_chat_service] = lambda: mock_chat_service
         try:
             r = client.post(
                 f"/api/session/{sid}/chat",
@@ -241,7 +244,7 @@ class TestChatSSE:
             )
             assert r.status_code == 200
         finally:
-            app.dependency_overrides.pop(get_project, None)
+            app.dependency_overrides.pop(get_chat_service, None)
 
     def test_chat_nonexistent_session(self):
         r = client.post(
@@ -259,7 +262,7 @@ class TestChatSSE:
 class TestRewindAPIs:
     def test_message_truncate_does_not_require_commit_sha(self):
         """Message truncation is independent from workspace commits."""
-        r = client.post("/api/session")
+        r = create_session()
         sid = r.json()["session_id"]
 
         r = client.post(

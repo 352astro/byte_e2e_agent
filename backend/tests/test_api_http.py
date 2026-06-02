@@ -168,7 +168,7 @@ class TestWorkspaceEndpoints:
 @pytest.mark.integration
 class TestSessionEndpoints:
     def test_session_lifecycle(self, client: httpx.Client) -> None:
-        create = client.post("/api/session")
+        create = client.post("/api/session", json={"name": "", "preamble": "", "rules": [], "preloaded_skills": []})
         assert create.status_code == 200
         created = create.json()
         assert "session_id" in created
@@ -201,15 +201,15 @@ class TestSessionEndpoints:
         status = client.get(f"/api/session/{sid}/status")
         assert status.status_code == 200
         status_body = status.json()
-        assert status_body["running"] is False
+        assert status_body["session_running"] is False
         assert status_body["runtime_busy"] is False
 
         recover = client.get(f"/api/session/{sid}/recover")
         assert recover.status_code == 200
         recover_body = recover.json()
-        assert recover_body["running"] is False
+        assert recover_body["session_running"] is False
         assert recover_body["runtime_busy"] is False
-        assert isinstance(recover_body["transcripts"], list)
+        assert isinstance(recover_body["messages"], list)
 
         commits = client.get(f"/api/session/{sid}/commits")
         assert commits.status_code == 200
@@ -283,7 +283,7 @@ class TestMetricsEndpoints:
         assert dashboard_body["recent_calls"] == []
 
     def test_metrics_query_params(self, client: httpx.Client) -> None:
-        create = client.post("/api/session")
+        create = client.post("/api/session", json={"name": "", "preamble": "", "rules": [], "preloaded_skills": []})
         assert create.status_code == 200
         sid = create.json()["session_id"]
         try:
@@ -310,7 +310,7 @@ class TestMetricsEndpoints:
 @pytest.mark.integration
 class TestStreamEndpoints:
     def test_stream_idle_empty_session(self, client: httpx.Client) -> None:
-        create = client.post("/api/session")
+        create = client.post("/api/session", json={"name": "", "preamble": "", "rules": [], "preloaded_skills": []})
         assert create.status_code == 200
         sid = create.json()["session_id"]
         try:

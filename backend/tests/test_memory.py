@@ -6,6 +6,7 @@ import pytest
 
 from agent.memory.memory_hook import MemoryHook
 from agent.memory.store import InMemoryMemoryStore, MemoryRecord, SQLiteMemoryStore
+from app.services.memory_service import MemoryService
 from shared.types import Message
 
 
@@ -176,3 +177,29 @@ async def test_memory_hook_recalls_by_llm_feature_pick_without_keyword_search():
 
     assert "饮品偏好" in hook.pick_prompt
     assert "用户最爱喝芒果味奶昔。" in injected[0]["content"]
+
+
+class FakeMemoryContext:
+    workspace = "/repo"
+
+    def __init__(self) -> None:
+        self.memory_store = InMemoryMemoryStore()
+
+
+@pytest.mark.asyncio
+async def test_manual_memory_add_generates_feature(monkeypatch):
+    async def fake_generate_feature(content: str, kind: str) -> str:
+        assert content == "用户最爱喝芒果味奶昔。"
+        assert kind == "preference"
+        return "饮品偏好：最爱芒果味奶昔"
+
+    monkeypatch.setattr(
+        "app.services.memory_service._generate_feature",
+        fake_generate_feature,
+    )
+    service = MemoryService(FakeMemoryContext())
+
+    result = await service.add_memory("用户最爱喝芒果味奶昔。", kind="preference")
+
+    assert result["memory"]["content"] == "用户最爱喝芒果味奶昔。"
+    assert result["memory"]["feature"] == "饮品偏好：最爱芒果味奶昔"
