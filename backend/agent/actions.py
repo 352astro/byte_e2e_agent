@@ -306,7 +306,7 @@ async def execute_one_tool(
 def _accepts_kwarg(fn, name: str) -> bool:
     try:
         params = inspect.signature(fn).parameters.values()
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return False
     return any(
         p.kind == inspect.Parameter.VAR_KEYWORD or p.name == name for p in params

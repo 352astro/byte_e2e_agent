@@ -114,7 +114,7 @@ class Workspace:
             return None
         try:
             return json.loads(path.read_text())
-        except json.JSONDecodeError, OSError:
+        except (json.JSONDecodeError, OSError):
             return None
 
     def list_session_ids(self) -> list[str]:
