@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.services.context import WorkspaceContext
 from app.services.workspace_registry import register_workspace
 
@@ -28,3 +30,11 @@ class WorkspaceService:
 
     def resolve_workspace(self, path: str | None = None) -> str:
         return self._ctx.resolve_workspace(path)
+
+    def resolve_file(self, path: str) -> Path:
+        if not path or not path.strip():
+            raise ValueError("path is required")
+        resolved = self._ctx.core_workspace.resolve(path.strip())
+        if resolved.is_dir():
+            raise ValueError("path points to a directory")
+        return resolved

@@ -127,6 +127,27 @@ class TestSessionCRUD:
         assert r.status_code == 404
 
 
+class TestWorkspaceFileAPI:
+    def test_workspace_file_serves_file(self, tmp_path):
+        from app.dependencies import get_context
+
+        ctx = get_context()
+        old_workspace = ctx.workspace
+        try:
+            ctx.set_workspace(str(tmp_path))
+            (tmp_path / "image.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+            r = client.get("/api/workspace/file", params={"path": "image.png"})
+            assert r.status_code == 200
+            assert r.headers["content-type"].startswith("image/png")
+            assert r.content == b"\x89PNG\r\n\x1a\n"
+        finally:
+            ctx.set_workspace(old_workspace)
+
+    def test_workspace_file_rejects_traversal(self):
+        r = client.get("/api/workspace/file", params={"path": "../secret.png"})
+        assert r.status_code == 403
+
+
 # ═══════════════════════════════════════════════════════════
 # Interrupt
 # ═══════════════════════════════════════════════════════════

@@ -74,7 +74,23 @@ export function splitPartialJson(raw: string, longKey: string): SplitResult {
 
     // Best case: the whole string is already valid JSON
     try {
-        return { meta: JSON.parse(raw), rest: "" };
+        const parsed = JSON.parse(raw);
+        if (
+            parsed &&
+            typeof parsed === "object" &&
+            !Array.isArray(parsed) &&
+            Object.prototype.hasOwnProperty.call(parsed, longKey)
+        ) {
+            const { [longKey]: longValue, ...meta } = parsed as Record<
+                string,
+                unknown
+            >;
+            return {
+                meta,
+                rest: longValue != null ? String(longValue) : "",
+            };
+        }
+        return { meta: parsed, rest: "" };
     } catch {
         /* fall through */
     }
@@ -82,7 +98,13 @@ export function splitPartialJson(raw: string, longKey: string): SplitResult {
     // Locate the long key
     const keyToken = `"${longKey}"`;
     const keyPos = raw.indexOf(keyToken);
-    if (keyPos === -1) return { meta: {}, rest: jsonUnescape(raw) };
+    if (keyPos === -1) {
+        try {
+            return { meta: JSON.parse(raw.trimEnd() + "}"), rest: "" };
+        } catch {
+            return { meta: {}, rest: "" };
+        }
+    }
 
     // Skip past the key and colon to the value
     const afterKey = raw.slice(keyPos + keyToken.length);

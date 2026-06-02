@@ -322,6 +322,10 @@
     color: #1a56db;
     text-decoration: underline;
 }
+.md-content img {
+    max-width: 100%;
+    height: auto;
+}
 .md-content strong {
     color: #111;
 }
@@ -1119,24 +1123,32 @@
     opacity: 1;
 }
 
-/* ── Write call card (light indigo) ─────────── */
+/* ── File call cards (Read / Write) ─────────── */
 
 .tool-card--write {
     /* header blends in; content area has tint */
 }
 
-.write-call-bar {
+.tool-card--read {
+    /* header blends in; content area has tint */
+}
+
+.file-call-bar {
     display: flex;
     align-items: center;
     gap: 6px;
 }
 
-.write-call-icon {
+.file-call-icon {
     color: #888;
     flex-shrink: 0;
 }
 
-.write-call-label {
+.file-call--read .file-call-icon {
+    color: #999;
+}
+
+.file-call-label {
     font-size: 0.72rem;
     font-weight: 600;
     color: #666;
@@ -1144,7 +1156,11 @@
     letter-spacing: 0.5px;
 }
 
-.write-call-path {
+.file-call--read .file-call-label {
+    color: #777;
+}
+
+.file-call-path {
     font-size: 0.7rem;
     font-family: ui-monospace, monospace;
     color: #888;
@@ -1154,59 +1170,25 @@
     white-space: nowrap;
 }
 
-.write-call-body {
+.file-call--read .file-call-path {
+    color: #999;
+}
+
+.file-call-body {
+    margin: 4px 0 0 0;
+    padding: 10px 12px;
+    border-radius: 4px;
+    font-size: 0.88rem;
+    line-height: 1.6;
+    color: #333;
+}
+
+.file-call-body.file-call--write {
     background: #f3f4ff;
-    margin: 4px 0 0 0;
-    padding: 10px 12px;
-    border-radius: 4px;
-    font-size: 0.88rem;
-    line-height: 1.6;
-    color: #333;
 }
 
-/* ── Read result card (light gray) ──────────── */
-
-.tool-card--read {
-    /* header blends in; content area has tint */
-}
-
-.read-call-bar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.read-call-icon {
-    color: #999;
-    flex-shrink: 0;
-}
-
-.read-call-label {
-    font-size: 0.72rem;
-    font-weight: 600;
-    color: #777;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.read-call-path {
-    font-size: 0.7rem;
-    font-family: ui-monospace, monospace;
-    color: #999;
-    max-width: 50%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.read-call-body {
+.file-call-body.file-call--read {
     background: #f2f2f2;
-    margin: 4px 0 0 0;
-    padding: 10px 12px;
-    border-radius: 4px;
-    font-size: 0.88rem;
-    line-height: 1.6;
-    color: #333;
 }
 
 /* ── File result card (Write/Read standalone) ── */

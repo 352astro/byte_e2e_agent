@@ -5,7 +5,7 @@ import Icon from "./Icon";
 import MessageCard from "./MessageCard";
 import { pairToolCalls } from "../hooks/pairTools";
 import { useCollapsible } from "../hooks/useCollapsible";
-import { extractToolMeta } from "../utils";
+import { extractArg, extractToolMeta } from "../utils";
 import type { Message, StreamEvent, ToolPair } from "../types";
 
 // ── Public ───────────────────────────────────────────────
@@ -349,26 +349,20 @@ const ToolPairCard = React.memo(function ToolPairCard({
   const argumentsStr = pair.toolCall?.function?.arguments || "";
 
   const resultContent = pair.resultMessage?.tool_result || undefined;
-  const { meta } = extractToolMeta(argumentsStr, toolName);
+  const { meta, rest } = extractToolMeta(argumentsStr, toolName);
   const cwd = meta.cwd as string | undefined;
-  const filePath = meta.path as string | undefined;
+  const filePath =
+    (meta.path as string | undefined) || extractArg(argumentsStr, "path");
   const subtitle =
     toolName === "Shell" && cwd && cwd !== "." ? (
       <span className="shell-call-cwd">{cwd}</span>
     ) : (toolName === "Read" || toolName === "Write") && filePath ? (
-      <span className="write-call-path">{filePath}</span>
+      <span className="file-call-path">{filePath}</span>
     ) : undefined;
 
   const bodyContent =
-    toolName === "Write" && argumentsStr
-      ? (() => {
-          try {
-            const obj = JSON.parse(argumentsStr);
-            return obj.content != null ? String(obj.content) : undefined;
-          } catch {
-            return undefined;
-          }
-        })()
+    toolName === "Write" && rest
+      ? rest
       : undefined;
 
   if (toolName === "SubAgent") {
@@ -385,6 +379,7 @@ const ToolPairCard = React.memo(function ToolPairCard({
     id: `${pair.callMessageId}/${pair.callIndex}`,
     toolName,
     args: argumentsStr,
+    active: resultContent === undefined,
     defaultCollapsed,
     resultContent,
     bodyContent,

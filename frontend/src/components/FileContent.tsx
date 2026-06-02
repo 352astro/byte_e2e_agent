@@ -51,7 +51,7 @@ const FileContent = React.memo(function FileContent({
   if (lang === "markdown") {
     return (
       <div className={className}>
-        <Markdown text={content} />
+        <Markdown text={content} sourcePath={filePath} />
       </div>
     );
   }

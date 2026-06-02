@@ -6,7 +6,7 @@ import CollapsibleCard from "./CollapsibleCard";
 import ToolResult from "./ToolResult";
 import { renderToolCard } from "./ToolCards";
 import { useFocusedId } from "../hooks/FocusContext";
-import { extractToolMeta } from "../utils";
+import { extractArg, extractToolMeta } from "../utils";
 import type { Message, ToolCall } from "../types";
 
 // ── Public component ─────────────────────────────────────
@@ -151,12 +151,13 @@ const MessageCard = React.memo(function MessageCard({
           const args = fn.arguments || "";
           const { meta } = extractToolMeta(args, toolName);
           const cwd = meta.cwd as string | undefined;
-          const filePath = meta.path as string | undefined;
+          const filePath =
+            (meta.path as string | undefined) || extractArg(args, "path");
           const subtitle =
             toolName === "Shell" && cwd && cwd !== "." ? (
               <span className="shell-call-cwd">{cwd}</span>
             ) : (toolName === "Read" || toolName === "Write") && filePath ? (
-              <span className="write-call-path">{filePath}</span>
+              <span className="file-call-path">{filePath}</span>
             ) : undefined;
           const collapsed = collapsedCards.has(tcId);
           return (

@@ -118,6 +118,50 @@ function addCopyButtons(html: string): string {
     return html.replace(/(<pre[^>]*>)/g, '$1' + btnHtml);
 }
 
+function isRelativeAssetUrl(src: string): boolean {
+    if (!src || src.startsWith("/") || src.startsWith("#")) return false;
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(src)) return false;
+    if (src.startsWith("//")) return false;
+    return true;
+}
+
+function dirname(path: string): string {
+    const clean = path.replace(/\\/g, "/").split(/[?#]/, 1)[0];
+    const idx = clean.lastIndexOf("/");
+    return idx >= 0 ? clean.slice(0, idx) : "";
+}
+
+function normalizeWorkspacePath(path: string): string {
+    const parts: string[] = [];
+    for (const part of path.replace(/\\/g, "/").split("/")) {
+        if (!part || part === ".") continue;
+        if (part === "..") {
+            parts.pop();
+            continue;
+        }
+        parts.push(part);
+    }
+    return parts.join("/");
+}
+
+function resolveMarkdownAssetPath(src: string, sourcePath?: string): string {
+    if (!sourcePath) return normalizeWorkspacePath(src);
+    const base = dirname(sourcePath);
+    return normalizeWorkspacePath(base ? `${base}/${src}` : src);
+}
+
+function rewriteImageSrcs(html: string, sourcePath?: string): string {
+    return html.replace(
+        /<img\b([^>]*?)\bsrc=(["'])(.*?)\2([^>]*)>/gi,
+        (match, before: string, quote: string, rawSrc: string, after: string) => {
+            if (!isRelativeAssetUrl(rawSrc)) return match;
+            const resolved = resolveMarkdownAssetPath(rawSrc, sourcePath);
+            const rewritten = `/api/workspace/file?path=${encodeURIComponent(resolved)}`;
+            return `<img${before}src=${quote}${rewritten}${quote}${after}>`;
+        },
+    );
+}
+
 function renderKatex(source: string, displayMode: boolean): string {
     try {
         return katex.renderToString(source, {
@@ -141,9 +185,10 @@ let mermaidIdCounter = 0;
 
 interface MarkdownProps {
     text: string;
+    sourcePath?: string;
 }
 
-const Markdown = React.memo(function Markdown({ text }: MarkdownProps) {
+const Markdown = React.memo(function Markdown({ text, sourcePath }: MarkdownProps) {
     const mountedRef = useRef(true);
     const [html, setHtml] = useState("");
 
@@ -174,6 +219,9 @@ const Markdown = React.memo(function Markdown({ text }: MarkdownProps) {
         // 4. Add copy buttons
         let out = addCopyButtons(raw);
 
+        // 4b. Rewrite relative image URLs to workspace file API.
+        out = rewriteImageSrcs(out, sourcePath);
+
         // 5. Render KaTeX
         for (const [key, block] of mathBlocks) {
             out = out.replace(
@@ -183,7 +231,7 @@ const Markdown = React.memo(function Markdown({ text }: MarkdownProps) {
         }
 
         return { baseHtml: out, diagrams, mathBlocks };
-    }, [text]);
+    }, [text, sourcePath]);
 
 
     // Mermaid is async, handled in a separate phase
@@ -246,4 +294,3 @@ const Markdown = React.memo(function Markdown({ text }: MarkdownProps) {
 });
 
 export default Markdown;
-

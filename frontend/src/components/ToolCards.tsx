@@ -27,7 +27,7 @@ function shellMeta(args: string) {
 function fileMeta(args: string) {
   const { meta, rest } = extractToolMeta(args, "Write");
   return {
-    path: (meta.path as string) || "",
+    path: (meta.path as string) || extractArg(args, "path") || "",
     content: rest || (meta.content as string) || "",
   };
 }
@@ -103,7 +103,7 @@ export function ShellCard({
       headerClassName="shell-call-bar"
       title={
         <>
-          <Icon name="tool" size={13} className="shell-call-icon" />
+          <Icon name="terminal" size={14} className="shell-call-icon" />
           <span className="shell-call-label">Run Command</span>
           {subtitle}
         </>
@@ -170,10 +170,10 @@ export function WriteReadCard({
     bodyContent ?? (active ? streamingContent || undefined : undefined);
   const hasBody = displayContent !== undefined;
 
+  const variantClass =
+    variant === "Write" ? "file-call--write" : "file-call--read";
   const cardClass =
     variant === "Write" ? "tool-card--write" : "tool-card--read";
-  const headerClass = variant === "Write" ? "write-call-bar" : "read-call-bar";
-  const bodyClass = variant === "Write" ? "write-call-body" : "read-call-body";
 
   return (
     <CollapsibleCard
@@ -182,11 +182,15 @@ export function WriteReadCard({
       collapsed={collapsed}
       onToggle={toggle}
       cardClassName={`${cardClass}${active ? " tool-card--streaming" : ""}`}
-      headerClassName={headerClass}
+      headerClassName={`file-call-bar ${variantClass}`}
       title={
         <>
-          <Icon name="write" size={13} className="write-call-icon" />
-          <span className="write-call-label">{variant}</span>
+          <Icon
+            name={variant === "Read" ? "book-open" : "write"}
+            size={variant === "Read" ? 15 : 13}
+            className="file-call-icon"
+          />
+          <span className="file-call-label">{variant}</span>
           {subtitle}
         </>
       }
@@ -196,7 +200,7 @@ export function WriteReadCard({
         <FileContent
           content={displayContent}
           filePath={filePath}
-          className={bodyClass}
+          className={`file-call-body ${variantClass}`}
         />
       )}
     </CollapsibleCard>
