@@ -12,6 +12,7 @@ from agent.tools.browser import (
 from agent.tools.edit import edit_tool
 from agent.tools.glob import glob_tool
 from agent.tools.grep import grep_tool
+from agent.tools.listdir import listdir_tool
 from agent.tools.pyrepl import pyrepl_tool
 from agent.tools.read import read_tool
 from agent.tools.registry import ToolRegistry
@@ -34,6 +35,7 @@ tool_registry.register(write_tool)
 tool_registry.register(edit_tool)
 tool_registry.register(glob_tool)
 tool_registry.register(grep_tool)
+tool_registry.register(listdir_tool)
 tool_registry.register(pyrepl_tool)
 tool_registry.register(web_search_tool)
 tool_registry.register(web_fetch_tool)

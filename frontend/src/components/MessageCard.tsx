@@ -6,6 +6,7 @@ import CollapsibleCard from "./CollapsibleCard";
 import ToolResult from "./ToolResult";
 import { renderToolCard } from "./ToolCards";
 import { useFocusedId } from "../hooks/FocusContext";
+import { extractToolMeta } from "../utils";
 import type { Message, ToolCall } from "../types";
 
 // ── Public component ─────────────────────────────────────
@@ -143,19 +144,31 @@ const MessageCard = React.memo(function MessageCard({
         toolCalls.map((tc, i) => {
           const tcId = `${m.id}/tc/${i}`;
           const fn = tc.function || { name: "", arguments: "" };
+          const toolName =
+            fn.name ||
+            ((tc as Record<string, unknown>).tool_name as string) ||
+            "unknown";
+          const args = fn.arguments || "";
+          const { meta } = extractToolMeta(args, toolName);
+          const cwd = meta.cwd as string | undefined;
+          const filePath = meta.path as string | undefined;
+          const subtitle =
+            toolName === "Shell" && cwd && cwd !== "." ? (
+              <span className="shell-call-cwd">{cwd}</span>
+            ) : (toolName === "Read" || toolName === "Write") && filePath ? (
+              <span className="write-call-path">{filePath}</span>
+            ) : undefined;
           const collapsed = collapsedCards.has(tcId);
           return (
             <span key={tcId}>
               {renderToolCard({
                 id: tcId,
-                toolName:
-                  fn.name ||
-                  ((tc as Record<string, unknown>).tool_name as string) ||
-                  "unknown",
-                args: fn.arguments || "",
+                toolName,
+                args,
                 active: isStreaming && i === toolCalls.length - 1,
                 collapsed,
                 onToggle: toggleCard,
+                subtitle,
               })}
             </span>
           );

@@ -892,7 +892,8 @@ class TestToolSetPreset:
     def test_minimal_is_restricted(self):
         """MINIMAL preset includes only basic tools."""
         names = ToolSetPreset.MINIMAL.tool_names()
-        assert len(names) == 4
+        assert len(names) == 5
+        assert "ListDir" in names
         assert "Read" in names
         assert "Write" in names
         assert "Glob" in names

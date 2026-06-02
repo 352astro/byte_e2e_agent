@@ -369,6 +369,7 @@ export interface ToolCardDatum {
   resultContent?: string;
   bodyContent?: string;
   focusId?: string;
+  subtitle?: React.ReactNode;
 }
 
 export function renderToolCard(d: ToolCardDatum) {
@@ -377,13 +378,9 @@ export function renderToolCard(d: ToolCardDatum) {
   const onToggle = external ? d.onToggle : undefined;
   const defaultCollapsed = external ? false : (d.defaultCollapsed ?? false);
 
-  // ── Compute subtitle from early-extracted metadata ──
+  // ── Left extension is chosen by the caller ──
   const { meta } = extractToolMeta(d.args, d.toolName);
-  let subtitle: React.ReactNode = undefined;
-  const filePath = meta.path as string | undefined;
-  if (filePath) {
-    subtitle = <span className="write-call-path">{filePath}</span>;
-  }
+  const subtitle = d.subtitle;
 
   // ── Compute right-side: spinner + timeout ──
   const timeoutMs = meta.timeout_ms != null ? String(meta.timeout_ms) : null;

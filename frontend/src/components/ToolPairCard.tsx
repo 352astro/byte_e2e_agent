@@ -5,6 +5,7 @@ import Icon from "./Icon";
 import MessageCard from "./MessageCard";
 import { pairToolCalls } from "../hooks/pairTools";
 import { useCollapsible } from "../hooks/useCollapsible";
+import { extractToolMeta } from "../utils";
 import type { Message, StreamEvent, ToolPair } from "../types";
 
 // ── Public ───────────────────────────────────────────────
@@ -334,6 +335,15 @@ const ToolPairCard = React.memo(function ToolPairCard({
   const argumentsStr = pair.toolCall?.function?.arguments || "";
 
   const resultContent = pair.resultMessage?.tool_result || undefined;
+  const { meta } = extractToolMeta(argumentsStr, toolName);
+  const cwd = meta.cwd as string | undefined;
+  const filePath = meta.path as string | undefined;
+  const subtitle =
+    toolName === "Shell" && cwd && cwd !== "." ? (
+      <span className="shell-call-cwd">{cwd}</span>
+    ) : (toolName === "Read" || toolName === "Write") && filePath ? (
+      <span className="write-call-path">{filePath}</span>
+    ) : undefined;
 
   const bodyContent =
     toolName === "Write" && argumentsStr
@@ -365,6 +375,7 @@ const ToolPairCard = React.memo(function ToolPairCard({
     resultContent,
     bodyContent,
     focusId: `${pair.callMessageId}/${pair.callIndex}`,
+    subtitle,
   });
 });
 

@@ -1028,6 +1028,16 @@
     letter-spacing: 0.5px;
 }
 
+.shell-call-cwd {
+    max-width: 50%;
+    overflow: hidden;
+    color: #888;
+    font-family: ui-monospace, monospace;
+    font-size: 0.7rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .shell-call-right {
     margin-left: auto;
     display: flex;

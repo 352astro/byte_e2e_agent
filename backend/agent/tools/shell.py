@@ -37,18 +37,33 @@ def get_platform_hint() -> str:
 class ShellInput(BaseModel):
     """Shell tool input parameters."""
 
+    cwd: str = Field(
+        default=".",
+        description=(
+            "Working directory relative to the workspace root. "
+            "Use '.' for the workspace root."
+        ),
+    )
     timeout_ms: int = Field(
         default=30000,
         ge=1000,
         le=120000,
         description="Timeout in milliseconds.",
     )
+    max_output_bytes: int = Field(
+        default=20000,
+        ge=1000,
+        le=200000,
+        description="Maximum UTF-8 output bytes to return before truncating.",
+    )
     command: str = Field(..., description="Single-line shell command.")
 
 
 async def shell_handler(
-    command: str,
+    cwd: str = ".",
     timeout_ms: int = 30000,
+    max_output_bytes: int = 20000,
+    command: str = "",
     *,
     ws,
     interrupt_event: asyncio.Event | None = None,
@@ -63,10 +78,17 @@ async def shell_handler(
       5. Normal exit: collect all output, return with exit code annotation.
     """
     loop = asyncio.get_event_loop()
-    cwd = str(getattr(ws, "root", Path.cwd()))
+    try:
+        workdir = str(ws.resolve(cwd))
+    except PermissionError as exc:
+        return f"Error: {exc}"
+    except Exception as exc:
+        return f"Error: invalid cwd '{cwd}': {exc}"
+    if not Path(workdir).is_dir():
+        return f"Error: cwd is not a directory: {cwd}"
 
     terminal = PersistentTerminal()
-    terminal.start(cwd)
+    terminal.start(workdir)
 
     # ── Write command synchronously (fast — no I/O wait) ──
     marker, start_time = terminal.write_command(command)
@@ -116,6 +138,26 @@ async def shell_handler(
     signal_task = asyncio.create_task(_signal_task())
 
     output_parts: list[str] = []
+    output_bytes = 0
+    truncated_bytes = 0
+
+    def append_output(chunk: str) -> None:
+        nonlocal output_bytes, truncated_bytes
+        if not chunk:
+            return
+        chunk_bytes = len(chunk.encode("utf-8", errors="replace"))
+        remaining = max_output_bytes - output_bytes
+        if remaining <= 0:
+            truncated_bytes += chunk_bytes
+            return
+        if chunk_bytes <= remaining:
+            output_parts.append(chunk)
+            output_bytes += chunk_bytes
+            return
+        raw = chunk.encode("utf-8", errors="replace")[:remaining]
+        output_parts.append(raw.decode("utf-8", errors="ignore"))
+        output_bytes = max_output_bytes
+        truncated_bytes += chunk_bytes - remaining
 
     try:
         while not interrupted_flag.is_set():
@@ -132,7 +174,7 @@ async def shell_handler(
                 chunk = chunk_future.result()
                 if chunk is None:
                     break
-                output_parts.append(chunk)
+                append_output(chunk)
             else:
                 chunk_future.cancel()
 
@@ -143,7 +185,7 @@ async def shell_handler(
                     chunk = chunk_queue.get_nowait()
                     if chunk is None:
                         break
-                    output_parts.append(chunk)
+                    append_output(chunk)
                 except asyncio.QueueEmpty:
                     break
 
@@ -173,6 +215,11 @@ async def shell_handler(
             pass
 
     output = "".join(output_parts).strip()
+    if truncated_bytes > 0:
+        output = (
+            f"{output}\n[output truncated after {max_output_bytes} bytes; "
+            f"{truncated_bytes} bytes omitted]"
+        ).strip()
 
     # ── Append exit code for non-zero (normal exit path only) ──
     if not interrupted_flag.is_set():

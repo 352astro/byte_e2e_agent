@@ -61,6 +61,7 @@ class ToolSetPreset(str, Enum):
             ToolSetPreset.ALL: [
                 "WebSearch",
                 "WebFetch",
+                "ListDir",
                 "Grep",
                 "Glob",
                 "PyRepl",
@@ -75,8 +76,9 @@ class ToolSetPreset(str, Enum):
                 "TaskRewrite",
                 "TaskUpdate",
             ],
-            ToolSetPreset.MINIMAL: ["Read", "Write", "Glob", "Grep"],
+            ToolSetPreset.MINIMAL: ["ListDir", "Read", "Write", "Glob", "Grep"],
             ToolSetPreset.CODE_ONLY: [
+                "ListDir",
                 "Read",
                 "Write",
                 "Edit",
@@ -84,7 +86,7 @@ class ToolSetPreset(str, Enum):
                 "Grep",
                 "Shell",
             ],
-            ToolSetPreset.REVIEW_ONLY: ["Read", "Glob", "Grep"],
+            ToolSetPreset.REVIEW_ONLY: ["ListDir", "Read", "Glob", "Grep"],
             ToolSetPreset.CUSTOM: [],
         }
         return mapping.get(self, [])

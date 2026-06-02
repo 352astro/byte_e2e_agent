@@ -64,6 +64,7 @@ class TestToolRegistry:
         assert len(tools) >= 14
         names = {t.name for t in tools}
         assert "Shell" in names
+        assert "ListDir" in names
         assert "Read" in names
         assert "Write" in names
         assert "Grep" in names
@@ -266,6 +267,30 @@ class TestToolHandlers:
         assert "timed out" in result.lower()
 
     @pytest.mark.asyncio
+    async def test_shell_handler_cwd(self, tmp_path):
+        from agent.core.workspace import Workspace
+
+        (tmp_path / "sub").mkdir()
+        ws = Workspace(tmp_path)
+        tool = tool_registry.get("Shell")
+        result = await tool.coroutine(command="pwd", cwd="sub", ws=ws)
+        assert str(tmp_path / "sub") in result
+
+    @pytest.mark.asyncio
+    async def test_shell_handler_truncates_output(self, tmp_path):
+        from agent.core.workspace import Workspace
+
+        ws = Workspace(tmp_path)
+        tool = tool_registry.get("Shell")
+        result = await tool.coroutine(
+            command="printf 1234567890",
+            max_output_bytes=5,
+            ws=ws,
+        )
+        assert result.startswith("12345")
+        assert "output truncated" in result
+
+    @pytest.mark.asyncio
     async def test_shell_handler_nohup_background_survives(self, tmp_path):
         from agent.core.workspace import Workspace
 
@@ -311,6 +336,22 @@ class TestToolHandlers:
         tool = tool_registry.get("Read")
         result = await tool.coroutine(path="test.py", ws=ws)
         assert "line1" in result
+
+    @pytest.mark.asyncio
+    async def test_listdir_handler(self, tmp_path):
+        from agent.core.workspace import Workspace
+
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "app.py").write_text("print('hi')", encoding="utf-8")
+        (tmp_path / ".hidden").write_text("secret", encoding="utf-8")
+
+        ws = Workspace(tmp_path)
+        tool = tool_registry.get("ListDir")
+        result = await tool.coroutine(path=".", recursive=True, ws=ws)
+
+        assert "src/" in result
+        assert "app.py" in result
+        assert ".hidden" not in result
 
     @pytest.mark.asyncio
     async def test_write_handler(self):
