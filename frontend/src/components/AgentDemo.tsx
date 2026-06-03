@@ -102,12 +102,14 @@ export default function AgentDemo({
     messages,
     send,
     interrupt,
+    respondGuard,
     prefillRef,
     reloadMessages,
     truncateMessages,
     resetRunning,
     runError,
     clearRunError,
+    pendingGuard,
   } = useAgentStream({
     sessionId,
     onSessionCreated,
@@ -503,6 +505,35 @@ export default function AgentDemo({
           >
             ×
           </button>
+        </div>
+      )}
+
+      {pendingGuard && (
+        <div className="agent-guard-request" role="alert">
+          <div className="agent-guard-main">
+            <span className="agent-guard-kicker">Permission Required</span>
+            <span className="agent-guard-text">
+              {pendingGuard.action_type}: {pendingGuard.subject}
+            </span>
+          </div>
+          <div className="agent-guard-actions">
+            <button
+              className="agent-guard-deny"
+              type="button"
+              onClick={() => void respondGuard(pendingGuard.request_id, false)}
+            >
+              <Icon name="x" size={13} />
+              Deny
+            </button>
+            <button
+              className="agent-guard-allow"
+              type="button"
+              onClick={() => void respondGuard(pendingGuard.request_id, true)}
+            >
+              <Icon name="check" size={13} />
+              Allow
+            </button>
+          </div>
         </div>
       )}
 

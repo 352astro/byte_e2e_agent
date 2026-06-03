@@ -14,6 +14,7 @@ from agent.core.workspace import Workspace as CoreWorkspace
 from agent.hook.logging_hook import LoggingHook
 from agent.hook.metrics_hook import MetricsHook
 from agent.hook.persistence_hook import PersistenceHook
+from agent.hook.permission_hook import ToolPermissionHook
 from agent.hook.shadow_commit_hook import ShadowCommitHook
 from agent.hook.stream_driver import StreamDriverHook
 from agent.llm import get_model_id
@@ -182,6 +183,7 @@ class WorkspaceContext:
             MetricsHook(self.metrics_store, model_id=self._model_id),
             PersistenceHook(self._workspace),
             ShadowCommitHook(self.shadow_repo),
+            ToolPermissionHook(self._workspace),
         ]
         if self._settings.memory_enabled:
             hook_list.append(

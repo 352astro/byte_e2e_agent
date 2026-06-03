@@ -6,10 +6,13 @@ import json
 import uuid
 from typing import Any
 
-from app.schemas.session import SessionRule, SessionSettings
+from agent.tools import tool_registry
+from app.schemas.session import SessionRule, SessionSettings, ToolPermissionSettings
 from app.services.context import WorkspaceContext
 
 SESSION_DEFAULTS_FILE = "session_defaults.json"
+TOOL_PERMISSIONS_FILE = "tool_permissions.json"
+_PERMISSION_VALUES = {"allow", "ask", "deny"}
 
 
 class SettingsService:
@@ -42,6 +45,16 @@ class SettingsService:
         ]
         cleaned = _clean_settings(settings)
         _write_settings(self._ctx, cleaned)
+        return cleaned.model_dump()
+
+    def get_tool_permissions(self) -> dict[str, Any]:
+        return _load_tool_permissions(self._ctx).model_dump()
+
+    def update_tool_permissions(
+        self, settings: ToolPermissionSettings
+    ) -> dict[str, Any]:
+        cleaned = _clean_tool_permissions(settings)
+        _write_tool_permissions(self._ctx, cleaned)
         return cleaned.model_dump()
 
 
@@ -90,3 +103,41 @@ def _clean_settings(settings: SessionSettings) -> SessionSettings:
             item.strip() for item in settings.default_skill_names if item.strip()
         ],
     )
+
+
+def _load_tool_permissions(ctx: WorkspaceContext) -> ToolPermissionSettings:
+    path = ctx.core_workspace.agent_dir() / TOOL_PERMISSIONS_FILE
+    if not path.is_file():
+        return ToolPermissionSettings()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return ToolPermissionSettings()
+    if not isinstance(data, dict):
+        return ToolPermissionSettings()
+    return _clean_tool_permissions(ToolPermissionSettings(**data))
+
+
+def _write_tool_permissions(
+    ctx: WorkspaceContext, settings: ToolPermissionSettings
+) -> None:
+    path = ctx.core_workspace.agent_dir() / TOOL_PERMISSIONS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(settings.model_dump(), indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _clean_tool_permissions(
+    settings: ToolPermissionSettings,
+) -> ToolPermissionSettings:
+    known = set(tool_registry.tool_names)
+    tools: dict[str, str] = {}
+    for name, mode in settings.tools.items():
+        clean_name = name.strip()
+        clean_mode = str(mode).strip()
+        if clean_name not in known or clean_mode not in _PERMISSION_VALUES:
+            continue
+        tools[clean_name] = clean_mode
+    return ToolPermissionSettings(tools=tools)

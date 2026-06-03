@@ -11,11 +11,34 @@ from __future__ import annotations
 
 import logging
 from abc import ABC
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 from shared.types import Message
 
 logger = logging.getLogger(__name__)
+
+
+class GuardDecision(str, Enum):
+    """Decision returned by guard hooks before a guarded action runs."""
+
+    ALLOW = "allow"
+    ASK = "ask"
+    DENY = "deny"
+
+
+@dataclass
+class GuardCheck:
+    """A runtime action that may be allowed, denied, or require approval."""
+
+    action_type: str
+    subject: str
+    payload: dict[str, Any] = field(default_factory=dict)
+    session_id: str = ""
+    turn_id: str = ""
+    message_id: str = ""
+    tool_call_id: str = ""
 
 
 # ═══════════════════════════════════════════════════════════
@@ -121,6 +144,27 @@ class BaseHook(ABC):
     async def on_subagent_end(self, *, result: str, **kwargs: Any) -> None:
         pass
 
+    # ── Guard / approval ────────────────────────────────
+
+    async def on_guard_check(
+        self,
+        *,
+        check: GuardCheck,
+        **kwargs: Any,
+    ) -> GuardDecision | None:
+        """Return a guard decision for an action, or None when not applicable."""
+        return None
+
+    async def on_guard_request(
+        self,
+        *,
+        request_id: str,
+        check: GuardCheck,
+        **kwargs: Any,
+    ) -> None:
+        """Notify listeners that runtime is waiting for user approval."""
+        pass
+
     # ── 上下文注入 ──────────────────────────────────────
 
     async def on_context_assemble(
@@ -221,6 +265,35 @@ class HookManager:
                 )
         return result
 
+    async def guard_check(self, check: GuardCheck, **kwargs: Any) -> GuardDecision:
+        """Collect guard decisions. Merge rule: DENY > ASK > ALLOW > None."""
+        result = GuardDecision.ALLOW
+        for hook in self._hooks:
+            try:
+                fn = getattr(hook, "on_guard_check", None)
+                if fn is None:
+                    continue
+                decision = await fn(check=check, **kwargs)
+            except Exception:
+                logger.exception("Hook %s.on_guard_check failed", type(hook).__name__)
+                continue
+            if decision is None:
+                continue
+            try:
+                decision = GuardDecision(decision)
+            except ValueError:
+                logger.warning(
+                    "Hook %s returned invalid guard decision %r",
+                    type(hook).__name__,
+                    decision,
+                )
+                continue
+            if decision == GuardDecision.DENY:
+                return GuardDecision.DENY
+            if decision == GuardDecision.ASK:
+                result = GuardDecision.ASK
+        return result
+
     # ── 便捷方法 ────────────────────────────────────────
 
     async def on_message_start(self, **kwargs: Any) -> None:
@@ -249,6 +322,9 @@ class HookManager:
 
     async def on_subagent_end(self, **kwargs: Any) -> None:
         await self.dispatch("on_subagent_end", **kwargs)
+
+    async def on_guard_request(self, **kwargs: Any) -> None:
+        await self.dispatch("on_guard_request", **kwargs)
 
     async def on_context_assemble(self, **kwargs: Any) -> list[dict]:
         return await self.gather_context(**kwargs)

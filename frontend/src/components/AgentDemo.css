@@ -69,6 +69,79 @@
     opacity: 0.75;
 }
 
+.agent-guard-request {
+    position: fixed;
+    left: 50%;
+    bottom: 96px;
+    z-index: 101;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    max-width: min(560px, calc(100vw - 32px));
+    padding: 12px 14px;
+    border: 1px solid #d7d7d7;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.14);
+}
+
+.agent-guard-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.agent-guard-kicker {
+    color: #777;
+    font-size: 0.68rem;
+    font-weight: 750;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.agent-guard-text {
+    min-width: 0;
+    color: #222;
+    font-size: 0.88rem;
+    font-weight: 650;
+    overflow-wrap: anywhere;
+}
+
+.agent-guard-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.agent-guard-actions button {
+    height: 30px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid #cfcfcf;
+    border-radius: 6px;
+    background: #fff;
+    color: #222;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 650;
+}
+
+.agent-guard-actions button:hover {
+    border-color: #777;
+}
+
+.agent-guard-deny svg {
+    color: #b42318;
+}
+
+.agent-guard-allow svg {
+    color: #16803c;
+}
+
 /* ── Fixed input bar ────────────────────────── */
 
 .agent-input-bar {

@@ -70,6 +70,24 @@ export interface RecoverData {
   messages: Message[];
   session_running: boolean;
   runtime_busy: boolean;
+  current_message?: Message | null;
+  pending_request?: GuardPendingRequest | null;
+}
+
+export interface GuardRequest {
+  request_id: string;
+  action_type: string;
+  subject: string;
+  payload: Record<string, unknown>;
+  turn_id?: string;
+  message_id?: string;
+  tool_call_id?: string;
+}
+
+export interface GuardPendingRequest {
+  message_id: string;
+  kind: string;
+  message: GuardRequest;
 }
 
 // ── Commit ──────────────────────────────────────────────

@@ -34,7 +34,7 @@ from agent.tools.skill import skill_context_message
 from agent.tools.task import task_context_message
 from agent.tools.toolset import ToolSet
 from app.core.config import TMP_DIR
-from shared.hooks import BaseHook, HookManager
+from shared.hooks import BaseHook, GuardCheck, GuardDecision, HookManager
 from shared.types import Message
 
 # ═══════════════════════════════════════════════════════════
@@ -383,6 +383,42 @@ class AgentRuntime:
         pending["response"] = response
         pending["event"].set()
 
+    async def _ask_guard(
+        self, check: GuardCheck, interrupt_event: asyncio.Event
+    ) -> bool:
+        request_id = _uuid.uuid4().hex
+        event = asyncio.Event()
+        self._pending[request_id] = {
+            "kind": "guard_request",
+            "message": {
+                "request_id": request_id,
+                "action_type": check.action_type,
+                "subject": check.subject,
+                "payload": check.payload,
+                "turn_id": check.turn_id,
+                "message_id": check.message_id,
+                "tool_call_id": check.tool_call_id,
+            },
+            "event": event,
+        }
+        try:
+            await self._hooks.on_guard_request(request_id=request_id, check=check)
+            _, pending = await asyncio.wait(
+                {
+                    asyncio.create_task(event.wait()),
+                    asyncio.create_task(interrupt_event.wait()),
+                },
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            if interrupt_event.is_set():
+                raise InterruptedError("Interrupted while waiting for approval")
+            response = self._pending.get(request_id, {}).get("response", {})
+            return bool(response.get("allow") or response.get("approved"))
+        finally:
+            self._pending.pop(request_id, None)
+
     async def interrupt(self) -> bool:
         """中断当前运行的 Session。
 
@@ -585,6 +621,31 @@ class AgentRuntime:
                         "id": tool_call_id,
                         "function": {"name": func_name, "arguments": func_args_str},
                     }
+                    guard_check = GuardCheck(
+                        action_type="tool.execute",
+                        subject=func_name,
+                        payload={
+                            "tool_name": func_name,
+                            "tool_args": func_args_str,
+                        },
+                        session_id=sid,
+                        turn_id=turn_id,
+                        message_id=assistant_msg.id,
+                        tool_call_id=tool_call_id,
+                    )
+                    guard_decision = await self._hooks.guard_check(guard_check)
+                    if guard_decision == GuardDecision.DENY:
+                        tool_output = (
+                            f"Permission denied: tool '{func_name}' is disabled "
+                            "by global tool permissions."
+                        )
+                    elif guard_decision == GuardDecision.ASK:
+                        approved = await self._ask_guard(guard_check, intr)
+                        if not approved:
+                            tool_output = (
+                                f"Permission denied: user rejected tool "
+                                f"'{func_name}'."
+                            )
 
                     async def invoke_child_agent(
                         prompt,
@@ -601,23 +662,24 @@ class AgentRuntime:
                             parent_tool_call_id=tool_call_id,
                         )
 
-                    try:
-                        tool_output = await execute_one_tool(
-                            tc_dict,
-                            ws,
-                            toolset,
-                            interrupt_event=intr,
-                            openai_client=openai_client,
-                            model_id=model_id,
-                            session_id=sid,
-                            hook_manager=self._hooks,
-                            agent_invoker=invoke_child_agent,
-                        )
-                    except InterruptedError:
-                        raise
-                    except Exception as exc:
-                        tool_error = exc
-                        tool_output = str(exc)
+                    if not tool_output:
+                        try:
+                            tool_output = await execute_one_tool(
+                                tc_dict,
+                                ws,
+                                toolset,
+                                interrupt_event=intr,
+                                openai_client=openai_client,
+                                model_id=model_id,
+                                session_id=sid,
+                                hook_manager=self._hooks,
+                                agent_invoker=invoke_child_agent,
+                            )
+                        except InterruptedError:
+                            raise
+                        except Exception as exc:
+                            tool_error = exc
+                            tool_output = str(exc)
 
                     # ── 构建 tool_result Message ──────
                     rid = _uuid.uuid4().hex

@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import SessionCustomizePanel from "./SessionCustomizePanel";
 import Icon from "./Icon";
 import type { CreateSessionRequest } from "../types";
@@ -37,6 +37,15 @@ export default function AgentInput({
     const [customizeOpen, setCustomizeOpen] = useState(true);
     const composingRef = useRef(false);
     const MAX_ROWS = 10;
+
+    useEffect(() => {
+        if (!customizeOpen) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setCustomizeOpen(false);
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [customizeOpen]);
 
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         setQuestion(e.target.value);

@@ -42,6 +42,7 @@ class RecoverResponse(BaseModel):
     session_running: bool = False
     runtime_busy: bool = False
     current_message: Message | None = None
+    pending_request: dict | None = None
 
 
 class SessionStatusResponse(BaseModel):

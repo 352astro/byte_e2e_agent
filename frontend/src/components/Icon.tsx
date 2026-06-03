@@ -16,6 +16,7 @@ export type IconName =
     | "write"
     | "book-open"
     | "check"
+    | "x"
     | "flag"
     | "settings"
     | "palette"
@@ -37,6 +38,9 @@ const paths: Record<IconName, SVGProps<SVGPathElement>> = {
     },
     check: {
         d: "M20 6L9 17l-5-5",
+    },
+    x: {
+        d: "M18 6L6 18M6 6l12 12",
     },
     flag: {
         d: "M5 21V3l10 6-10 6",

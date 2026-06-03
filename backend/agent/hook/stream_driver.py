@@ -11,6 +11,7 @@ import json
 import logging
 
 from shared.hooks import BaseHook
+from shared.hooks import GuardCheck
 from shared.types import Message, StreamEvent, StreamEventKind
 
 logger = logging.getLogger(__name__)
@@ -231,5 +232,29 @@ class StreamDriverHook(BaseHook):
                 json.dumps(payload, ensure_ascii=False),
                 tool_name="SubAgent",
                 session_id=parent_session_id,
+            )
+        )
+
+    async def on_guard_request(
+        self,
+        *,
+        request_id: str,
+        check: GuardCheck,
+        **kwargs,
+    ) -> None:
+        payload = {
+            "request_id": request_id,
+            "action_type": check.action_type,
+            "subject": check.subject,
+            "payload": check.payload,
+            "turn_id": check.turn_id,
+            "message_id": check.message_id,
+            "tool_call_id": check.tool_call_id,
+        }
+        self._broadcast(
+            StreamEvent.guard_request(
+                request_id,
+                json.dumps(payload, ensure_ascii=False),
+                session_id=check.session_id,
             )
         )

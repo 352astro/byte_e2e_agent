@@ -247,6 +247,7 @@ class SessionService:
             "current_message": current_msg.model_dump(mode="json")
             if current_msg
             else None,
+            "pending_request": runtime.pending_request,
         }
 
     async def interrupt_session(self, session_id: str) -> bool:

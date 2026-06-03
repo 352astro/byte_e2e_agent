@@ -797,6 +797,9 @@ export interface components {
              */
             runtime_busy: boolean;
             current_message?: components["schemas"]["Message"] | null;
+            pending_request?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** RespondRequest */
         RespondRequest: {
@@ -905,7 +908,7 @@ export interface components {
          * @description SSE 事件种类。
          * @enum {string}
          */
-        StreamEventKind: "message_start" | "chunk_delta" | "chunk_complete" | "message_finish" | "turn_complete" | "interrupted";
+        StreamEventKind: "message_start" | "chunk_delta" | "chunk_complete" | "message_finish" | "turn_complete" | "interrupted" | "guard_request";
         /**
          * StreamEventSchema
          * @description SSE event structure — documented for frontend gen, served via SSE not REST.

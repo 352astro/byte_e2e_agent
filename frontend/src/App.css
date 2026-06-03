@@ -302,10 +302,15 @@
     position: fixed;
     width: min(760px, calc(100vw - 32px));
     height: min(560px, calc(100vh - 32px));
+    min-width: 560px;
+    min-height: 360px;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px);
     z-index: 200;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    resize: both;
     border: 1px solid #d8d8d8;
     border-radius: 8px;
     background: #fff;
@@ -358,7 +363,7 @@
 .settings-nav {
     width: 180px;
     flex-shrink: 0;
-    padding: 10px 8px;
+    padding: 0;
     border-right: 1px solid #e8e8e8;
     background: #fbfbfb;
 }
@@ -388,7 +393,7 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 18px;
+    padding: 9px 9px 0;
     overflow: hidden;
 }
 
@@ -418,7 +423,7 @@
     color: #888;
 }
 
-.memory-refresh-btn,
+.settings-refresh-btn,
 .memory-add-btn {
     height: 32px;
     padding: 0 12px;
@@ -431,13 +436,13 @@
     font-weight: 650;
 }
 
-.memory-refresh-btn:hover:not(:disabled),
+.settings-refresh-btn:hover:not(:disabled),
 .memory-add-btn:hover:not(:disabled) {
     border-color: #777;
     background: #f7f7f7;
 }
 
-.memory-refresh-btn:disabled,
+.settings-refresh-btn:disabled,
 .memory-add-btn:disabled {
     color: #aaa;
     cursor: not-allowed;
@@ -558,6 +563,64 @@
     color: #c00;
 }
 
+.permissions-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 0;
+    flex: 1;
+}
+
+.permissions-list {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-right: 4px;
+}
+
+.permission-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 120px;
+    gap: 12px;
+    align-items: center;
+    padding: 10px;
+    border: 1px solid #e2e2e2;
+    border-radius: 7px;
+    background: #fafafa;
+}
+
+.permission-main {
+    min-width: 0;
+}
+
+.permission-name {
+    color: #222;
+    font-size: 0.86rem;
+    font-weight: 700;
+}
+
+.permission-description {
+    margin-top: 3px;
+    color: #777;
+    font-size: 0.78rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.permission-row select {
+    width: 100%;
+    height: 32px;
+    border: 1px solid #d0d0d0;
+    border-radius: 6px;
+    background: #fff;
+    color: #222;
+    font-size: 0.8rem;
+    font-weight: 650;
+}
+
 .session-customize {
     display: flex;
     flex-direction: column;
@@ -585,20 +648,6 @@
     margin-top: 3px;
     font-size: 0.76rem;
     color: #777;
-}
-
-.session-customize-link {
-    border: 0;
-    background: transparent;
-    color: #555;
-    font-size: 0.76rem;
-    font-weight: 650;
-    cursor: pointer;
-}
-
-.session-customize-link:disabled {
-    color: #aaa;
-    cursor: not-allowed;
 }
 
 .session-customize-error {

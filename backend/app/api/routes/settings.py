@@ -8,6 +8,7 @@ from app.dependencies import get_settings_service
 from app.schemas.session import (
     SessionSettings,
     SkillListResponse,
+    ToolPermissionSettings,
     ToolPresetListResponse,
 )
 from app.services.settings_service import SettingsService
@@ -57,6 +58,21 @@ def update_session_settings(
     settings_service: SettingsService = Depends(get_settings_service),
 ) -> dict:
     return settings_service.update_session_settings(req)
+
+
+@router.get("/settings/tool-permissions", response_model=ToolPermissionSettings)
+def get_tool_permissions(
+    settings_service: SettingsService = Depends(get_settings_service),
+) -> dict:
+    return settings_service.get_tool_permissions()
+
+
+@router.put("/settings/tool-permissions", response_model=ToolPermissionSettings)
+def update_tool_permissions(
+    req: ToolPermissionSettings,
+    settings_service: SettingsService = Depends(get_settings_service),
+) -> dict:
+    return settings_service.update_tool_permissions(req)
 
 
 @router.post("/settings/session-rules", response_model=SessionSettings)

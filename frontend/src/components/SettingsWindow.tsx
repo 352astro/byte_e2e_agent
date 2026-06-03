@@ -18,6 +18,13 @@ interface SettingsWindowProps {
   onClose: () => void;
 }
 
+interface ToolInfo {
+  name: string;
+  description: string;
+}
+
+type ToolPermissionMode = "allow" | "ask" | "deny";
+
 const memoryKinds = ["fact", "preference", "decision", "todo", "summary"];
 
 function formatTime(seconds: number): string {
@@ -30,6 +37,7 @@ export default function SettingsWindow({
   onClose,
 }: SettingsWindowProps) {
   const [position, setPosition] = useState({ x: 300, y: 80 });
+  const windowRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -44,8 +52,12 @@ export default function SettingsWindow({
   const [content, setContent] = useState("");
   const [kind, setKind] = useState("fact");
   const [activeTab, setActiveTab] = useState<
-    "memory" | "rules" | "skills" | "preamble"
+    "memory" | "rules" | "skills" | "preamble" | "permissions"
   >("memory");
+  const [tools, setTools] = useState<ToolInfo[]>([]);
+  const [toolPermissions, setToolPermissions] = useState<
+    Record<string, ToolPermissionMode>
+  >({});
 
   const loadMemories = useCallback(async () => {
     setLoading(true);
@@ -65,6 +77,31 @@ export default function SettingsWindow({
   useEffect(() => {
     void loadMemories();
   }, [loadMemories, workspace]);
+
+  const loadPermissions = useCallback(async () => {
+    try {
+      const [toolsRes, permissionsRes] = await Promise.all([
+        fetch("/api/tool-presets"),
+        fetch("/api/settings/tool-permissions"),
+      ]);
+      if (!toolsRes.ok) throw new Error(`Tools returned ${toolsRes.status}`);
+      if (!permissionsRes.ok) {
+        throw new Error(`Permissions returned ${permissionsRes.status}`);
+      }
+      const toolsData: { tools?: ToolInfo[] } = await toolsRes.json();
+      const permissionData: { tools?: Record<string, ToolPermissionMode> } =
+        await permissionsRes.json();
+      setTools(toolsData.tools || []);
+      setToolPermissions(permissionData.tools || {});
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPermissions();
+  }, [loadPermissions, workspace]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -89,8 +126,11 @@ export default function SettingsWindow({
   const moveDrag = (e: PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== e.pointerId) return;
-    const maxX = Math.max(16, window.innerWidth - 680);
-    const maxY = Math.max(16, window.innerHeight - 420);
+    const rect = windowRef.current?.getBoundingClientRect();
+    const width = rect?.width || 680;
+    const height = rect?.height || 420;
+    const maxX = Math.max(16, window.innerWidth - width - 16);
+    const maxY = Math.max(16, window.innerHeight - height - 16);
     setPosition({
       x: Math.min(Math.max(16, drag.originX + e.clientX - drag.startX), maxX),
       y: Math.min(Math.max(16, drag.originY + e.clientY - drag.startY), maxY),
@@ -134,8 +174,32 @@ export default function SettingsWindow({
     }
   };
 
+  const updateToolPermission = async (
+    toolName: string,
+    mode: ToolPermissionMode,
+  ) => {
+    const next = { ...toolPermissions, [toolName]: mode };
+    setToolPermissions(next);
+    try {
+      const res = await fetch("/api/settings/tool-permissions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tools: next }),
+      });
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      const saved: { tools?: Record<string, ToolPermissionMode> } =
+        await res.json();
+      setToolPermissions(saved.tools || {});
+      setError(null);
+    } catch (err) {
+      setToolPermissions(toolPermissions);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   return (
     <div
+      ref={windowRef}
       className="settings-window"
       style={{ left: position.x, top: position.y }}
     >
@@ -182,6 +246,13 @@ export default function SettingsWindow({
           >
             Preamble
           </button>
+          <button
+            className={`settings-nav-item ${activeTab === "permissions" ? "active" : ""}`}
+            type="button"
+            onClick={() => setActiveTab("permissions")}
+          >
+            Permissions
+          </button>
         </aside>
 
         <main className="settings-content">
@@ -195,7 +266,7 @@ export default function SettingsWindow({
                   </div>
                 </div>
                 <button
-                  className="memory-refresh-btn"
+                  className="settings-refresh-btn"
                   type="button"
                   onClick={() => void loadMemories()}
                   disabled={loading}
@@ -266,6 +337,50 @@ export default function SettingsWindow({
                 ))}
               </div>
             </>
+          ) : activeTab === "permissions" ? (
+            <div className="permissions-panel">
+              <div className="memory-panel-head">
+                <div>
+                  <h2>Tool Permissions</h2>
+                  <div className="memory-workspace">
+                    Global emergency controls for this workspace.
+                  </div>
+                </div>
+                <button
+                  className="settings-refresh-btn"
+                  type="button"
+                  onClick={() => void loadPermissions()}
+                >
+                  Refresh
+                </button>
+              </div>
+              {error && <div className="memory-error">{error}</div>}
+              <div className="permissions-list">
+                {tools.map((tool) => (
+                  <div className="permission-row" key={tool.name}>
+                    <div className="permission-main">
+                      <div className="permission-name">{tool.name}</div>
+                      <div className="permission-description">
+                        {tool.description || "No description."}
+                      </div>
+                    </div>
+                    <select
+                      value={toolPermissions[tool.name] || "allow"}
+                      onChange={(e) =>
+                        void updateToolPermission(
+                          tool.name,
+                          e.target.value as ToolPermissionMode,
+                        )
+                      }
+                    >
+                      <option value="allow">Allow</option>
+                      <option value="ask">Ask</option>
+                      <option value="deny">Deny</option>
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
           ) : (
             <SessionCustomizePanel
               mode="settings"

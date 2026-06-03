@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import type {
   CreateSessionRequest,
+  GuardRequest,
   Message,
   RecoverData,
   StreamEvent,
@@ -28,6 +29,7 @@ export interface UseAgentStreamReturn {
   send: (question: string, sessionConfig?: CreateSessionRequest) => Promise<void>;
   interrupt: () => Promise<void>;
   reloadMessages: () => Promise<void>;
+  respondGuard: (requestId: string, allow: boolean) => Promise<void>;
 
   // ── 命令（同步）──
   truncateMessages: (truncateTid: string, keep?: boolean) => void;
@@ -39,6 +41,7 @@ export interface UseAgentStreamReturn {
   scrollToMessage: (id: string) => void;
   runError: string | null;
   clearRunError: () => void;
+  pendingGuard: GuardRequest | null;
 }
 
 // ── helpers ───────────────────────────────────────────
@@ -110,6 +113,7 @@ export default function useAgentStream({
   const [active, setActive] = useState<Message | null>(null);
   const [interrupting, setInterrupting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const [pendingGuard, setPendingGuard] = useState<GuardRequest | null>(null);
 
   // ═══════════════════════════════════════════════════
   //  Refs (mutable, no re-render on change)
@@ -219,6 +223,7 @@ export default function useAgentStream({
         setActive(null);
         lastIdRef.current = msgs.length ? msgs[msgs.length - 1].id : null;
         setRuntimeBusy(Boolean(data.runtime_busy));
+        setPendingGuard(data.pending_request?.message || null);
         if (data.session_running) {
           setRunning(true);
           streamSidRef.current = sid;
@@ -338,6 +343,21 @@ export default function useAgentStream({
           break;
         }
 
+        case "guard_request": {
+          if (genRef.current !== gen) return;
+          try {
+            setPendingGuard(JSON.parse(ev.full_content) as GuardRequest);
+          } catch {
+            setPendingGuard({
+              request_id: ev.message_id,
+              action_type: "unknown",
+              subject: ev.tool_name || "unknown",
+              payload: {},
+            });
+          }
+          break;
+        }
+
         case "message_finish": {
           if (genRef.current !== gen) return;
           setActive((prev) => {
@@ -447,6 +467,26 @@ export default function useAgentStream({
     }
   }, [sessionId, interruptInternal, reloadMessagesInternal]);
 
+  const respondGuard = useCallback(
+    async (requestId: string, allow: boolean): Promise<void> => {
+      if (!sessionId) return;
+      const res = await fetch(`/api/session/${sessionId}/respond`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message_id: requestId,
+          response: { allow },
+        }),
+      });
+      if (!res.ok) {
+        setRunError(`Permission response failed: ${res.status}`);
+        return;
+      }
+      setPendingGuard(null);
+    },
+    [sessionId],
+  );
+
   // ═══════════════════════════════════════════════════
   //  send — 统一发送入口
   // ═══════════════════════════════════════════════════
@@ -468,7 +508,8 @@ export default function useAgentStream({
       const gen = bumpGen();
 
       try {
-        setRunError(null);
+      setRunError(null);
+      setPendingGuard(null);
         const prefill = prefillRef.current.trim();
         if (prefill) prefillRef.current = "";
         const q = (prefill ? prefill + "\n" + question : question).trim();
@@ -599,6 +640,7 @@ export default function useAgentStream({
       setCompleted([]);
       completedIdsRef.current = new Set();
       setActive(null);
+      setPendingGuard(null);
       setRunning(false);
       setRuntimeBusy(false);
       streamSidRef.current = null;
@@ -617,6 +659,7 @@ export default function useAgentStream({
     setCompleted([]);
     completedIdsRef.current = new Set();
     setActive(null);
+    setPendingGuard(null);
     setRunning(false);
     setRuntimeBusy(false);
     streamSidRef.current = null;
@@ -676,6 +719,7 @@ export default function useAgentStream({
     send,
     interrupt,
     reloadMessages,
+    respondGuard,
     truncateMessages,
     resetRunning,
     createSession,
@@ -683,5 +727,6 @@ export default function useAgentStream({
     scrollToMessage,
     runError,
     clearRunError,
+    pendingGuard,
   };
 }

@@ -597,7 +597,7 @@ export default function SessionCustomizePanel({
           </div>
         </div>
         <button
-          className="session-customize-link"
+          className="settings-refresh-btn"
           type="button"
           onClick={() => void load()}
           disabled={loading}

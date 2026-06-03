@@ -51,6 +51,7 @@ class StreamEventKind(str, Enum):
     MESSAGE_FINISH = "message_finish"
     TURN_COMPLETE = "turn_complete"
     INTERRUPTED = "interrupted"
+    GUARD_REQUEST = "guard_request"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -300,6 +301,21 @@ class StreamEvent(BaseModel):
             kind=StreamEventKind.INTERRUPTED,
             session_id=session_id,
             reason=reason,
+        )
+
+    @classmethod
+    def guard_request(
+        cls,
+        request_id: str,
+        full_content: str,
+        session_id: str = "",
+    ) -> "StreamEvent":
+        return cls(
+            kind=StreamEventKind.GUARD_REQUEST,
+            session_id=session_id,
+            message_id=request_id,
+            field="guard_request",
+            full_content=full_content,
         )
 
 
