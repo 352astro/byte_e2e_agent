@@ -80,10 +80,28 @@ export interface RecoverData {
 }
 
 export interface GuardRequest {
+  kind?: string;
   request_id: string;
   action_type: string;
   subject: string;
   payload: Record<string, unknown>;
+  title?: string;
+  description?: string;
+  choices?: Array<{
+    id: string;
+    label: string;
+    description?: string;
+  }>;
+  questions?: Array<{
+    id: string;
+    label: string;
+    type?: "text" | "textarea" | string;
+    required?: boolean;
+    placeholder?: string;
+  }>;
+  allow_custom?: boolean;
+  choice_required?: boolean;
+  multiple?: boolean;
   turn_id?: string;
   message_id?: string;
   tool_call_id?: string;

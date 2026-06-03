@@ -9,6 +9,7 @@ from agent.tools.browser import (
     browser_inspect_tool,
     browser_open_tool,
 )
+from agent.tools.ask_user import ask_user_tool
 from agent.tools.edit import edit_tool
 from agent.tools.glob import glob_tool
 from agent.tools.grep import grep_tool
@@ -39,6 +40,7 @@ tool_registry.register(listdir_tool)
 tool_registry.register(pyrepl_tool)
 tool_registry.register(web_search_tool)
 tool_registry.register(web_fetch_tool)
+tool_registry.register(ask_user_tool)
 tool_registry.register(load_skill_tool)
 tool_registry.register(subagent_tool)
 tool_registry.register(browser_open_tool)

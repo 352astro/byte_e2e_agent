@@ -32,6 +32,10 @@ export interface UseAgentStreamReturn {
   ) => Promise<void>;
   interrupt: () => Promise<void>;
   reloadMessages: () => Promise<void>;
+  respondPending: (
+    requestId: string,
+    response: Record<string, unknown>,
+  ) => Promise<void>;
   respondGuard: (requestId: string, allow: boolean) => Promise<void>;
 
   // ── 命令（同步）──
@@ -493,24 +497,34 @@ export default function useAgentStream({
     }
   }, [sessionId, interruptInternal, reloadMessagesInternal]);
 
-  const respondGuard = useCallback(
-    async (requestId: string, allow: boolean): Promise<void> => {
+  const respondPending = useCallback(
+    async (
+      requestId: string,
+      response: Record<string, unknown>,
+    ): Promise<void> => {
       if (!sessionId) return;
       const res = await fetch(`/api/session/${sessionId}/respond`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message_id: requestId,
-          response: { allow },
+          response,
         }),
       });
       if (!res.ok) {
-        setRunError(`Permission response failed: ${res.status}`);
+        setRunError(`Pending response failed: ${res.status}`);
         return;
       }
       setPendingGuard(null);
     },
     [sessionId],
+  );
+
+  const respondGuard = useCallback(
+    async (requestId: string, allow: boolean): Promise<void> => {
+      await respondPending(requestId, { allow });
+    },
+    [respondPending],
   );
 
   // ═══════════════════════════════════════════════════
@@ -743,6 +757,7 @@ export default function useAgentStream({
     send,
     interrupt,
     reloadMessages,
+    respondPending,
     respondGuard,
     truncateMessages,
     resetRunning,

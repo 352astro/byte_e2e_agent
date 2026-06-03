@@ -70,6 +70,7 @@ class ToolSetPreset(str, Enum):
                 "Write",
                 "Edit",
                 "LoadSkill",
+                "AskUser",
                 "SubAgent",
                 "BrowserInspect",
                 "TaskList",

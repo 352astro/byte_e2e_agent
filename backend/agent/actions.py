@@ -261,6 +261,7 @@ async def execute_one_tool(
     session_id: str = "",
     hook_manager: HookManager | None = None,
     agent_invoker=None,
+    human_input_requester=None,
 ) -> ToolExecutionResult:
     """执行单个 tool_call。SubAgent / BrowserInspect 原地分发。"""
     func_name: str = tc["function"]["name"]
@@ -300,6 +301,7 @@ async def execute_one_tool(
                 interrupt_event=interrupt_event,
                 with_skills=args.get("with_skills", []),
                 hook_manager=hook_manager,
+                human_input_requester=human_input_requester,
             )
     elif tool.name == "BrowserInspect":
         browser_toolset = ToolSet(tool_registry, "BrowserOpen", "BrowserAct")
@@ -322,6 +324,7 @@ async def execute_one_tool(
                 "what you see. Do not plan. Do not summarize at length. "
                 "Open the browser, check, report. That is your entire job."
             ),
+            human_input_requester=human_input_requester,
         )
     else:
         try:
@@ -331,6 +334,7 @@ async def execute_one_tool(
                 ("ws", ws),
                 ("session_id", session_id),
                 ("interrupt_event", interrupt_event),
+                ("human_input_requester", human_input_requester),
             ):
                 if _accepts_kwarg(tool.coroutine, meta_name):
                     call_args[meta_name] = meta_value
@@ -376,6 +380,7 @@ async def run_subagent(
     with_skills: list[str] | None = None,
     system_extra: str | None = None,
     hook_manager: HookManager | None = None,
+    human_input_requester=None,
 ) -> str:
     """在同一个 session 内运行子智能体。从空白上下文启动。"""
     from agent.tools.skill import get_skill
@@ -469,6 +474,7 @@ async def run_subagent(
                 model_id=model_id,
                 session_id=session_id,
                 hook_manager=hook_manager,
+                human_input_requester=human_input_requester,
             )
             subagent_messages.append(
                 {

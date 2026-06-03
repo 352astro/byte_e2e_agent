@@ -134,12 +134,147 @@
     border-color: #777;
 }
 
+.agent-guard-actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
 .agent-guard-deny svg {
     color: #b42318;
 }
 
 .agent-guard-allow svg {
     color: #16803c;
+}
+
+.agent-user-ignore {
+    color: #777 !important;
+}
+
+.agent-user-ignore:hover {
+    color: #222 !important;
+}
+
+.agent-user-request {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: min(640px, calc(100vw - 32px));
+    max-height: min(520px, calc(100vh - 160px));
+    gap: 12px;
+}
+
+.agent-user-request-main {
+    min-height: 0;
+    width: 100%;
+    flex: 1;
+    gap: 4px;
+}
+
+.agent-user-request-description {
+    color: #666;
+    font-size: 0.78rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.agent-user-request-body {
+    min-height: 0;
+    width: 100%;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 8px;
+    padding-right: 4px;
+}
+
+.agent-user-request-actions {
+    width: 100%;
+    justify-content: flex-end;
+    padding-top: 10px;
+    border-top: 1px solid #eee;
+}
+
+.agent-user-choice-list,
+.agent-user-qa-list {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.agent-user-choice {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+    align-items: flex-start;
+    padding: 8px;
+    border: 1px solid #e2e2e2;
+    border-radius: 6px;
+    background: #fafafa;
+    cursor: pointer;
+}
+
+.agent-user-choice[data-selected="true"] {
+    border-color: #98b8ff;
+    background: #f3f7ff;
+}
+
+.agent-user-choice input {
+    margin-top: 2px;
+}
+
+.agent-user-choice strong {
+    display: block;
+    color: #222;
+    font-size: 0.82rem;
+}
+
+.agent-user-choice small {
+    display: block;
+    margin-top: 2px;
+    color: #777;
+    font-size: 0.74rem;
+    line-height: 1.32;
+    overflow-wrap: anywhere;
+}
+
+.agent-user-input,
+.agent-user-question input,
+.agent-user-question textarea {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid #d3d3d3;
+    border-radius: 6px;
+    background: #fff;
+    color: #222;
+    font: inherit;
+    font-size: 0.82rem;
+}
+
+.agent-user-input,
+.agent-user-question input {
+    height: 32px;
+    padding: 0 9px;
+}
+
+.agent-user-question {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.agent-user-question span {
+    color: #555;
+    font-size: 0.74rem;
+    font-weight: 700;
+}
+
+.agent-user-question textarea {
+    resize: vertical;
+    min-height: 66px;
+    padding: 7px 9px;
 }
 
 /* ── Fixed input bar ────────────────────────── */

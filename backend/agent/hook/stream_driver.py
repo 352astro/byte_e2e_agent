@@ -252,6 +252,7 @@ class StreamDriverHook(BaseHook):
         **kwargs,
     ) -> None:
         payload = {
+            "kind": check.payload.get("kind", "guard_request"),
             "request_id": request_id,
             "action_type": check.action_type,
             "subject": check.subject,
@@ -260,6 +261,20 @@ class StreamDriverHook(BaseHook):
             "message_id": check.message_id,
             "tool_call_id": check.tool_call_id,
         }
+        if payload["kind"] == "user_input_request":
+            payload.update(
+                {
+                    "title": check.payload.get("title", check.subject),
+                    "description": check.payload.get("description", ""),
+                    "choices": check.payload.get("choices", []),
+                    "questions": check.payload.get("questions", []),
+                    "choice_required": bool(
+                        check.payload.get("choice_required", True)
+                    ),
+                    "multiple": bool(check.payload.get("multiple", False)),
+                    "allow_custom": bool(check.payload.get("allow_custom", False)),
+                }
+            )
         self._broadcast(
             StreamEvent.guard_request(
                 request_id,

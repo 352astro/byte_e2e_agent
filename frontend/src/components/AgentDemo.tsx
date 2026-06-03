@@ -6,6 +6,7 @@ import {
   useCallback,
   useMemo,
 } from "react";
+import type { ChangeEvent } from "react";
 import useAgentStream from "../hooks/useAgentStream";
 import { FocusProvider } from "../hooks/FocusContext";
 import LockableButton from "./LockableButton";
@@ -15,7 +16,11 @@ import ToolPairCard from "./ToolPairCard";
 import AgentInput from "./AgentInput";
 import EditableUserBubble from "./EditableUserBubble";
 import { pairToolCalls } from "../hooks/pairTools";
-import { type CommitInfo, type CreateSessionRequest } from "../types";
+import {
+  type CommitInfo,
+  type CreateSessionRequest,
+  type GuardRequest,
+} from "../types";
 import CommitGraphPanel, { CommitGraphHandle } from "./CommitGraphPanel";
 import "./AgentDemo.css";
 
@@ -25,6 +30,198 @@ interface AgentDemoProps {
 }
 
 type MessageAction = "delete" | "replay" | null;
+
+function PendingRequestPanel({
+  request,
+  onRespond,
+}: {
+  request: GuardRequest;
+  onRespond: (
+    requestId: string,
+    response: Record<string, unknown>,
+  ) => Promise<void>;
+}) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const [custom, setCustom] = useState("");
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+
+  if (request.kind !== "user_input_request") {
+    return (
+      <div className="agent-guard-request" role="alert">
+        <div className="agent-guard-main">
+          <span className="agent-guard-kicker">Permission Required</span>
+          <span className="agent-guard-text">
+            {request.action_type}: {request.subject}
+          </span>
+        </div>
+        <div className="agent-guard-actions">
+          <button
+            className="agent-guard-deny"
+            type="button"
+            onClick={() => void onRespond(request.request_id, { allow: false })}
+          >
+            <Icon name="x" size={13} />
+            Deny
+          </button>
+          <button
+            className="agent-guard-allow"
+            type="button"
+            onClick={() => void onRespond(request.request_id, { allow: true })}
+          >
+            <Icon name="check" size={13} />
+            Allow
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const payload = request.payload || {};
+  const title =
+    request.title || String(payload.title || "") || request.subject || "Input requested";
+  const description = request.description || String(payload.description || "");
+  const choices =
+    request.choices ||
+    (payload.choices as GuardRequest["choices"]) ||
+    [];
+  const questions =
+    request.questions || (payload.questions as GuardRequest["questions"]) || [];
+  const allowCustom =
+    request.allow_custom ?? Boolean(payload.allow_custom || false);
+  const choiceRequired =
+    request.choice_required ??
+    (payload.choice_required == null ? true : Boolean(payload.choice_required));
+  const multiple = request.multiple ?? Boolean(payload.multiple || false);
+  const qaValid = questions.every(
+    (q) => !q.required || (answers[q.id] || "").trim(),
+  );
+  const choiceValid =
+    !choices.length ||
+    !choiceRequired ||
+    selected.length > 0 ||
+    Boolean(custom.trim());
+  const canSubmit = choiceValid && qaValid;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    void onRespond(request.request_id, {
+      selected,
+      custom: custom.trim(),
+      answers,
+    });
+  };
+
+  const ignore = () => {
+    void onRespond(request.request_id, {
+      ignored: true,
+      reason: "user_ignored",
+    });
+  };
+
+  const toggleChoice = (id: string) => {
+    setSelected((prev) => {
+      if (!multiple) return prev.includes(id) ? [] : [id];
+      return prev.includes(id)
+        ? prev.filter((item) => item !== id)
+        : [...prev, id];
+    });
+  };
+
+  return (
+    <div className="agent-guard-request agent-user-request" role="alert">
+      <div className="agent-guard-main agent-user-request-main">
+        <span className="agent-guard-kicker">Input Requested</span>
+        <span className="agent-guard-text">{title}</span>
+        {description && (
+          <span className="agent-user-request-description">{description}</span>
+        )}
+
+        <div className="agent-user-request-body">
+          {choices.length > 0 && (
+            <div className="agent-user-choice-list">
+              {choices.map((option) => (
+                <label
+                  className="agent-user-choice"
+                  key={option.id}
+                  data-selected={selected.includes(option.id)}
+                >
+                  <input
+                    type={multiple ? "checkbox" : "radio"}
+                    name={`ask-user-${request.request_id}`}
+                    checked={selected.includes(option.id)}
+                    onChange={() => toggleChoice(option.id)}
+                  />
+                  <span>
+                    <strong>{option.label}</strong>
+                    {option.description && <small>{option.description}</small>}
+                  </span>
+                </label>
+              ))}
+              {allowCustom && (
+                <input
+                  className="agent-user-input"
+                  placeholder="Custom response"
+                  value={custom}
+                  onChange={(e) => setCustom(e.target.value)}
+                />
+              )}
+            </div>
+          )}
+
+          {questions.length > 0 && (
+            <div className="agent-user-qa-list">
+              {questions.map((question) => {
+                const common = {
+                  value: answers[question.id] || "",
+                  placeholder: question.placeholder || "",
+                  onChange: (
+                    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+                  ) =>
+                    setAnswers((prev) => ({
+                      ...prev,
+                      [question.id]: e.target.value,
+                    })),
+                };
+                return (
+                  <label className="agent-user-question" key={question.id}>
+                    <span>
+                      {question.label}
+                      {question.required ? " *" : ""}
+                    </span>
+                    {question.type === "textarea" ? (
+                      <textarea {...common} rows={3} />
+                    ) : (
+                      <input {...common} />
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="agent-guard-actions agent-user-request-actions">
+        <button
+          className="agent-user-ignore"
+          type="button"
+          title="Ignore this request: I do not want to answer."
+          onClick={ignore}
+        >
+          Ignore
+        </button>
+        <button
+          className="agent-guard-allow"
+          type="button"
+          disabled={!canSubmit}
+          onClick={submit}
+        >
+          <Icon name="check" size={13} />
+          Submit
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ── Message actions ─────────────────────────────────
 
@@ -102,7 +299,7 @@ export default function AgentDemo({
     messages,
     send,
     interrupt,
-    respondGuard,
+    respondPending,
     prefillRef,
     reloadMessages,
     truncateMessages,
@@ -509,32 +706,7 @@ export default function AgentDemo({
       )}
 
       {pendingGuard && (
-        <div className="agent-guard-request" role="alert">
-          <div className="agent-guard-main">
-            <span className="agent-guard-kicker">Permission Required</span>
-            <span className="agent-guard-text">
-              {pendingGuard.action_type}: {pendingGuard.subject}
-            </span>
-          </div>
-          <div className="agent-guard-actions">
-            <button
-              className="agent-guard-deny"
-              type="button"
-              onClick={() => void respondGuard(pendingGuard.request_id, false)}
-            >
-              <Icon name="x" size={13} />
-              Deny
-            </button>
-            <button
-              className="agent-guard-allow"
-              type="button"
-              onClick={() => void respondGuard(pendingGuard.request_id, true)}
-            >
-              <Icon name="check" size={13} />
-              Allow
-            </button>
-          </div>
-        </div>
+        <PendingRequestPanel request={pendingGuard} onRespond={respondPending} />
       )}
 
       <AgentInput

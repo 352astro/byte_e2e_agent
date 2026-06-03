@@ -419,6 +419,71 @@ class AgentRuntime:
         finally:
             self._pending.pop(request_id, None)
 
+    async def _ask_user_input(
+        self,
+        payload: dict,
+        interrupt_event: asyncio.Event,
+        *,
+        session_id: str,
+        turn_id: str,
+        message_id: str,
+        tool_call_id: str,
+    ) -> dict:
+        request_id = _uuid.uuid4().hex
+        event = asyncio.Event()
+        message = {
+            "kind": "user_input_request",
+            "request_id": request_id,
+            "action_type": "user.input",
+            "subject": payload.get("title") or "AskUser",
+            "payload": payload,
+            "title": payload.get("title", ""),
+            "description": payload.get("description", ""),
+            "choices": payload.get("choices", []),
+            "questions": payload.get("questions", []),
+            "choice_required": bool(payload.get("choice_required", True)),
+            "multiple": bool(payload.get("multiple", False)),
+            "allow_custom": bool(payload.get("allow_custom", False)),
+            "turn_id": turn_id,
+            "message_id": message_id,
+            "tool_call_id": tool_call_id,
+        }
+        self._pending[request_id] = {
+            "kind": "user_input_request",
+            "message": message,
+            "event": event,
+        }
+        entry = self._sessions.get(session_id)
+        if entry and entry.status == SessionStatus.RUNNING:
+            entry.transition_to(SessionStatus.PENDING)
+        try:
+            check = GuardCheck(
+                action_type="user.input",
+                subject=message["subject"],
+                payload=message,
+                session_id=session_id,
+                turn_id=turn_id,
+                message_id=message_id,
+                tool_call_id=tool_call_id,
+            )
+            await self._hooks.on_guard_request(request_id=request_id, check=check)
+            _, pending = await asyncio.wait(
+                {
+                    asyncio.create_task(event.wait()),
+                    asyncio.create_task(interrupt_event.wait()),
+                },
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            if interrupt_event.is_set():
+                raise InterruptedError("Interrupted while waiting for user input")
+            return self._pending.get(request_id, {}).get("response", {})
+        finally:
+            self._pending.pop(request_id, None)
+            if entry and entry.status == SessionStatus.PENDING:
+                entry.transition_to(SessionStatus.RUNNING)
+
     async def interrupt(self) -> bool:
         """中断当前运行的 Session。
 
@@ -671,6 +736,16 @@ class AgentRuntime:
                             parent_tool_call_id=tool_call_id,
                         )
 
+                    async def request_human_input(payload, interrupt_event=None):
+                        return await self._ask_user_input(
+                            payload,
+                            interrupt_event or intr,
+                            session_id=sid,
+                            turn_id=turn_id,
+                            message_id=assistant_msg.id,
+                            tool_call_id=tool_call_id,
+                        )
+
                     if not tool_output:
                         try:
                             tool_exec = await execute_one_tool(
@@ -683,6 +758,7 @@ class AgentRuntime:
                                 session_id=sid,
                                 hook_manager=self._hooks,
                                 agent_invoker=invoke_child_agent,
+                                human_input_requester=request_human_input,
                             )
                             tool_output = tool_exec.output
                             tool_status = tool_exec.status
