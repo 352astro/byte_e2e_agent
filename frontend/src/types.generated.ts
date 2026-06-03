@@ -647,6 +647,13 @@ export interface components {
             rules?: string[];
             /** Preloaded Skills */
             preloaded_skills?: string[];
+            /**
+             * Tool Set Preset
+             * @default all
+             */
+            tool_set_preset?: components["schemas"]["ToolSetPreset"];
+            /** Custom Tools */
+            custom_tools?: string[];
         };
         /** CreateSessionResponse */
         CreateSessionResponse: {
@@ -859,6 +866,40 @@ export interface components {
             /** Skills */
             skills: components["schemas"]["SkillInfoResponse"][];
         };
+        /** ToolInfoResponse */
+        ToolInfoResponse: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+        };
+        /** ToolPresetListResponse */
+        ToolPresetListResponse: {
+            /** Presets */
+            presets: components["schemas"]["ToolPresetResponse"][];
+            /** Tools */
+            tools: components["schemas"]["ToolInfoResponse"][];
+        };
+        /** ToolPresetResponse */
+        ToolPresetResponse: {
+            /** Name */
+            name: components["schemas"]["ToolSetPreset"];
+            /** Tools */
+            tools: string[];
+        };
+        /**
+         * ToolSetPreset
+         * @description 可用工具集预设。
+         *
+         *     对标 Rust ToolSet enum:
+         *     - ALL: 全部工具
+         *     - MINIMAL: read_file, write, glob, grep
+         *     - CODE_ONLY: read_file, write, edit, glob, grep, shell
+         *     - REVIEW_ONLY: read_file, glob, grep
+         *     - CUSTOM: 用户指定
+         * @enum {string}
+         */
+        ToolSetPreset: "all" | "minimal" | "code_only" | "review_only" | "custom";
         /**
          * StreamEventKind
          * @description SSE 事件种类。

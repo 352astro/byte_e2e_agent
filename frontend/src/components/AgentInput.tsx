@@ -119,29 +119,29 @@ export default function AgentInput({
 
             {/* Main input bar */}
             <div className="agent-input-bar">
-                <div className="agent-input-bar-inner">
-                    {showCustomize && sessionConfig && onSessionConfigChange && (
-                        <div className="agent-customize-slot">
-                            <button
-                                className={`agent-customize-toggle${customizeOpen ? " active" : ""}`}
-                                type="button"
-                                onClick={() => setCustomizeOpen((v) => !v)}
-                                title="Customize session"
-                            >
-                                <Icon name="palette" size={22} />
-                            </button>
-                            <div
-                                className={`agent-customize-popover${customizeOpen ? " open" : ""}`}
-                            >
-                                <SessionCustomizePanel
-                                    value={sessionConfig}
-                                    onChange={onSessionConfigChange}
-                                    mode="create"
-                                    readonly={customizeReadonly}
-                                />
-                            </div>
+                {showCustomize && sessionConfig && onSessionConfigChange && (
+                    <div className="agent-customize-slot">
+                        <button
+                            className={`agent-customize-toggle${customizeOpen ? " active" : ""}`}
+                            type="button"
+                            onClick={() => setCustomizeOpen((v) => !v)}
+                            title="Customize session"
+                        >
+                            <Icon name="palette" size={22} />
+                        </button>
+                        <div
+                            className={`agent-customize-popover${customizeOpen ? " open" : ""}`}
+                        >
+                            <SessionCustomizePanel
+                                value={sessionConfig}
+                                onChange={onSessionConfigChange}
+                                mode="create"
+                                readonly={customizeReadonly}
+                            />
                         </div>
-                    )}
+                    </div>
+                )}
+                <div className="agent-input-bar-inner">
                     <textarea
                         className="agent-textarea"
                         placeholder="Ask the agent something… (Enter to send, Ctrl/Shift+Enter for newline)"

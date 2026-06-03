@@ -1,11 +1,15 @@
 from pydantic import BaseModel, Field
 
+from agent.core.config import ToolSetPreset
+
 
 class CreateSessionRequest(BaseModel):
     name: str = ""
     preamble: str = ""
     rules: list[str] = Field(default_factory=list)
     preloaded_skills: list[str] = Field(default_factory=list)
+    tool_set_preset: ToolSetPreset = ToolSetPreset.ALL
+    custom_tools: list[str] = Field(default_factory=list)
 
 
 class SessionRule(BaseModel):
@@ -27,3 +31,18 @@ class SkillInfoResponse(BaseModel):
 
 class SkillListResponse(BaseModel):
     skills: list[SkillInfoResponse]
+
+
+class ToolInfoResponse(BaseModel):
+    name: str
+    description: str
+
+
+class ToolPresetResponse(BaseModel):
+    name: ToolSetPreset
+    tools: list[str]
+
+
+class ToolPresetListResponse(BaseModel):
+    presets: list[ToolPresetResponse]
+    tools: list[ToolInfoResponse]

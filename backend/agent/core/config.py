@@ -246,13 +246,16 @@ class SessionConfig:
         preamble: str = "",
         preloaded_skills: list[str] | None = None,
         rules: list[str] | None = None,
+        tool_set_preset: ToolSetPreset = ToolSetPreset.ALL,
+        custom_tools: list[str] | None = None,
     ) -> "SessionConfig":
         """用户主 Session 的工厂方法。"""
         return cls(
             name=name,
             model_id=model_id,
             preamble=preamble,
-            tool_set_preset=ToolSetPreset.ALL,
+            tool_set_preset=tool_set_preset,
+            custom_tools=list(custom_tools or []),
             preloaded_skills=list(preloaded_skills or []),
             rules=list(rules or []),
             access=AccessPolicy.user_default(),

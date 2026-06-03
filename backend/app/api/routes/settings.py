@@ -1,9 +1,15 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from agent.core.config import ToolSetPreset
+from agent.tools import tool_registry
 from agent.tools.skill import scan_skills
 from app.dependencies import get_settings_service
-from app.schemas.session import SessionSettings, SkillListResponse
+from app.schemas.session import (
+    SessionSettings,
+    SkillListResponse,
+    ToolPresetListResponse,
+)
 from app.services.settings_service import SettingsService
 
 router = APIRouter(prefix="/api")
@@ -20,6 +26,21 @@ def list_skills() -> dict:
             {"name": skill.name, "description": skill.description}
             for skill in scan_skills()
         ]
+    }
+
+
+@router.get("/tool-presets", response_model=ToolPresetListResponse)
+def list_tool_presets() -> dict:
+    return {
+        "presets": [
+            {"name": preset, "tools": preset.tool_names()}
+            for preset in ToolSetPreset
+            if preset != ToolSetPreset.CUSTOM
+        ],
+        "tools": [
+            {"name": tool.name, "description": tool.description or ""}
+            for tool in tool_registry.get_all()
+        ],
     }
 
 

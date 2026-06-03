@@ -120,6 +120,8 @@ export default function AgentDemo({
     preamble: "",
     rules: [],
     preloaded_skills: [],
+    tool_set_preset: "all",
+    custom_tools: [],
   });
   const [graphVersion, setGraphVersion] = useState(0);
   const graphRef = useRef<CommitGraphHandle>(null);

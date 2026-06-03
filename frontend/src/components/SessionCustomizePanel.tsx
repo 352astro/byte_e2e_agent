@@ -5,6 +5,10 @@ import type {
   SessionRule,
   SessionSettings,
   SkillInfoResponse,
+  ToolInfoResponse,
+  ToolPresetListResponse,
+  ToolPresetResponse,
+  ToolSetPreset,
 } from "../types";
 
 type SettingsSection = "rules" | "skills" | "preamble";
@@ -22,6 +26,8 @@ const emptyConfig: CreateSessionRequest = {
   preamble: "",
   rules: [],
   preloaded_skills: [],
+  tool_set_preset: "all",
+  custom_tools: [],
 };
 
 const emptySettings: SessionSettings = {
@@ -37,6 +43,8 @@ function normalizeConfig(config?: CreateSessionRequest): CreateSessionRequest {
     preamble: config?.preamble || "",
     rules: config?.rules || [],
     preloaded_skills: config?.preloaded_skills || [],
+    tool_set_preset: config?.tool_set_preset || "all",
+    custom_tools: config?.custom_tools || [],
   };
 }
 
@@ -61,6 +69,23 @@ function configFromSettings(settings: SessionSettings): CreateSessionRequest {
   };
 }
 
+function toolPresetLabel(preset: ToolSetPreset): string {
+  switch (preset) {
+    case "all":
+      return "All";
+    case "minimal":
+      return "Minimal";
+    case "code_only":
+      return "Code Only";
+    case "review_only":
+      return "Review Only";
+    case "custom":
+      return "Custom";
+    default:
+      return preset;
+  }
+}
+
 export default function SessionCustomizePanel({
   value,
   onChange,
@@ -70,7 +95,11 @@ export default function SessionCustomizePanel({
 }: SessionCustomizePanelProps) {
   const [settings, setSettings] = useState<SessionSettings>(emptySettings);
   const [skills, setSkills] = useState<SkillInfoResponse[]>([]);
+  const [toolPresets, setToolPresets] = useState<ToolPresetResponse[]>([]);
+  const [tools, setTools] = useState<ToolInfoResponse[]>([]);
   const [activeSkill, setActiveSkill] = useState("");
+  const [activeTool, setActiveTool] = useState("");
+  const [customToolDraft, setCustomToolDraft] = useState<string[]>([]);
   const [newRule, setNewRule] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -101,6 +130,20 @@ export default function SessionCustomizePanel({
     () => skills.find((skill) => skill.name === activeSkill) || skills[0],
     [activeSkill, skills],
   );
+  const selectedToolNames = useMemo(
+    () => new Set(config.custom_tools || []),
+    [config.custom_tools],
+  );
+  const activeToolInfo = useMemo(
+    () => tools.find((tool) => tool.name === activeTool) || tools[0],
+    [activeTool, tools],
+  );
+  const presetTools = useMemo(() => {
+    const preset = toolPresets.find(
+      (item) => item.name === config.tool_set_preset,
+    );
+    return preset?.tools || [];
+  }, [config.tool_set_preset, toolPresets]);
 
   const emitCreateConfig = useCallback(
     (
@@ -112,7 +155,12 @@ export default function SessionCustomizePanel({
       const currentConfig = normalizeConfig(baseValue);
       const base =
         mode === "create"
-          ? { ...configFromSettings(nextSettings), name: currentConfig.name }
+          ? {
+              ...configFromSettings(nextSettings),
+              name: currentConfig.name,
+              tool_set_preset: currentConfig.tool_set_preset,
+              custom_tools: currentConfig.custom_tools,
+            }
           : currentConfig;
       onChange(normalizeConfig({ ...base, ...partial }));
     },
@@ -122,16 +170,21 @@ export default function SessionCustomizePanel({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [skillsRes, settingsRes] = await Promise.all([
+      const [skillsRes, settingsRes, toolPresetsRes] = await Promise.all([
         fetch("/api/skills"),
         fetch("/api/settings/session-defaults"),
+        fetch("/api/tool-presets"),
       ]);
       if (!skillsRes.ok) throw new Error(`Skills returned ${skillsRes.status}`);
       if (!settingsRes.ok) {
         throw new Error(`Settings returned ${settingsRes.status}`);
       }
+      if (!toolPresetsRes.ok) {
+        throw new Error(`Tool presets returned ${toolPresetsRes.status}`);
+      }
       const skillsData: { skills?: SkillInfoResponse[] } =
         await skillsRes.json();
+      const toolsData: ToolPresetListResponse = await toolPresetsRes.json();
       let settingsData: SessionSettings = normalizeSettings(
         await settingsRes.json(),
       );
@@ -151,8 +204,12 @@ export default function SessionCustomizePanel({
         });
       }
       const skillItems = skillsData.skills || [];
+      const toolItems = toolsData.tools || [];
       setSkills(skillItems);
+      setTools(toolItems);
+      setToolPresets(toolsData.presets || []);
       setActiveSkill((current) => current || skillItems[0]?.name || "");
+      setActiveTool((current) => current || toolItems[0]?.name || "");
       setSettings(settingsData);
       if (
         !readonlyRef.current &&
@@ -165,6 +222,8 @@ export default function SessionCustomizePanel({
           normalizeConfig({
             ...configFromSettings(settingsData),
             name: currentConfig.name,
+            tool_set_preset: currentConfig.tool_set_preset,
+            custom_tools: currentConfig.custom_tools,
           }),
         );
       }
@@ -222,6 +281,36 @@ export default function SessionCustomizePanel({
     if (next.has(name)) next.delete(name);
     else next.add(name);
     patchSettings({ default_skill_names: Array.from(next).sort() });
+  };
+
+  const setToolPreset = (preset: ToolSetPreset) => {
+    if (readonly) return;
+    const currentCustom = config.custom_tools || [];
+    const nextCustom =
+      preset === "custom"
+        ? customToolDraft.length
+          ? customToolDraft
+          : currentCustom.length
+            ? currentCustom
+            : presetTools
+        : currentCustom;
+    if (preset === "custom") setCustomToolDraft(nextCustom);
+    emitCreateConfig(settings, {
+      tool_set_preset: preset,
+      custom_tools: preset === "custom" ? nextCustom : [],
+    });
+  };
+
+  const toggleCustomTool = (name: string) => {
+    if (readonly || config.tool_set_preset !== "custom") return;
+    const next = new Set(selectedToolNames);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    const ordered = tools
+      .map((tool) => tool.name)
+      .filter((toolName) => next.has(toolName));
+    setCustomToolDraft(ordered);
+    emitCreateConfig(settings, { custom_tools: ordered });
   };
 
   const addRule = async () => {
@@ -412,6 +501,80 @@ export default function SessionCustomizePanel({
     </>
   );
 
+  const renderTools = () => {
+    const shownTools =
+      config.tool_set_preset === "custom"
+        ? config.custom_tools || []
+        : presetTools;
+    return (
+      <div className="session-tools">
+        <label className="session-customize-field">
+          <span>Tool Preset</span>
+          <select
+            value={config.tool_set_preset || "all"}
+            disabled={readonly}
+            onChange={(e) => setToolPreset(e.target.value as ToolSetPreset)}
+          >
+            {toolPresets.map((preset) => (
+              <option key={preset.name} value={preset.name}>
+                {toolPresetLabel(preset.name)}
+              </option>
+            ))}
+            <option value="custom">{toolPresetLabel("custom")}</option>
+          </select>
+        </label>
+
+        {config.tool_set_preset === "custom" ? (
+          <div className="session-tools-layout">
+            <aside className="session-tools-sidebar">
+              {tools.length === 0 && (
+                <div className="session-customize-empty">
+                  No tools available.
+                </div>
+              )}
+              {tools.map((tool) => (
+                <button
+                  type="button"
+                  className={`session-tool-nav ${activeToolInfo?.name === tool.name ? "active" : ""}`}
+                  key={tool.name}
+                  onClick={() => setActiveTool(tool.name)}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedToolNames.has(tool.name)}
+                    disabled={readonly}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      toggleCustomTool(tool.name);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <span>{tool.name}</span>
+                </button>
+              ))}
+            </aside>
+            <section className="session-tool-preview">
+              {activeToolInfo ? (
+                <>
+                  <h3>{activeToolInfo.name}</h3>
+                  <p>{activeToolInfo.description || "No description."}</p>
+                </>
+              ) : (
+                <div className="session-customize-empty">Select a tool.</div>
+              )}
+            </section>
+          </div>
+        ) : (
+          <div className="session-tool-chip-list">
+            {shownTools.map((toolName) => (
+              <span key={toolName}>{toolName}</span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div
       className={`session-customize session-customize--${mode}${readonly ? " session-customize--readonly" : ""}`}
@@ -429,7 +592,7 @@ export default function SessionCustomizePanel({
             {readonly
               ? "Current personalization is read-only after the session starts."
               : mode === "create"
-              ? "Choose stored rules, skills, and preamble for the first turn."
+              ? "Choose stored rules, skills, tools, and preamble for the first turn."
               : "Manage reusable defaults for new sessions."}
           </div>
         </div>
@@ -459,6 +622,7 @@ export default function SessionCustomizePanel({
 
       {(mode === "create" || section === "rules") && renderRules()}
       {(mode === "create" || section === "skills") && renderSkills()}
+      {mode === "create" && renderTools()}
       {(mode === "create" || section === "preamble") && renderPreamble()}
     </div>
   );

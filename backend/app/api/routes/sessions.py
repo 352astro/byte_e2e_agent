@@ -43,7 +43,10 @@ def create_session(
     req: CreateSessionRequest,
     session_service: SessionService = Depends(get_session_service),
 ) -> dict:
-    return session_service.create_session(req)
+    try:
+        return session_service.create_session(req)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/sessions", response_model=ListSessionsResponse)

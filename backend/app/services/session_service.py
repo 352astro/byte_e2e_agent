@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from agent.core.config import SessionConfig
+from agent.core.config import ToolSetPreset
+from agent.tools import tool_registry
 from agent.core.workspace import Workspace as CoreWorkspace
 from agent.llm import get_model_id
 from agent.session import clear
@@ -37,6 +39,9 @@ class SessionService:
         messages_path = self._ctx.messages_path(session_id)
         messages_path.parent.mkdir(parents=True, exist_ok=True)
         messages_path.touch()
+        tool_set_preset, custom_tools = _clean_toolset(
+            req.tool_set_preset, req.custom_tools
+        )
         config = SessionConfig.user_main(
             name=req.name.strip() or session_id,
             model_id=get_model_id(),
@@ -45,6 +50,8 @@ class SessionService:
                 item.strip() for item in req.preloaded_skills if item.strip()
             ],
             rules=[item.strip() for item in req.rules if item.strip()],
+            tool_set_preset=tool_set_preset,
+            custom_tools=custom_tools,
         )
         CoreWorkspace(self._ctx.workspace).save_session_config(session_id, config)
         scope = self._locator.resolve(session_id, workspace_hint=self._ctx.workspace)
@@ -205,6 +212,7 @@ class SessionService:
             result.append(scope)
         return result
 
+
     def get_session_status(self, session_id: str) -> dict:
         try:
             scope = self._locator.resolve(session_id)
@@ -288,3 +296,28 @@ def _session_kind(scope: SessionScope) -> str:
             if owner.get("kind") == "session":
                 return "subagent"
     return "user"
+
+
+def _clean_toolset(
+    preset: ToolSetPreset,
+    custom_tools: list[str],
+) -> tuple[ToolSetPreset, list[str]]:
+    if preset != ToolSetPreset.CUSTOM:
+        return preset, []
+
+    known = set(tool_registry.tool_names)
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in custom_tools:
+        name = item.strip()
+        if not name:
+            continue
+        if name not in known:
+            raise ValueError(f"Unknown tool: {name}")
+        if name not in seen:
+            cleaned.append(name)
+            seen.add(name)
+
+    if not cleaned:
+        raise ValueError("custom_tools must not be empty for custom toolset")
+    return preset, cleaned

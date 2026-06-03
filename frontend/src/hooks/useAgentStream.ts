@@ -459,6 +459,8 @@ export default function useAgentStream({
         preamble: "",
         rules: [],
         preloaded_skills: [],
+        tool_set_preset: "all",
+        custom_tools: [],
       },
     ): Promise<void> => {
       if (opGuardRef.current) return;
