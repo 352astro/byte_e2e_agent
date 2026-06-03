@@ -32,23 +32,53 @@ function fileMeta(args: string) {
   };
 }
 
+function statusLabel(
+  status: string | undefined,
+  source: string | undefined,
+  reason: string | undefined,
+): string {
+  if (status === "denied") {
+    if (source === "user") return "Rejected";
+    if (source === "permission") return "Permission denied";
+    if (source === "kernel") return "Kernel denied";
+    if (source === "sandbox") return "Sandbox denied";
+    return reason || "Denied";
+  }
+  if (status === "timeout") return "Timeout";
+  if (status === "interrupted") return "Interrupted";
+  if (status === "error") return reason || "Error";
+  return "";
+}
+
 /**
- * Build the right-side status indicator: spinner (running), red X (error),
- * green check (completed), plus dim timeout text when applicable.
+ * Build the right-side status indicator from explicit tool result status.
  */
 function buildHeaderRight(
   active: boolean,
   timeout: string | null,
   hasResult: boolean,
+  toolStatus?: string,
+  toolStatusSource?: string,
+  toolStatusReason?: string,
 ): React.ReactNode {
-  // unpaired → spinner (backend will eventually pair it)
-  // paired   → check (success) or error (when backend provides flag)
   const showSpinner = active || !hasResult;
+  const status = toolStatus || (hasResult ? "success" : "");
+  const failed = ["denied", "error", "timeout", "interrupted"].includes(status);
+  const label = statusLabel(status, toolStatusSource, toolStatusReason);
   return (
     <>
       {timeout && <span className="shell-call-timeout">{timeout}s</span>}
       {showSpinner ? (
         <span className="shell-call-spinner" />
+      ) : failed ? (
+        <>
+          {label && (
+            <span className="tool-status-label" title={toolStatusReason || label}>
+              {label}
+            </span>
+          )}
+          <Icon name="x" size={12} className="tool-status-err" />
+        </>
       ) : (
         <Icon name="check" size={12} className="tool-status-ok" />
       )}
@@ -374,6 +404,9 @@ export interface ToolCardDatum {
   bodyContent?: string;
   focusId?: string;
   subtitle?: React.ReactNode;
+  toolStatus?: string;
+  toolStatusSource?: string;
+  toolStatusReason?: string;
 }
 
 export function renderToolCard(d: ToolCardDatum) {
@@ -395,6 +428,9 @@ export function renderToolCard(d: ToolCardDatum) {
     d.active ?? false,
     timeout,
     d.resultContent !== undefined,
+    d.toolStatus,
+    d.toolStatusSource,
+    d.toolStatusReason,
   );
 
   switch (d.toolName) {

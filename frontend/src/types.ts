@@ -41,6 +41,9 @@ export interface StreamEvent {
   tool_name: string;
   tool_args: string;
   is_error: boolean;
+  tool_status: string;
+  tool_status_source: string;
+  tool_status_reason: string;
   input_tokens: number;
   output_tokens: number;
   reason: string;

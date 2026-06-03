@@ -19,6 +19,8 @@ import textwrap
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
+from agent.tools.result import ToolResult
+
 _MAX_OUTPUT_BYTES = 10_240  # 10 KiB
 _DEFAULT_TIMEOUT_S = 30
 
@@ -121,7 +123,7 @@ async def pyrepl_handler(
     *,
     ws=None,
     interrupt_event: asyncio.Event | None = None,
-) -> str:
+) -> ToolResult:
     """在独立子进程中运行 Python 代码。"""
     script = _build_sandbox_script(code)
     timeout_s = timeout_ms / 1000.0
@@ -156,13 +158,23 @@ async def pyrepl_handler(
             _kill_proc(proc)
             await proc.wait()
             communicate_task.cancel()
-            return "[PyRepl interrupted]"
+            return ToolResult(
+                "[PyRepl interrupted]",
+                status="interrupted",
+                source="user",
+                reason="interrupted_by_user",
+            )
 
         if communicate_task not in done:
             _kill_proc(proc)
             await proc.wait()
             communicate_task.cancel()
-            return f"[PyRepl timed out after {timeout_ms}ms]"
+            return ToolResult(
+                f"[PyRepl timed out after {timeout_ms}ms]",
+                status="timeout",
+                source="tool",
+                reason=f"timeout_ms={timeout_ms}",
+            )
 
         if interrupt_task is not None:
             interrupt_task.cancel()
@@ -177,10 +189,15 @@ async def pyrepl_handler(
                 output[:_MAX_OUTPUT_BYTES]
                 + f"\n\n[Output truncated at {_MAX_OUTPUT_BYTES} bytes]"
             )
-        return output if output.strip() else "(no output)"
+        return ToolResult(output if output.strip() else "(no output)")
 
     except Exception as exc:
-        return f"PyRepl error: {exc}"
+        return ToolResult(
+            f"PyRepl error: {exc}",
+            status="error",
+            source="tool",
+            reason=str(exc),
+        )
 
 
 def _kill_proc(proc) -> None:

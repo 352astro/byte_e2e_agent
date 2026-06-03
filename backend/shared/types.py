@@ -42,6 +42,16 @@ class MessageStatus(str, Enum):
     COMPLETE = "complete"
 
 
+class ToolExecutionStatus(str, Enum):
+    """Semantic status for a completed tool result."""
+
+    SUCCESS = "success"
+    ERROR = "error"
+    DENIED = "denied"
+    TIMEOUT = "timeout"
+    INTERRUPTED = "interrupted"
+
+
 class StreamEventKind(str, Enum):
     """SSE 事件种类。"""
 
@@ -102,6 +112,9 @@ class Message(BaseModel):
     # ── tool_result 的关联信息（role=TOOL 时用）──
     tool_call_id: str = ""  # 关联的 tool_call.id
     tool_name: str = ""  # 工具名
+    tool_status: str = ToolExecutionStatus.SUCCESS.value
+    tool_status_source: str = "tool"
+    tool_status_reason: str = ""
 
     # ── 错误信息 ──
     error: str = ""
@@ -142,6 +155,9 @@ class Message(BaseModel):
         tool_call_id: str,
         tool_name: str,
         result: str,
+        tool_status: str = ToolExecutionStatus.SUCCESS.value,
+        tool_status_source: str = "tool",
+        tool_status_reason: str = "",
     ) -> "Message":
         """工厂：工具执行结果消息。"""
         return cls(
@@ -152,6 +168,9 @@ class Message(BaseModel):
             tool_call_id=tool_call_id,
             tool_name=tool_name,
             tool_result=result,
+            tool_status=tool_status,
+            tool_status_source=tool_status_source,
+            tool_status_reason=tool_status_reason,
         )
 
     @classmethod
@@ -203,6 +222,9 @@ class StreamEvent(BaseModel):
     tool_name: str = ""
     tool_args: str = ""
     is_error: bool = False
+    tool_status: str = ""
+    tool_status_source: str = ""
+    tool_status_reason: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
     reason: str = ""  # interrupted 时的原因
@@ -258,6 +280,9 @@ class StreamEvent(BaseModel):
         tool_name: str = "",
         tool_args: str = "",
         is_error: bool = False,
+        tool_status: str = "",
+        tool_status_source: str = "",
+        tool_status_reason: str = "",
         session_id: str = "",
     ) -> "StreamEvent":
         return cls(
@@ -269,6 +294,9 @@ class StreamEvent(BaseModel):
             tool_name=tool_name,
             tool_args=tool_args,
             is_error=is_error,
+            tool_status=tool_status,
+            tool_status_source=tool_status_source,
+            tool_status_reason=tool_status_reason,
         )
 
     @classmethod

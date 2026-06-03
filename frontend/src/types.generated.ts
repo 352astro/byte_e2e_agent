@@ -734,6 +734,21 @@ export interface components {
              */
             tool_name: string;
             /**
+             * Tool Status
+             * @default success
+             */
+            tool_status: string;
+            /**
+             * Tool Status Source
+             * @default tool
+             */
+            tool_status_source: string;
+            /**
+             * Tool Status Reason
+             * @default
+             */
+            tool_status_reason: string;
+            /**
              * Error
              * @default
              */
@@ -960,6 +975,9 @@ export interface components {
              * @default false
              */
             is_error: boolean;
+            tool_status: string;
+            tool_status_source: string;
+            tool_status_reason: string;
             /**
              * Input Tokens
              * @default 0

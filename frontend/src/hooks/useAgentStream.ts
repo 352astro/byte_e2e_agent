@@ -58,6 +58,9 @@ function emptyMessage(id: string, turnId: string, role: string): Message {
     tool_result: "",
     tool_call_id: "",
     tool_name: "",
+    tool_status: "success",
+    tool_status_source: "tool",
+    tool_status_reason: "",
     error: "",
   } as Message;
 }
@@ -338,7 +341,18 @@ export default function useAgentStream({
           }
           setActive((prev) => {
             if (!prev || prev.id !== ev.message_id) return prev;
-            return { ...prev, [field]: full_content };
+            const next = { ...prev, [field]: full_content };
+            if (field === "tool_result") {
+              return {
+                ...next,
+                tool_status: ev.tool_status || prev.tool_status || "success",
+                tool_status_source:
+                  ev.tool_status_source || prev.tool_status_source || "tool",
+                tool_status_reason:
+                  ev.tool_status_reason || prev.tool_status_reason || "",
+              };
+            }
+            return next;
           });
           break;
         }

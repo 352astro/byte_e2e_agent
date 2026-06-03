@@ -10,6 +10,7 @@ from shared.types import (  # noqa: F401
     StreamEvent,
     StreamEventKind,
     ToolCall,
+    ToolExecutionStatus,
     ToolCallFunction,
 )
 
@@ -101,6 +102,9 @@ class StreamEventSchema(BaseModel):
     tool_name: str = ""
     tool_args: str = ""
     is_error: bool = False
+    tool_status: str = ""
+    tool_status_source: str = ""
+    tool_status_reason: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
     reason: str = ""

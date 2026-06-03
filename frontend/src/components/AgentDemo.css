@@ -758,6 +758,16 @@
     color: #4b7f32;
 }
 
+.subagent-card-state--denied,
+.subagent-card-state--timeout,
+.subagent-card-state--error {
+  color: #e53935;
+}
+
+.subagent-card-state--interrupted {
+    color: #777;
+}
+
 .subagent-card-body {
     display: flex;
     flex-direction: column;
@@ -1611,6 +1621,17 @@
 .tool-status-err {
     color: #e53935;
     flex-shrink: 0;
+}
+
+.tool-status-label {
+    max-width: 160px;
+    overflow: hidden;
+    color: #9f2d2d;
+    font-size: 0.66rem;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
 }
 
 /* Ensure <pre> can host absolutely-positioned copy button */

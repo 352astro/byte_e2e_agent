@@ -14,6 +14,7 @@ from pathlib import Path
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
+from agent.tools.result import ToolResult
 from agent.tools.terminal import PersistentTerminal
 
 _PLATFORM_MAP = {"linux": "Linux", "darwin": "macOS", "win32": "Windows"}
@@ -67,7 +68,7 @@ async def shell_handler(
     *,
     ws,
     interrupt_event: asyncio.Event | None = None,
-) -> str:
+) -> ToolResult:
     """Execute a shell command in the workspace with async interrupt.
 
     Flow:
@@ -81,11 +82,26 @@ async def shell_handler(
     try:
         workdir = str(ws.resolve(cwd))
     except PermissionError as exc:
-        return f"Error: {exc}"
+        return ToolResult(
+            f"Error: {exc}",
+            status="denied",
+            source="sandbox",
+            reason=str(exc),
+        )
     except Exception as exc:
-        return f"Error: invalid cwd '{cwd}': {exc}"
+        return ToolResult(
+            f"Error: invalid cwd '{cwd}': {exc}",
+            status="error",
+            source="tool",
+            reason="invalid_cwd",
+        )
     if not Path(workdir).is_dir():
-        return f"Error: cwd is not a directory: {cwd}"
+        return ToolResult(
+            f"Error: cwd is not a directory: {cwd}",
+            status="error",
+            source="tool",
+            reason="cwd_not_directory",
+        )
 
     terminal = PersistentTerminal()
     terminal.start(workdir)
@@ -140,6 +156,9 @@ async def shell_handler(
     output_parts: list[str] = []
     output_bytes = 0
     truncated_bytes = 0
+    result_status = "success"
+    result_source = "tool"
+    result_reason = ""
 
     def append_output(chunk: str) -> None:
         nonlocal output_bytes, truncated_bytes
@@ -190,8 +209,13 @@ async def shell_handler(
                     break
 
             if timed_out:
+                result_status = "timeout"
+                result_reason = f"timeout_ms={timeout_ms}"
                 output_parts.append(f"\n[Command timed out after {timeout_ms}ms]")
             else:
+                result_status = "interrupted"
+                result_source = "user"
+                result_reason = "interrupted_by_user"
                 output_parts.append("\n[Command interrupted]")
 
             # Terminal may be dirty after interrupt — reset for next command
@@ -225,12 +249,19 @@ async def shell_handler(
     if not interrupted_flag.is_set():
         exit_code = terminal._last_exit_code
         if exit_code not in (0, -1):
+            result_status = "error"
+            result_reason = f"exit_code={exit_code}"
             if output:
                 output += f"\n[exit code: {exit_code}]"
             else:
                 output = f"[exit code: {exit_code}]"
 
-    return output if output else "(no output)"
+    return ToolResult(
+        output if output else "(no output)",
+        status=result_status,
+        source=result_source,
+        reason=result_reason,
+    )
 
 
 shell_tool = StructuredTool.from_function(

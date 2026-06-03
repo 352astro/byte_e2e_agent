@@ -91,6 +91,9 @@ def _message_replay_events(msg: dict, session_id: str = ""):
 
     tool_result = msg.get("tool_result", "")
     if tool_result:
+        tool_status = msg.get("tool_status", "")
+        if not tool_status:
+            tool_status = "error" if msg.get("error", "") else "success"
         yield StreamEvent.chunk_delta(
             msg_id, "tool_result", tool_result, session_id=session_id
         )
@@ -99,7 +102,10 @@ def _message_replay_events(msg: dict, session_id: str = ""):
             "tool_result",
             tool_result,
             tool_name=msg.get("tool_name", ""),
-            is_error=bool(msg.get("error", "")),
+            is_error=tool_status != "success",
+            tool_status=tool_status,
+            tool_status_source=msg.get("tool_status_source", ""),
+            tool_status_reason=msg.get("tool_status_reason", ""),
             session_id=session_id,
         )
 

@@ -292,9 +292,14 @@ function SubAgentToolCard({
   const args = parseArgs(pair.toolCall?.function?.arguments || "");
   const meta = ((pair.toolCall as any)?.tool_meta || {}) as Record<string, unknown>;
   const resultContent = pair.resultMessage?.tool_result || "";
+  const toolStatus = pair.resultMessage?.tool_status || "";
+  const toolStatusSource = pair.resultMessage?.tool_status_source || "";
+  const toolStatusReason = pair.resultMessage?.tool_status_reason || "";
   const childSessionId =
     String(meta.child_session_id || "") || childSidFromResult(resultContent);
-  const status = String(meta.status || (resultContent ? "complete" : "running"));
+  const status = toolStatus && toolStatus !== "success"
+    ? toolStatus
+    : String(meta.status || (resultContent ? "complete" : "running"));
   const prompt = String(args.prompt || "");
   const maxSteps = args.max_steps != null ? String(args.max_steps) : "";
   const canNest = Boolean(childSessionId) && depth < 3;
@@ -316,7 +321,10 @@ function SubAgentToolCard({
         </>
       }
       headerRight={
-        <span className={`subagent-card-state subagent-card-state--${status}`}>
+        <span
+          className={`subagent-card-state subagent-card-state--${status}`}
+          title={toolStatusReason || toolStatusSource}
+        >
           {status}
         </span>
       }
@@ -349,6 +357,9 @@ const ToolPairCard = React.memo(function ToolPairCard({
   const argumentsStr = pair.toolCall?.function?.arguments || "";
 
   const resultContent = pair.resultMessage?.tool_result || undefined;
+  const toolStatus = pair.resultMessage?.tool_status || undefined;
+  const toolStatusSource = pair.resultMessage?.tool_status_source || undefined;
+  const toolStatusReason = pair.resultMessage?.tool_status_reason || undefined;
   const { meta, rest } = extractToolMeta(argumentsStr, toolName);
   const cwd = meta.cwd as string | undefined;
   const filePath =
@@ -385,6 +396,9 @@ const ToolPairCard = React.memo(function ToolPairCard({
     bodyContent,
     focusId: `${pair.callMessageId}/${pair.callIndex}`,
     subtitle,
+    toolStatus,
+    toolStatusSource,
+    toolStatusReason,
   });
 });
 

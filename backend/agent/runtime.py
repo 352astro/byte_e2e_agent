@@ -617,6 +617,9 @@ class AgentRuntime:
                     # 执行
                     tool_error = None
                     tool_output = ""
+                    tool_status = "success"
+                    tool_status_source = "tool"
+                    tool_status_reason = ""
                     tc_dict = {
                         "id": tool_call_id,
                         "function": {"name": func_name, "arguments": func_args_str},
@@ -635,6 +638,9 @@ class AgentRuntime:
                     )
                     guard_decision = await self._hooks.guard_check(guard_check)
                     if guard_decision == GuardDecision.DENY:
+                        tool_status = "denied"
+                        tool_status_source = "permission"
+                        tool_status_reason = "disabled_by_policy"
                         tool_output = (
                             f"Permission denied: tool '{func_name}' is disabled "
                             "by global tool permissions."
@@ -642,6 +648,9 @@ class AgentRuntime:
                     elif guard_decision == GuardDecision.ASK:
                         approved = await self._ask_guard(guard_check, intr)
                         if not approved:
+                            tool_status = "denied"
+                            tool_status_source = "user"
+                            tool_status_reason = "rejected_by_user"
                             tool_output = (
                                 f"Permission denied: user rejected tool "
                                 f"'{func_name}'."
@@ -664,7 +673,7 @@ class AgentRuntime:
 
                     if not tool_output:
                         try:
-                            tool_output = await execute_one_tool(
+                            tool_exec = await execute_one_tool(
                                 tc_dict,
                                 ws,
                                 toolset,
@@ -675,16 +684,30 @@ class AgentRuntime:
                                 hook_manager=self._hooks,
                                 agent_invoker=invoke_child_agent,
                             )
+                            tool_output = tool_exec.output
+                            tool_status = tool_exec.status
+                            tool_status_source = tool_exec.source
+                            tool_status_reason = tool_exec.reason
                         except InterruptedError:
                             raise
                         except Exception as exc:
                             tool_error = exc
+                            tool_status = "error"
+                            tool_status_source = "tool"
+                            tool_status_reason = str(exc)
                             tool_output = str(exc)
 
                     # ── 构建 tool_result Message ──────
                     rid = _uuid.uuid4().hex
                     tool_result_msg = Message.tool_message(
-                        rid, turn_id, tool_call_id, func_name, tool_output
+                        rid,
+                        turn_id,
+                        tool_call_id,
+                        func_name,
+                        tool_output,
+                        tool_status=tool_status,
+                        tool_status_source=tool_status_source,
+                        tool_status_reason=tool_status_reason,
                     )
                     await self._hooks.on_message_start(
                         msg=tool_result_msg, session_id=sid
@@ -694,7 +717,10 @@ class AgentRuntime:
                         field="tool_result",
                         full_content=tool_output,
                         tool_name=func_name,
-                        is_error=tool_error is not None,
+                        is_error=tool_status != "success",
+                        tool_status=tool_status,
+                        tool_status_source=tool_status_source,
+                        tool_status_reason=tool_status_reason,
                         session_id=sid,
                     )
                     await self._hooks.on_message_finish(

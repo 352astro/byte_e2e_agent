@@ -8,16 +8,50 @@ from __future__ import annotations
 import asyncio
 import inspect
 import uuid as _uuid
+from dataclasses import dataclass
 
 from agent.core.workspace import Workspace
 from agent.errors import InterruptedError
 from agent.tools import tool_registry
+from agent.tools.result import ToolResult
 from agent.tools.toolset import ToolSet
 from shared.hooks import HookManager
 from shared.types import Message, ToolCall
 
 _SUBAGENT_DEBUG = True  # 设为 False 关闭子智能体控制台调试输出
 _STREAM_END = object()
+
+
+@dataclass
+class ToolExecutionResult:
+    output: str
+    status: str = "success"
+    source: str = "tool"
+    reason: str = ""
+
+    def __str__(self) -> str:
+        return self.output
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, str):
+            return self.output == other
+        return super().__eq__(other)
+
+    def __contains__(self, item: object) -> bool:
+        return str(item) in self.output
+
+
+def _coerce_tool_result(result: object) -> ToolExecutionResult:
+    if isinstance(result, ToolExecutionResult):
+        return result
+    if isinstance(result, ToolResult):
+        return ToolExecutionResult(
+            output=result.output,
+            status=result.status,
+            source=result.source,
+            reason=result.reason,
+        )
+    return ToolExecutionResult(output=str(result))
 
 
 # ═══════════════════════════════════════════════════════════
@@ -225,11 +259,10 @@ async def execute_one_tool(
     session_id: str = "",
     hook_manager: HookManager | None = None,
     agent_invoker=None,
-) -> str:
-    """执行单个 tool_call。SubAgent / BrowserInspect 原地分发。返回结果字符串。"""
+) -> ToolExecutionResult:
+    """执行单个 tool_call。SubAgent / BrowserInspect 原地分发。"""
     func_name: str = tc["function"]["name"]
     func_args: str = tc["function"]["arguments"]
-    result_id = _uuid.uuid4().hex
 
     if interrupt_event.is_set():
         raise InterruptedError("Interrupted before tool execution")
@@ -237,7 +270,12 @@ async def execute_one_tool(
     try:
         tool, args = toolset.parse(func_name, func_args)
     except Exception as exc:
-        return f"Error parsing {func_name}: {exc}"
+        return ToolExecutionResult(
+            output=f"Error parsing {func_name}: {exc}",
+            status="error",
+            source="runtime",
+            reason="parse_failed",
+        )
 
     # ── SubAgent / BrowserInspect：原地分发，不调 handler ──
     if tool.name == "SubAgent":
@@ -298,9 +336,14 @@ async def execute_one_tool(
         except InterruptedError:
             raise
         except Exception as exc:
-            result_str = f"Error: {exc}"
+            return ToolExecutionResult(
+                output=f"Error: {exc}",
+                status="error",
+                source="tool",
+                reason=str(exc),
+            )
 
-    return result_str
+    return _coerce_tool_result(result_str)
 
 
 def _accepts_kwarg(fn, name: str) -> bool:
@@ -429,7 +472,7 @@ async def run_subagent(
                 {
                     "role": "tool",
                     "tool_call_id": tc["id"],
-                    "content": result,
+                    "content": result.output,
                 }
             )
 

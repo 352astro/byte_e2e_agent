@@ -40,6 +40,9 @@ export function reduceMessages(
           tool_result: "",
           tool_call_id: "",
           tool_name: "",
+          tool_status: "success",
+          tool_status_source: "tool",
+          tool_status_reason: "",
           error: "",
         } as Message,
       ];
@@ -87,7 +90,26 @@ export function reduceMessages(
     case "chunk_complete": {
       const field = event.field as keyof Message;
       return messages.map((m) =>
-        m.id === event.message_id ? { ...m, [field]: event.full_content } : m,
+        m.id === event.message_id
+          ? {
+              ...m,
+              [field]: event.full_content,
+              ...(event.field === "tool_result"
+                ? {
+                    tool_status:
+                      event.tool_status || m.tool_status || "success",
+                    tool_status_source:
+                      event.tool_status_source ||
+                      m.tool_status_source ||
+                      "tool",
+                    tool_status_reason:
+                      event.tool_status_reason ||
+                      m.tool_status_reason ||
+                      "",
+                  }
+                : {}),
+            }
+          : m,
       );
     }
 

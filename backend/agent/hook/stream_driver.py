@@ -158,6 +158,13 @@ class StreamDriverHook(BaseHook):
                 tool_name=tool_name,
                 tool_args=tool_args,
                 is_error=is_error,
+                tool_status=kwargs.get("tool_status", msg.tool_status),
+                tool_status_source=kwargs.get(
+                    "tool_status_source", msg.tool_status_source
+                ),
+                tool_status_reason=kwargs.get(
+                    "tool_status_reason", msg.tool_status_reason
+                ),
                 session_id=session_id,
             )
         )
