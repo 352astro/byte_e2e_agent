@@ -2,13 +2,14 @@ import { useState, useCallback } from "react";
 import AgentDemo from "./components/AgentDemo";
 import SessionSidebar from "./components/SessionSidebar";
 import SettingsWindow from "./components/SettingsWindow";
+import MetricsPanel from "./components/MetricsPanel";
 import "./App.css";
-
 
 export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [metricsOpen, setMetricsOpen] = useState(false);
 
   const handleSelect = useCallback((sid: string) => {
     setSessionId(sid);
@@ -46,6 +47,7 @@ export default function App() {
         onNew={handleNew}
         onDelete={handleDelete}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenMetrics={() => setMetricsOpen(true)}
       />
       <div className="app-main">
         <AgentDemo
@@ -59,6 +61,7 @@ export default function App() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
+      {metricsOpen && <MetricsPanel onClose={() => setMetricsOpen(false)} />}
     </div>
   );
 }

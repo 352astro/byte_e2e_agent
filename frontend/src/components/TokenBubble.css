@@ -1,0 +1,106 @@
+/* ── Token bubble: outside assistant card, no layout impact ── */
+
+.message-row {
+    position: relative;
+}
+
+/* ── Bubble ──────────────────────────────── */
+
+.token-bubble {
+    position: absolute;
+    left: calc(100% + 6px);
+    top: 4px;
+    font-size: 0.68rem;
+    font-family:
+        ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+        monospace;
+    color: #aaa;
+    line-height: 1.45;
+    opacity: 0.5;
+    transition:
+        opacity 160ms ease,
+        color 160ms ease;
+    white-space: nowrap;
+    z-index: 2;
+}
+
+.token-bubble::before {
+    content: "";
+    position: absolute;
+    left: -6px;
+    right: -6px;
+    top: 100%;
+    height: 10px;
+}
+
+.message-row:hover .token-bubble,
+.token-bubble:hover {
+    opacity: 1;
+    color: #555;
+}
+
+/* ── Compact label ───────────────────────── */
+
+.token-bubble-label {
+    background: transparent;
+}
+
+/* ── Detail: transparent, shadow only ─────── */
+
+.token-bubble-detail {
+    position: absolute;
+    left: 0;
+    top: calc(100% + 6px);
+    padding: 4px 8px 6px 8px;
+    background: transparent;
+    border-radius: 4px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.10);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-5px) scale(0.98);
+    transform-origin: top left;
+    transition:
+        opacity 160ms ease,
+        transform 160ms ease,
+        visibility 0s linear 160ms;
+    visibility: hidden;
+    white-space: nowrap;
+}
+
+.token-bubble:hover .token-bubble-detail {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+    transition:
+        opacity 160ms ease,
+        transform 160ms ease,
+        visibility 0s;
+    visibility: visible;
+}
+
+.token-bubble-detail table {
+    border-collapse: collapse;
+    font-size: 0.65rem;
+}
+
+.token-bubble-detail td {
+    padding: 1px 8px 1px 0;
+    color: #888;
+}
+
+.token-bubble-detail td + td {
+    text-align: right;
+    color: #555;
+    font-weight: 500;
+}
+
+.token-bubble-cost-row td {
+    border-top: 1px solid #e8e8e8;
+    padding-top: 2px;
+    margin-top: 2px;
+}
+
+.token-bubble-cost-row td + td {
+    color: #333;
+    font-weight: 600;
+}

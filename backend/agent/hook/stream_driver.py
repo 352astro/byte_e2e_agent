@@ -10,8 +10,7 @@ import asyncio
 import json
 import logging
 
-from shared.hooks import BaseHook
-from shared.hooks import GuardCheck
+from shared.hooks import BaseHook, GuardCheck
 from shared.types import Message, StreamEvent, StreamEventKind
 
 logger = logging.getLogger(__name__)
@@ -171,7 +170,10 @@ class StreamDriverHook(BaseHook):
 
     async def on_message_finish(self, *, msg: Message, **kwargs) -> None:
         session_id = kwargs.get("session_id", "")
-        self._broadcast(StreamEvent.message_finish(msg.id, session_id=session_id))
+        usage = kwargs.get("usage") or {}
+        self._broadcast(
+            StreamEvent.message_finish(msg.id, session_id=session_id, usage=usage)
+        )
 
     async def on_turn_end(
         self, *, turn_id: str, input_tokens: int = 0, output_tokens: int = 0, **kwargs

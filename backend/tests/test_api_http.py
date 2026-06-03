@@ -87,7 +87,7 @@ def api_server() -> str:
     workspace = tempfile.mkdtemp(prefix="byte_e2e_api_test_")
     env = os.environ.copy()
     env["AGENT_WORKSPACE"] = workspace
-    env["LLM_METRICS_DB_PATH"] = str(Path(workspace) / ".tmp" / "ai_metrics.sqlite3")
+    env["LLM_METRICS_DB_PATH"] = str(Path(workspace) / ".tmp" / "metrics.db")
 
     proc = subprocess.Popen(
         [

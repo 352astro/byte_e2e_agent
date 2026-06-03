@@ -519,6 +519,373 @@
     flex: 1;
 }
 
+/* ── Metrics dashboard ─────────────────────── */
+
+.metrics-window {
+    width: min(980px, calc(100vw - 32px));
+    height: min(720px, calc(100vh - 32px));
+    min-width: 760px;
+    min-height: 560px;
+}
+
+.metrics-dashboard {
+    min-height: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    overflow: hidden;
+    background: #fafafa;
+}
+
+.metrics-toolbar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+}
+
+.metrics-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #555;
+    font-size: 0.78rem;
+    font-weight: 650;
+}
+
+.metrics-select,
+.metrics-input {
+    height: 30px;
+    border: 1px solid #d0d0d0;
+    border-radius: 6px;
+    background: #fff;
+    color: #222;
+    font-size: 0.8rem;
+}
+
+.metrics-select {
+    padding: 0 28px 0 8px;
+}
+
+.metrics-input {
+    min-width: 0;
+    padding: 0 8px;
+}
+
+.metrics-workspace-path {
+    overflow: hidden;
+    color: #777;
+    font-family: ui-monospace, monospace;
+    font-size: 0.72rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.metrics-config-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.metrics-card {
+    min-height: 0;
+    padding: 12px;
+    border: 1px solid #e4e4e4;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.metrics-card--fill {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.metrics-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.metrics-card-head h2 {
+    margin: 0;
+    color: #202020;
+    font-size: 0.95rem;
+}
+
+.metrics-card-head span {
+    color: #888;
+    font-size: 0.72rem;
+}
+
+.metrics-card-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.metrics-segment {
+    display: inline-flex;
+    overflow: hidden;
+    border: 1px solid #d8d8d8;
+    border-radius: 7px;
+    background: #fff;
+}
+
+.metrics-segment button {
+    height: 28px;
+    padding: 0 10px;
+    border: none;
+    border-right: 1px solid #e2e2e2;
+    background: transparent;
+    color: #666;
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.metrics-segment button:last-child {
+    border-right: none;
+}
+
+.metrics-segment button.active,
+.metrics-segment button:hover {
+    background: #eceff5;
+    color: #1d4ed8;
+}
+
+.metrics-chart-svg {
+    width: 100%;
+    height: 220px;
+    display: block;
+}
+
+.metrics-chart-svg line {
+    stroke: #ececec;
+}
+
+.metrics-chart-svg text {
+    fill: #888;
+    font: 10px ui-monospace, monospace;
+}
+
+.metrics-cost-line {
+    fill: none;
+    stroke: #2563eb;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2.5;
+}
+
+.metrics-chart-svg circle {
+    fill: #fff;
+    stroke: #2563eb;
+    stroke-width: 2;
+}
+
+.metrics-cost-hover-target {
+    fill: transparent;
+    pointer-events: all;
+}
+
+.metrics-svg-tooltip {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-4px);
+    transition:
+        opacity 150ms ease,
+        transform 150ms ease;
+}
+
+.metrics-cost-point.has-data:hover .metrics-svg-tooltip,
+.metrics-token-bar.has-data:hover .metrics-svg-tooltip {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.metrics-tooltip-box {
+    display: inline-flex;
+    flex-direction: column;
+    width: fit-content;
+    max-width: 160px;
+    padding: 7px 9px;
+    border: 1px solid #d8d8d8;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.14);
+    color: #333;
+    font: 10px/1.35 ui-monospace, monospace;
+    white-space: nowrap;
+}
+
+.metrics-tooltip-box strong {
+    font-weight: 750;
+}
+
+.metrics-tooltip-box span {
+    display: block;
+}
+
+.metrics-token-legend {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 8px;
+    color: #666;
+    font-size: 0.72rem;
+    font-weight: 650;
+}
+
+.metrics-token-legend span::before {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 5px;
+    border-radius: 2px;
+    background: var(--c);
+}
+
+.metrics-token-chart {
+    width: 100%;
+    height: min(300px, 34vh);
+    min-height: 230px;
+    display: block;
+}
+
+.metrics-token-chart line {
+    stroke: #ececec;
+}
+
+.metrics-token-chart text {
+    fill: #888;
+    font: 10px ui-monospace, monospace;
+}
+
+.metrics-token-bar rect {
+    shape-rendering: crispEdges;
+}
+
+.metrics-token-hover-target {
+    fill: transparent;
+    pointer-events: all;
+}
+
+.metrics-token-bar.has-data:hover rect:not(.metrics-token-hover-target) {
+    filter: brightness(0.94);
+}
+
+.metrics-token-x-label {
+    font-size: 9px;
+}
+
+.metrics-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 140px;
+    color: #999;
+    font-size: 0.84rem;
+}
+
+.metrics-config-popover {
+    position: absolute;
+    right: 14px;
+    top: 54px;
+    z-index: 3;
+    width: min(760px, calc(100% - 28px));
+    max-height: calc(100% - 70px);
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    border: 1px solid #d7d7d7;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.18);
+}
+
+.metrics-config-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.metrics-config-head h2 {
+    margin: 0;
+    font-size: 0.95rem;
+}
+
+.metrics-config-head span {
+    color: #888;
+    font-size: 0.74rem;
+}
+
+.metrics-pricing-unit {
+    margin-left: auto;
+    color: #666;
+    font-size: 0.72rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.metrics-pricing-list {
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-right: 3px;
+}
+
+.metrics-pricing-header,
+.metrics-pricing-row,
+.metrics-pricing-add {
+    display: grid;
+    grid-template-columns: minmax(150px, 1.4fr) repeat(4, minmax(86px, 1fr)) auto;
+    gap: 6px;
+    align-items: center;
+}
+
+.metrics-pricing-header {
+    margin-bottom: 6px;
+    color: #777;
+    font-size: 0.68rem;
+    font-weight: 750;
+    text-transform: uppercase;
+}
+
+.metrics-pricing-add {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #eee;
+}
+
+.metrics-pricing-model {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.metrics-pricing-model span {
+    overflow: hidden;
+    color: #222;
+    font-family: ui-monospace, monospace;
+    font-size: 0.76rem;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.metrics-pricing-model small {
+    color: #999;
+    font-size: 0.66rem;
+}
+
 .memory-meta {
     display: flex;
     flex-wrap: wrap;

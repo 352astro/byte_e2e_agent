@@ -262,6 +262,47 @@ class TestSQLiteLLMMetricsStore:
             # input_price defaults to 3.0 per 1M tokens
             assert item["cost_yuan"] == pytest.approx(3.0, rel=0.01)
 
+    def test_cost_yuan_uses_current_pricing(self):
+        """展示和汇总费用应按当前 model_pricing 动态重算。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = self._make_store(tmpdir)
+            store.record_call(
+                model="gpt-4",
+                created_at=utc_now_iso(),
+                latency_ms=100,
+                usage={
+                    "prompt_tokens": 1_000,
+                    "completion_tokens": 2_000,
+                    "total_tokens": 3_000,
+                },
+                reasoning_tokens=500,
+                prompt_cached_tokens=200,
+            )
+
+            store.upsert_pricing(
+                "gpt-4",
+                input_price=10,
+                output_price=20,
+                reasoning_price=30,
+                cached_input_price=1,
+            )
+
+            expected = (800 * 10 + 200 * 1 + 1_500 * 20 + 500 * 30) / 1_000_000
+            assert store.list_calls()["items"][0]["cost_yuan"] == pytest.approx(
+                expected
+            )
+            assert store.summary()["cost_yuan"] == pytest.approx(expected)
+            assert store.series()["buckets"][0]["cost_yuan"] == pytest.approx(expected)
+
+            store.upsert_pricing(
+                "gpt-4",
+                input_price=0,
+                output_price=0,
+                reasoning_price=0,
+                cached_input_price=0,
+            )
+            assert store.summary()["cost_yuan"] == 0.0
+
     # ── error recording ───────────────────────────────────
 
     def test_record_call_with_error(self):
@@ -401,7 +442,7 @@ class TestSQLiteLLMMetricsStore:
             assert s["errored_calls"] == 0
             assert s["avg_latency_ms"] is None
             assert s["total_tokens"] == 0
-            assert s["cost_yuan"] is None  # SUM(NULL) → None in empty store
+            assert s["cost_yuan"] == 0.0
 
     def test_summary_filters_by_session_id(self):
         """summary(session_id=...) 应仅聚合该 session 的数据。"""

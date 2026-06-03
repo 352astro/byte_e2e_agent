@@ -13,8 +13,8 @@ from agent.core.workspace import Workspace, is_valid_session_id
 from agent.core.workspace import Workspace as CoreWorkspace
 from agent.hook.logging_hook import LoggingHook
 from agent.hook.metrics_hook import MetricsHook
-from agent.hook.persistence_hook import PersistenceHook
 from agent.hook.permission_hook import ToolPermissionHook
+from agent.hook.persistence_hook import PersistenceHook
 from agent.hook.shadow_commit_hook import ShadowCommitHook
 from agent.hook.stream_driver import StreamDriverHook
 from agent.llm import get_model_id
@@ -46,9 +46,7 @@ class WorkspaceContext:
         self._runtime: AgentRuntime | None = None
         self._shadow_repo: ShadowRepo | None = None
         self._memory_store: SQLiteMemoryStore | None = None
-        self._scoped_contexts = (
-            _shared_contexts if _shared_contexts is not None else {}
-        )
+        self._scoped_contexts = _shared_contexts if _shared_contexts is not None else {}
         self._scoped_contexts[self._workspace] = self
         self._model_id = get_model_id()
         self.metrics_store = self._build_metrics_store()
@@ -180,7 +178,11 @@ class WorkspaceContext:
     def _build_runtime(self) -> AgentRuntime:
         hook_list = [
             StreamDriverHook(),
-            MetricsHook(self.metrics_store, model_id=self._model_id),
+            MetricsHook(
+                self.metrics_store,
+                model_id=self._model_id,
+                workspace_root=self._workspace,
+            ),
             PersistenceHook(self._workspace),
             ShadowCommitHook(self.shadow_repo),
             ToolPermissionHook(self._workspace),
@@ -193,6 +195,7 @@ class WorkspaceContext:
                     top_k=self._settings.memory_top_k,
                     recall_top_k=self._settings.memory_recall_top_k,
                     llm_timeout=self._settings.memory_llm_timeout,
+                    metrics_store=self.metrics_store,
                 )
             )
         hook_list.append(LoggingHook(verbose=True))

@@ -75,6 +75,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspace/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Workspace File */
+        get: operations["get_workspace_file_api_workspace_file_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspace/set": {
         parameters: {
             query?: never;
@@ -374,6 +391,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tool-presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Tool Presets */
+        get: operations["list_tool_presets_api_tool_presets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/session-defaults": {
         parameters: {
             query?: never;
@@ -385,6 +419,24 @@ export interface paths {
         get: operations["get_session_settings_api_settings_session_defaults_get"];
         /** Update Session Settings */
         put: operations["update_session_settings_api_settings_session_defaults_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/tool-permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Tool Permissions */
+        get: operations["get_tool_permissions_api_settings_tool_permissions_get"];
+        /** Update Tool Permissions */
+        put: operations["update_tool_permissions_api_settings_tool_permissions_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -534,6 +586,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/metrics/llm/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Llm Series */
+        get: operations["get_llm_series_api_metrics_llm_series_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/metrics/llm/pricing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pricing */
+        get: operations["list_pricing_api_metrics_llm_pricing_get"];
+        put?: never;
+        /** Upsert Pricing */
+        post: operations["upsert_pricing_api_metrics_llm_pricing_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/metrics/llm/pricing/{model_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Pricing */
+        delete: operations["delete_pricing_api_metrics_llm_pricing__model_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/memory": {
         parameters: {
             query?: never;
@@ -647,11 +751,8 @@ export interface components {
             rules?: string[];
             /** Preloaded Skills */
             preloaded_skills?: string[];
-            /**
-             * Tool Set Preset
-             * @default all
-             */
-            tool_set_preset?: components["schemas"]["ToolSetPreset"];
+            /** @default all */
+            tool_set_preset: components["schemas"]["ToolSetPreset"];
             /** Custom Tools */
             custom_tools?: string[];
         };
@@ -680,6 +781,194 @@ export interface components {
         InterruptResponse: {
             /** Ok */
             ok: boolean;
+        };
+        /** LLMCallItem */
+        LLMCallItem: {
+            /** Id */
+            id: string;
+            /** Created At */
+            created_at: string;
+            /**
+             * Workspace Root
+             * @default
+             */
+            workspace_root: string;
+            /** Session Id */
+            session_id?: string | null;
+            /** Message Id */
+            message_id?: string | null;
+            /** Call Type */
+            call_type: string;
+            /** Model */
+            model: string;
+            /** Status */
+            status: string;
+            /** Finish Reason */
+            finish_reason?: string | null;
+            /** Latency Ms */
+            latency_ms: number;
+            /** Prompt Tokens */
+            prompt_tokens?: number | null;
+            /** Completion Tokens */
+            completion_tokens?: number | null;
+            /** Total Tokens */
+            total_tokens?: number | null;
+            /** Reasoning Tokens */
+            reasoning_tokens?: number | null;
+            /** Prompt Cached Tokens */
+            prompt_cached_tokens?: number | null;
+            /** Prompt Cache Hit */
+            prompt_cache_hit?: number | null;
+            /** Prompt Cache Miss */
+            prompt_cache_miss?: number | null;
+            /** Cost Yuan */
+            cost_yuan?: number | null;
+            /** Error */
+            error?: string | null;
+        };
+        /** LLMCallListResponse */
+        LLMCallListResponse: {
+            /** Items */
+            items: components["schemas"]["LLMCallItem"][];
+            pagination: components["schemas"]["Pagination"];
+        };
+        /** LLMDashboardResponse */
+        LLMDashboardResponse: {
+            summary: components["schemas"]["LLMSummaryResponse"];
+            /** By Model */
+            by_model: components["schemas"]["LLMModelBreakdown"][];
+            /** Recent Calls */
+            recent_calls: components["schemas"]["LLMCallItem"][];
+        };
+        /** LLMModelBreakdown */
+        LLMModelBreakdown: {
+            /** Model */
+            model: string;
+            /** Total Calls */
+            total_calls: number;
+            /**
+             * Errored Calls
+             * @default 0
+             */
+            errored_calls: number;
+            /** Avg Latency Ms */
+            avg_latency_ms?: number | null;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Reasoning Tokens
+             * @default 0
+             */
+            reasoning_tokens: number;
+            /** Cost Yuan */
+            cost_yuan?: number | null;
+        };
+        /** LLMSeriesBucket */
+        LLMSeriesBucket: {
+            /** Bucket */
+            bucket: string;
+            /** Model */
+            model: string;
+            /**
+             * Calls
+             * @default 0
+             */
+            calls: number;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Cached Tokens
+             * @default 0
+             */
+            cached_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Reasoning Tokens
+             * @default 0
+             */
+            reasoning_tokens: number;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Cost Yuan
+             * @default 0
+             */
+            cost_yuan: number;
+        };
+        /** LLMSeriesResponse */
+        LLMSeriesResponse: {
+            /** Span */
+            span: string;
+            /** Unit */
+            unit: string;
+            /** Models */
+            models: string[];
+            /** Buckets */
+            buckets: components["schemas"]["LLMSeriesBucket"][];
+        };
+        /** LLMSummaryResponse */
+        LLMSummaryResponse: {
+            /**
+             * Total Calls
+             * @default 0
+             */
+            total_calls: number;
+            /**
+             * Successful Calls
+             * @default 0
+             */
+            successful_calls: number;
+            /**
+             * Errored Calls
+             * @default 0
+             */
+            errored_calls: number;
+            /** Avg Latency Ms */
+            avg_latency_ms?: number | null;
+            /** Min Latency Ms */
+            min_latency_ms?: number | null;
+            /** Max Latency Ms */
+            max_latency_ms?: number | null;
+            /**
+             * Prompt Tokens
+             * @default 0
+             */
+            prompt_tokens: number;
+            /**
+             * Completion Tokens
+             * @default 0
+             */
+            completion_tokens: number;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Reasoning Tokens
+             * @default 0
+             */
+            reasoning_tokens: number;
+            /**
+             * Prompt Cached Tokens
+             * @default 0
+             */
+            prompt_cached_tokens: number;
+            /** Cost Yuan */
+            cost_yuan?: number | null;
         };
         /** ListSessionsResponse */
         ListSessionsResponse: {
@@ -793,6 +1082,35 @@ export interface components {
              */
             deleted_subagents: number;
         };
+        /** ModelPricingItem */
+        ModelPricingItem: {
+            /** Model Id */
+            model_id: string;
+            /** Input Price Per 1M */
+            input_price_per_1m: number;
+            /** Output Price Per 1M */
+            output_price_per_1m: number;
+            /** Reasoning Price Per 1M */
+            reasoning_price_per_1m?: number | null;
+            /** Cached Input Price Per 1M */
+            cached_input_price_per_1m?: number | null;
+            /**
+             * Is Custom
+             * @default 0
+             */
+            is_custom: number;
+            /** Updated At */
+            updated_at: string;
+        };
+        /** Pagination */
+        Pagination: {
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
         /** RecoverResponse */
         RecoverResponse: {
             /** Session */
@@ -812,6 +1130,7 @@ export interface components {
              */
             runtime_busy: boolean;
             current_message?: components["schemas"]["Message"] | null;
+            /** Pending Request */
             pending_request?: {
                 [key: string]: unknown;
             } | null;
@@ -884,40 +1203,6 @@ export interface components {
             /** Skills */
             skills: components["schemas"]["SkillInfoResponse"][];
         };
-        /** ToolInfoResponse */
-        ToolInfoResponse: {
-            /** Name */
-            name: string;
-            /** Description */
-            description: string;
-        };
-        /** ToolPresetListResponse */
-        ToolPresetListResponse: {
-            /** Presets */
-            presets: components["schemas"]["ToolPresetResponse"][];
-            /** Tools */
-            tools: components["schemas"]["ToolInfoResponse"][];
-        };
-        /** ToolPresetResponse */
-        ToolPresetResponse: {
-            /** Name */
-            name: components["schemas"]["ToolSetPreset"];
-            /** Tools */
-            tools: string[];
-        };
-        /**
-         * ToolSetPreset
-         * @description 可用工具集预设。
-         *
-         *     对标 Rust ToolSet enum:
-         *     - ALL: 全部工具
-         *     - MINIMAL: read_file, write, glob, grep
-         *     - CODE_ONLY: read_file, write, edit, glob, grep, shell
-         *     - REVIEW_ONLY: read_file, glob, grep
-         *     - CUSTOM: 用户指定
-         * @enum {string}
-         */
-        ToolSetPreset: "all" | "minimal" | "code_only" | "review_only" | "custom";
         /**
          * StreamEventKind
          * @description SSE 事件种类。
@@ -975,8 +1260,20 @@ export interface components {
              * @default false
              */
             is_error: boolean;
+            /**
+             * Tool Status
+             * @default
+             */
             tool_status: string;
+            /**
+             * Tool Status Source
+             * @default
+             */
             tool_status_source: string;
+            /**
+             * Tool Status Reason
+             * @default
+             */
             tool_status_reason: string;
             /**
              * Input Tokens
@@ -1026,6 +1323,59 @@ export interface components {
              * @default
              */
             arguments: string;
+        };
+        /** ToolInfoResponse */
+        ToolInfoResponse: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+        };
+        /** ToolPermissionSettings */
+        ToolPermissionSettings: {
+            /** Tools */
+            tools?: {
+                [key: string]: "allow" | "ask" | "deny";
+            };
+        };
+        /** ToolPresetListResponse */
+        ToolPresetListResponse: {
+            /** Presets */
+            presets: components["schemas"]["ToolPresetResponse"][];
+            /** Tools */
+            tools: components["schemas"]["ToolInfoResponse"][];
+        };
+        /** ToolPresetResponse */
+        ToolPresetResponse: {
+            name: components["schemas"]["ToolSetPreset"];
+            /** Tools */
+            tools: string[];
+        };
+        /**
+         * ToolSetPreset
+         * @description 可用工具集预设。
+         *
+         *     对标 Rust ToolSet enum:
+         *     - ALL: 全部工具
+         *     - MINIMAL: read_file, write, glob, grep
+         *     - CODE_ONLY: read_file, write, edit, glob, grep, shell
+         *     - REVIEW_ONLY: read_file, glob, grep
+         *     - CUSTOM: 用户指定
+         * @enum {string}
+         */
+        ToolSetPreset: "all" | "minimal" | "code_only" | "review_only" | "custom";
+        /** UpsertPricingRequest */
+        UpsertPricingRequest: {
+            /** Model Id */
+            model_id: string;
+            /** Input Price */
+            input_price: number;
+            /** Output Price */
+            output_price: number;
+            /** Reasoning Price */
+            reasoning_price?: number | null;
+            /** Cached Input Price */
+            cached_input_price?: number | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -1148,6 +1498,37 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    get_workspace_file_api_workspace_file_get: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -1610,6 +1991,26 @@ export interface operations {
             };
         };
     };
+    list_tool_presets_api_tool_presets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPresetListResponse"];
+                };
+            };
+        };
+    };
     get_session_settings_api_settings_session_defaults_get: {
         parameters: {
             query?: never;
@@ -1650,6 +2051,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionSettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_tool_permissions_api_settings_tool_permissions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPermissionSettings"];
+                };
+            };
+        };
+    };
+    update_tool_permissions_api_settings_tool_permissions_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolPermissionSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPermissionSettings"];
                 };
             };
             /** @description Validation Error */
@@ -1834,6 +2288,8 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 session_id?: string | null;
+                message_id?: string | null;
+                workspace_root?: string | null;
             };
             header?: never;
             path?: never;
@@ -1847,9 +2303,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LLMCallListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1867,6 +2321,7 @@ export interface operations {
         parameters: {
             query?: {
                 session_id?: string | null;
+                workspace_root?: string | null;
             };
             header?: never;
             path?: never;
@@ -1880,9 +2335,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["LLMSummaryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1901,9 +2354,129 @@ export interface operations {
             query?: {
                 limit?: number;
                 session_id?: string | null;
+                workspace_root?: string | null;
             };
             header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMDashboardResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_llm_series_api_metrics_llm_series_get: {
+        parameters: {
+            query?: {
+                span?: string;
+                workspace_root?: string | null;
+                model?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_pricing_api_metrics_llm_pricing_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPricingItem"][];
+                };
+            };
+        };
+    };
+    upsert_pricing_api_metrics_llm_pricing_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertPricingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_pricing_api_metrics_llm_pricing__model_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
             cookie?: never;
         };
         requestBody?: never;

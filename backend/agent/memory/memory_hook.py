@@ -77,6 +77,7 @@ class MemoryHook(BaseHook):
         min_confidence: float = 0.55,
         extract_client=None,
         extract_model: str = "",
+        metrics_store=None,
     ) -> None:
         self._store = store
         self._workspace = workspace
@@ -87,6 +88,7 @@ class MemoryHook(BaseHook):
         self._min_confidence = min_confidence
         self._extract_client = extract_client
         self._extract_model = extract_model
+        self._metrics_store = metrics_store
         self._turn_buffer: dict[str, list[str]] = {}
         self._tasks: set[asyncio.Task] = set()
 
@@ -268,7 +270,7 @@ class MemoryHook(BaseHook):
 
     async def _extract(self, conversation: str) -> list[dict[str, Any]]:
         prompt = _EXTRACT_PROMPT.format(conversation=conversation[:4000])
-        raw = await self._llm_call(prompt, max_tokens=400)
+        raw = await self._llm_call(prompt, max_tokens=400, call_type="memory_summarize")
         if not raw:
             return []
         try:
@@ -292,7 +294,7 @@ class MemoryHook(BaseHook):
             question=question,
             candidates="\n".join(lines),
         )
-        raw = await self._llm_call(prompt, max_tokens=30)
+        raw = await self._llm_call(prompt, max_tokens=30, call_type="memory_rerank")
         if not raw or raw.strip().lower() == "none":
             return []
         indices: list[int] = []
@@ -305,7 +307,9 @@ class MemoryHook(BaseHook):
                 indices.append(idx - 1)
         return [candidates[i] for i in indices]
 
-    async def _llm_call(self, prompt: str, max_tokens: int = 120) -> str:
+    async def _llm_call(
+        self, prompt: str, max_tokens: int = 120, call_type: str = "memory"
+    ) -> str:
         client = self._extract_client
         model = self._extract_model
         if client is None:
@@ -317,6 +321,8 @@ class MemoryHook(BaseHook):
             client = create_side_client()
             model = get_side_model_id()
 
+        t0 = time.time()
+
         def _sync_call():
             resp = client.chat.completions.create(
                 model=model,
@@ -324,10 +330,18 @@ class MemoryHook(BaseHook):
                 max_tokens=max_tokens,
                 temperature=0.0,
             )
-            return resp.choices[0].message.content or ""
+            content = resp.choices[0].message.content or ""
+            usage = None
+            if hasattr(resp, "usage") and resp.usage:
+                usage = (
+                    resp.usage.model_dump()
+                    if hasattr(resp.usage, "model_dump")
+                    else resp.usage
+                )
+            return content, usage
 
         try:
-            return await asyncio.wait_for(
+            content, usage = await asyncio.wait_for(
                 asyncio.to_thread(_sync_call),
                 timeout=self._llm_timeout,
             )
@@ -335,10 +349,36 @@ class MemoryHook(BaseHook):
             logger.warning(
                 "MemoryHook: LLM call timed out after %.1fs", self._llm_timeout
             )
-            return ""
+            content, usage = "", None
         except Exception:
             logger.exception("MemoryHook: LLM call failed")
-            return ""
+            content, usage = "", None
+
+        # Record side-query metrics
+        if self._metrics_store and model:
+            latency_ms = int((time.time() - t0) * 1000)
+            try:
+                from agent.metrics import LLMCallContext, utc_now_iso
+
+                _usage = usage or {}
+                details = _usage.get("completion_tokens_details") or {}
+                prompt_details = _usage.get("prompt_tokens_details") or {}
+                self._metrics_store.record_call(
+                    model=model,
+                    created_at=utc_now_iso(),
+                    latency_ms=latency_ms,
+                    workspace_root=self._workspace,
+                    context=LLMCallContext(call_type=call_type),
+                    usage=_usage,
+                    reasoning_tokens=_int(details.get("reasoning_tokens")),
+                    prompt_cached_tokens=_int(prompt_details.get("cached_tokens")),
+                    prompt_cache_hit=_int(_usage.get("prompt_cache_hit_tokens")),
+                    prompt_cache_miss=_int(_usage.get("prompt_cache_miss_tokens")),
+                )
+            except Exception:
+                logger.exception("MemoryHook: metrics record failed")
+
+        return content
 
 
 def _strip_code_fence(text: str) -> str:

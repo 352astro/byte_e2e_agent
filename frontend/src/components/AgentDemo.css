@@ -563,6 +563,7 @@
 /* ── Assistant card ─────────────────────────── */
 
 .assistant-card {
+    position: relative;
     padding: 4px 0;
 }
 
@@ -761,7 +762,7 @@
 .subagent-card-state--denied,
 .subagent-card-state--timeout,
 .subagent-card-state--error {
-  color: #e53935;
+    color: #e53935;
 }
 
 .subagent-card-state--interrupted {
@@ -1682,4 +1683,25 @@ pre:focus-within .copy-btn,
 .md-content svg[id^="mermaid-"] {
     max-width: 100%;
     height: auto;
+}
+
+/* ── Metrics summary (inside settings-content) ── */
+
+.metrics-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 8px 0;
+}
+
+.metrics-summary-row {
+    display: flex;
+    gap: 16px;
+    font-size: 0.82rem;
+    color: #555;
+}
+
+.metrics-summary-row--main {
+    font-weight: 650;
+    color: #333;
 }

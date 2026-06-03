@@ -103,9 +103,7 @@ export function reduceMessages(
                       m.tool_status_source ||
                       "tool",
                     tool_status_reason:
-                      event.tool_status_reason ||
-                      m.tool_status_reason ||
-                      "",
+                      event.tool_status_reason || m.tool_status_reason || "",
                   }
                 : {}),
             }
@@ -116,7 +114,11 @@ export function reduceMessages(
     case "message_finish": {
       return messages.map((m) => {
         if (m.id !== event.message_id) return m;
-        const cleaned = { ...m, status: "complete" as const };
+        const cleaned = {
+          ...m,
+          status: "complete" as const,
+          _usage: event.usage || (m as Record<string, unknown>)._usage,
+        };
         if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
           delete (cleaned as Record<string, unknown>)._toolCallsRaw;
         }

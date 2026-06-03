@@ -227,6 +227,7 @@ class StreamEvent(BaseModel):
     tool_status_reason: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
+    usage: dict = Field(default_factory=dict)
     reason: str = ""  # interrupted 时的原因
 
     # ═══════════════════════════════════════════════════════
@@ -300,11 +301,16 @@ class StreamEvent(BaseModel):
         )
 
     @classmethod
-    def message_finish(cls, message_id: str, session_id: str = "") -> "StreamEvent":
+    def message_finish(
+        cls, message_id: str, session_id: str = "", usage: dict | None = None
+    ) -> "StreamEvent":
         return cls(
             kind=StreamEventKind.MESSAGE_FINISH,
             session_id=session_id,
             message_id=message_id,
+            usage=usage or {},
+            input_tokens=(usage or {}).get("prompt_tokens", 0),
+            output_tokens=(usage or {}).get("completion_tokens", 0),
         )
 
     @classmethod

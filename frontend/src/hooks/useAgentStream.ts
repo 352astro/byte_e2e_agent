@@ -26,7 +26,10 @@ export interface UseAgentStreamReturn {
   activeMessage: Message | null;
 
   // ── 命令（异步）──
-  send: (question: string, sessionConfig?: CreateSessionRequest) => Promise<void>;
+  send: (
+    question: string,
+    sessionConfig?: CreateSessionRequest,
+  ) => Promise<void>;
   interrupt: () => Promise<void>;
   reloadMessages: () => Promise<void>;
   respondGuard: (requestId: string, allow: boolean) => Promise<void>;
@@ -168,14 +171,17 @@ export default function useAgentStream({
     return next;
   }, []);
 
-  const appendCompleted = useCallback((msg: Message) => {
-    setCompleted((prev) => {
-      const nextMsg = applyPendingToolMeta(msg);
-      if (prev.some((m) => m.id === nextMsg.id)) return prev;
-      completedIdsRef.current.add(nextMsg.id);
-      return [...prev, nextMsg];
-    });
-  }, [applyPendingToolMeta]);
+  const appendCompleted = useCallback(
+    (msg: Message) => {
+      setCompleted((prev) => {
+        const nextMsg = applyPendingToolMeta(msg);
+        if (prev.some((m) => m.id === nextMsg.id)) return prev;
+        completedIdsRef.current.add(nextMsg.id);
+        return [...prev, nextMsg];
+      });
+    },
+    [applyPendingToolMeta],
+  );
 
   useEffect(() => {
     completedIdsRef.current = new Set(completed.map((m) => m.id));
@@ -329,7 +335,9 @@ export default function useAgentStream({
             pendingToolMetaRef.current.set(ev.message_id, pending);
             setCompleted((prev) =>
               prev.map((msg) =>
-                msg.id === ev.message_id ? applyToolMeta(msg, full_content) : msg,
+                msg.id === ev.message_id
+                  ? applyToolMeta(msg, full_content)
+                  : msg,
               ),
             );
             setActive((prev) =>
@@ -376,7 +384,11 @@ export default function useAgentStream({
           if (genRef.current !== gen) return;
           setActive((prev) => {
             if (!prev || prev.id !== ev.message_id) return prev;
-            const done = { ...prev, status: "complete" as const };
+            const done = {
+              ...prev,
+              status: "complete" as const,
+              _usage: ev.usage || (prev as Record<string, unknown>)?._usage,
+            };
             appendCompleted(done);
             lastIdRef.current = ev.message_id;
             return null;
@@ -522,8 +534,8 @@ export default function useAgentStream({
       const gen = bumpGen();
 
       try {
-      setRunError(null);
-      setPendingGuard(null);
+        setRunError(null);
+        setPendingGuard(null);
         const prefill = prefillRef.current.trim();
         if (prefill) prefillRef.current = "";
         const q = (prefill ? prefill + "\n" + question : question).trim();
@@ -576,9 +588,7 @@ export default function useAgentStream({
               setRunError(BUSY_MESSAGE);
               return;
             }
-            throw new Error(
-              `Server returned ${streamRes.status}`,
-            );
+            throw new Error(`Server returned ${streamRes.status}`);
           }
           await readSSEStream(streamRes.body!.getReader(), gen);
         } catch (err) {

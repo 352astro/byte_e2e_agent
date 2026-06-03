@@ -10,6 +10,7 @@ interface SessionSidebarProps {
   onNew: () => void;
   onDelete?: (sid: string) => void;
   onOpenSettings: () => void;
+  onOpenMetrics: () => void;
 }
 
 function workspaceLabel(path: string): string {
@@ -26,6 +27,7 @@ export default function SessionSidebar({
   onNew,
   onDelete,
   onOpenSettings,
+  onOpenMetrics,
 }: SessionSidebarProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -289,6 +291,15 @@ export default function SessionSidebar({
         ))}
       </div>
       <div className="sidebar-footer">
+        <button
+          className="sidebar-settings-btn"
+          type="button"
+          onClick={onOpenMetrics}
+          title="Metrics"
+        >
+          <Icon name="chart" size={17} />
+          <span>Metrics</span>
+        </button>
         <button
           className="sidebar-settings-btn"
           type="button"

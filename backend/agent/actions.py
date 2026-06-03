@@ -213,8 +213,10 @@ async def model_call(
             finish_reason = _finish
 
         if _usage and not hasattr(msg, "_usage"):
-            # openai returns CompletionUsage (Pydantic object), normalize to dict
-            if hasattr(_usage, "prompt_tokens"):
+            # 完整透传 usage（含 reasoning_tokens / cache 等扩展字段）
+            if hasattr(_usage, "model_dump"):
+                object.__setattr__(msg, "_usage", _usage.model_dump())
+            elif hasattr(_usage, "prompt_tokens"):
                 object.__setattr__(
                     msg,
                     "_usage",

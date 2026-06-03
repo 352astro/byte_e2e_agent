@@ -4,6 +4,7 @@ import Markdown from "./Markdown";
 import Icon from "./Icon";
 import CollapsibleCard from "./CollapsibleCard";
 import ToolResult from "./ToolResult";
+import TokenBubble from "./TokenBubble";
 import { renderToolCard } from "./ToolCards";
 import { useFocusedId } from "../hooks/FocusContext";
 import { extractArg, extractToolMeta } from "../utils";
@@ -90,103 +91,116 @@ const MessageCard = React.memo(function MessageCard({
   const hasContent = (m.content || "").length > 0;
 
   return (
-    <div className="transcript-card assistant-card">
-      {/* Reasoning block */}
-      {(hasThinking || isStreaming) && (
-        <CollapsibleCard
-          id={`${m.id}/thinking`}
-          dataFid={focusedId ? `${m.id}/thinking` : undefined}
-          collapsed={!isStreaming && !expandedThinking.has(`${m.id}/thinking`)}
-          onToggle={toggleThinking}
-          headerClickable={!isStreaming}
-          cardClassName={`thinking-block${expandedThinking.has(`${m.id}/thinking`) ? " thinking-block--open" : ""}${!isStreaming ? " thinking-block--done" : ""}`}
-          headerClassName="thinking-header"
-          title={
-            <>
-              <Icon name="bulb" size={14} className="thinking-bulb" />
-              <span className="thinking-label">thinking</span>
-            </>
-          }
-        >
-          {hasThinking && (
-            <div className="thinking-body">
-              <Markdown text={m.reasoning} />
-            </div>
-          )}
-          {!hasThinking && isStreaming && (
-            <div className="thinking-body">
-              <span className="message-empty-spinner" aria-label="Thinking" />
-            </div>
-          )}
-        </CollapsibleCard>
-      )}
+    <div className="message-row">
+      <div className="transcript-card assistant-card">
+        {/* Reasoning block */}
+        {(hasThinking || isStreaming) && (
+          <CollapsibleCard
+            id={`${m.id}/thinking`}
+            dataFid={focusedId ? `${m.id}/thinking` : undefined}
+            collapsed={
+              !isStreaming && !expandedThinking.has(`${m.id}/thinking`)
+            }
+            onToggle={toggleThinking}
+            headerClickable={!isStreaming}
+            cardClassName={`thinking-block${expandedThinking.has(`${m.id}/thinking`) ? " thinking-block--open" : ""}${!isStreaming ? " thinking-block--done" : ""}`}
+            headerClassName="thinking-header"
+            title={
+              <>
+                <Icon name="bulb" size={14} className="thinking-bulb" />
+                <span className="thinking-label">thinking</span>
+              </>
+            }
+          >
+            {hasThinking && (
+              <div className="thinking-body">
+                <Markdown text={m.reasoning} />
+              </div>
+            )}
+            {!hasThinking && isStreaming && (
+              <div className="thinking-body">
+                <span className="message-empty-spinner" aria-label="Thinking" />
+              </div>
+            )}
+          </CollapsibleCard>
+        )}
 
-      {/* Content block */}
-      {hasContent && (
-        <div
-          className={`transcript-body no-focus-glow${focusedId === `${m.id}/content` ? " card-latest" : ""}`}
-          data-fid={`${m.id}/content`}
-        >
-          <Markdown text={m.content} />
-        </div>
-      )}
-
-      {/* Streaming indicator */}
-      {isStreaming && !hasThinking && !hasContent && (
-        <div className="transcript-body streaming-indicator">
-          <span className="message-empty-spinner" aria-label="Thinking" />
-        </div>
-      )}
-
-      {/* Tool calls */}
-      {!hideToolCards &&
-        toolCalls.length > 0 &&
-        toolCalls.map((tc, i) => {
-          const tcId = `${m.id}/tc/${i}`;
-          const fn = tc.function || { name: "", arguments: "" };
-          const toolName =
-            fn.name ||
-            ((tc as Record<string, unknown>).tool_name as string) ||
-            "unknown";
-          const args = fn.arguments || "";
-          const { meta } = extractToolMeta(args, toolName);
-          const cwd = meta.cwd as string | undefined;
-          const filePath =
-            (meta.path as string | undefined) || extractArg(args, "path");
-          const subtitle =
-            toolName === "Shell" && cwd && cwd !== "." ? (
-              <span className="shell-call-cwd">{cwd}</span>
-            ) : (toolName === "Read" || toolName === "Write") && filePath ? (
-              <span className="file-call-path">{filePath}</span>
-            ) : undefined;
-          const collapsed = collapsedCards.has(tcId);
-          return (
-            <span key={tcId}>
-              {renderToolCard({
-                id: tcId,
-                toolName,
-                args,
-                active: isStreaming && i === toolCalls.length - 1,
-                collapsed,
-                onToggle: toggleCard,
-                subtitle,
-              })}
-            </span>
-          );
-        })}
-      {/* Fallback: show raw tool call stream if structured is empty */}
-      {!hideToolCards &&
-        toolCalls.length === 0 &&
-        (m as Record<string, unknown>)._toolCallsRaw && (
-          <div className="tool-card">
-            <div className="tool-card-header">
-              <Icon name="tool" size={13} className="tool-icon" />
-              <span className="tool-label">
-                {(m as Record<string, unknown>)._toolCallsRaw as string}
-              </span>
-            </div>
+        {/* Content block */}
+        {hasContent && (
+          <div
+            className={`transcript-body no-focus-glow${focusedId === `${m.id}/content` ? " card-latest" : ""}`}
+            data-fid={`${m.id}/content`}
+          >
+            <Markdown text={m.content} />
           </div>
         )}
+
+        {/* Streaming indicator */}
+        {isStreaming && !hasThinking && !hasContent && (
+          <div className="transcript-body streaming-indicator">
+            <span className="message-empty-spinner" aria-label="Thinking" />
+          </div>
+        )}
+
+        {/* Tool calls */}
+        {!hideToolCards &&
+          toolCalls.length > 0 &&
+          toolCalls.map((tc, i) => {
+            const tcId = `${m.id}/tc/${i}`;
+            const fn = tc.function || { name: "", arguments: "" };
+            const toolName =
+              fn.name ||
+              ((tc as Record<string, unknown>).tool_name as string) ||
+              "unknown";
+            const args = fn.arguments || "";
+            const { meta } = extractToolMeta(args, toolName);
+            const cwd = meta.cwd as string | undefined;
+            const filePath =
+              (meta.path as string | undefined) || extractArg(args, "path");
+            const subtitle =
+              toolName === "Shell" && cwd && cwd !== "." ? (
+                <span className="shell-call-cwd">{cwd}</span>
+              ) : (toolName === "Read" || toolName === "Write") && filePath ? (
+                <span className="file-call-path">{filePath}</span>
+              ) : undefined;
+            const collapsed = collapsedCards.has(tcId);
+            return (
+              <span key={tcId}>
+                {renderToolCard({
+                  id: tcId,
+                  toolName,
+                  args,
+                  active: isStreaming && i === toolCalls.length - 1,
+                  collapsed,
+                  onToggle: toggleCard,
+                  subtitle,
+                })}
+              </span>
+            );
+          })}
+        {/* Fallback: show raw tool call stream if structured is empty */}
+        {!hideToolCards &&
+          toolCalls.length === 0 &&
+          (m as Record<string, unknown>)._toolCallsRaw && (
+            <div className="tool-card">
+              <div className="tool-card-header">
+                <Icon name="tool" size={13} className="tool-icon" />
+                <span className="tool-label">
+                  {(m as Record<string, unknown>)._toolCallsRaw as string}
+                </span>
+              </div>
+            </div>
+          )}
+        {/* Token usage bubble */}
+        <TokenBubble
+          usage={
+            (m as Record<string, unknown>)._usage as
+              | Record<string, unknown>
+              | undefined
+          }
+          messageId={m.id}
+        />
+      </div>
     </div>
   );
 });

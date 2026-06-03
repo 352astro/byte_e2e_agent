@@ -15,7 +15,8 @@ export type ToolCallFunction = components["schemas"]["ToolCallFunction"];
 export type MessageRole = components["schemas"]["MessageRole"];
 export type MessageStatus = components["schemas"]["MessageStatus"];
 export type StreamEventKind = components["schemas"]["StreamEventKind"];
-export type CreateSessionRequest = components["schemas"]["CreateSessionRequest"];
+export type CreateSessionRequest =
+  components["schemas"]["CreateSessionRequest"];
 export type SessionSettings = components["schemas"]["SessionSettings"];
 export type SessionRule = components["schemas"]["SessionRule"];
 export type SkillInfoResponse = components["schemas"]["SkillInfoResponse"];
@@ -46,6 +47,7 @@ export interface StreamEvent {
   tool_status_reason: string;
   input_tokens: number;
   output_tokens: number;
+  usage?: Record<string, unknown>;
   reason: string;
 }
 
