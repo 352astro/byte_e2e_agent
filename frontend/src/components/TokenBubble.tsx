@@ -29,25 +29,15 @@ function fmt(n: number | undefined): string {
   return String(n);
 }
 
-function hasUsageFields(v: Record<string, unknown> | undefined): boolean {
-  if (!v) return false;
-  return (
-    v.prompt_tokens != null ||
-    v.completion_tokens != null ||
-    v.total_tokens != null ||
-    v.reasoning_tokens != null ||
-    v.prompt_cached_tokens != null ||
-    v.cost_yuan != null
-  );
-}
-
 const TokenBubble: React.FC<TokenBubbleProps> = ({ usage, messageId }) => {
   const [fetched, setFetched] = useState<CallItem | null>(null);
   const fetchedForRef = React.useRef<string>("");
-  const inlineUsage = hasUsageFields(usage) ? usage : undefined;
+
+  // compact total from SSE (instant)
+  const sseTotal = num(usage?.total_tokens);
 
   useEffect(() => {
-    if (inlineUsage || !messageId || fetchedForRef.current === messageId) return;
+    if (!messageId || fetchedForRef.current === messageId) return;
     fetchedForRef.current = messageId;
     setFetched(null);
     (async () => {
@@ -62,28 +52,20 @@ const TokenBubble: React.FC<TokenBubbleProps> = ({ usage, messageId }) => {
         // silent
       }
     })();
-  }, [inlineUsage, messageId]);
+  }, [messageId]);
 
-  const resolved = inlineUsage ?? fetched;
-  if (!resolved) return null;
+  // compact label: SSE total > API total
+  const compactTotal = sseTotal ?? num(fetched?.total_tokens);
+  if (compactTotal === undefined && !fetched) return null;
 
-  const prompt = num(resolved.prompt_tokens);
-  const completion = num(resolved.completion_tokens);
-  const total = num(resolved.total_tokens) ?? (prompt ?? 0) + (completion ?? 0);
-  const reasoning = num(resolved.reasoning_tokens);
-  const cached = num(resolved.prompt_cached_tokens);
-  const cacheHit = num(resolved.prompt_cache_hit);
-  const cacheMiss = num(resolved.prompt_cache_miss);
-  const cost =
-    resolved.cost_yuan != null ? Number(resolved.cost_yuan) : undefined;
-
-  if (total === 0 && prompt === undefined && completion === undefined)
-    return null;
+  // hover detail always from API
+  const detail = fetched;
+  if (!detail && compactTotal === undefined) return null;
 
   return (
     <div className="token-bubble">
       {/* compact label */}
-      <span className="token-bubble-label">token: {fmt(total)}</span>
+      <span className="token-bubble-label">token: {fmt(compactTotal)}</span>
 
       {/* expanded detail on hover */}
       <div className="token-bubble-detail">
@@ -91,40 +73,40 @@ const TokenBubble: React.FC<TokenBubbleProps> = ({ usage, messageId }) => {
           <tbody>
             <tr>
               <td>prompt</td>
-              <td>{fmt(prompt)}</td>
+              <td>{fmt(num(detail?.prompt_tokens))}</td>
             </tr>
             <tr>
               <td>completion</td>
-              <td>{fmt(completion)}</td>
+              <td>{fmt(num(detail?.completion_tokens))}</td>
             </tr>
-            {reasoning !== undefined && (
+            {detail?.reasoning_tokens != null && (
               <tr>
                 <td>reasoning</td>
-                <td>{fmt(reasoning)}</td>
+                <td>{fmt(num(detail.reasoning_tokens))}</td>
               </tr>
             )}
-            {cached !== undefined && (
+            {detail?.prompt_cached_tokens != null && (
               <tr>
                 <td>cached</td>
-                <td>{fmt(cached)}</td>
+                <td>{fmt(num(detail.prompt_cached_tokens))}</td>
               </tr>
             )}
-            {cacheHit !== undefined && (
+            {detail?.prompt_cache_hit != null && (
               <tr>
                 <td>cache hit</td>
-                <td>{fmt(cacheHit)}</td>
+                <td>{fmt(num(detail.prompt_cache_hit))}</td>
               </tr>
             )}
-            {cacheMiss !== undefined && (
+            {detail?.prompt_cache_miss != null && (
               <tr>
                 <td>cache miss</td>
-                <td>{fmt(cacheMiss)}</td>
+                <td>{fmt(num(detail.prompt_cache_miss))}</td>
               </tr>
             )}
-            {cost !== undefined && (
+            {detail?.cost_yuan != null && (
               <tr className="token-bubble-cost-row">
                 <td>cost</td>
-                <td>¥{cost.toFixed(4)}</td>
+                <td>¥{detail.cost_yuan.toFixed(4)}</td>
               </tr>
             )}
           </tbody>
