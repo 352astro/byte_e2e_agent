@@ -4,7 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
 from app.dependencies import get_workspace_service
-from app.schemas.workspace import SetWorkspaceRequest
+from app.schemas.workspace import (
+    SetWorkspaceRequest,
+    WorkspaceDirectoryResponse,
+    WorkspacePwdResponse,
+)
 from app.services.errors import AgentBusy
 from app.services.workspace_service import WorkspaceService
 
@@ -16,6 +20,27 @@ def get_workspace(
     workspace_service: WorkspaceService = Depends(get_workspace_service),
 ) -> dict:
     return {"workspace": workspace_service.get_workspace()}
+
+
+@router.get("/pwd", response_model=WorkspacePwdResponse)
+def get_workspace_pwd(
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+) -> dict:
+    return workspace_service.get_picker_context()
+
+
+@router.get("/ls", response_model=WorkspaceDirectoryResponse)
+def list_workspace_directory(
+    path: str | None = None,
+    show_hidden: bool = False,
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+) -> dict:
+    try:
+        return workspace_service.list_directory(path, show_hidden=show_hidden)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/file")

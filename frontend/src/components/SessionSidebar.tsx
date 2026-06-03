@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Icon from "./Icon";
+import WorkspacePickerModal from "./WorkspacePickerModal";
 import type { SessionInfo } from "../types";
 
 interface SessionSidebarProps {
@@ -32,6 +33,7 @@ export default function SessionSidebar({
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selecting, setSelecting] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [activatingId, setActivatingId] = useState<string | null>(null);
   const workspaceLoadedRef = useRef(false);
   const [menuSid, setMenuSid] = useState<string | null>(null);
@@ -110,24 +112,9 @@ export default function SessionSidebar({
     return () => document.removeEventListener("mousedown", close);
   }, [menuSid]);
 
-  const chooseWorkspace = async () => {
+  const applyWorkspace = async (path: string) => {
     setSelecting(true);
     try {
-      let selectedPath: string | null = null;
-      try {
-        const handle = await window.showDirectoryPicker({
-          mode: "read",
-          startIn: "documents",
-        });
-        const parent = workspace.split("/").slice(0, -1).join("/") || "/";
-        selectedPath = `${parent}/${handle.name}`;
-      } catch {
-        // User cancelled — fall back to manual input
-      }
-      const path = window.prompt(
-        "Workspace directory:",
-        selectedPath || workspace || "",
-      );
       if (!path || !path.trim()) {
         setError(null);
         return;
@@ -147,6 +134,7 @@ export default function SessionSidebar({
       const data: { workspace: string } = await res.json();
       onWorkspaceChange(data.workspace);
       await fetchSessions();
+      setPickerOpen(false);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -216,7 +204,7 @@ export default function SessionSidebar({
         <button
           className="sidebar-workspace-btn"
           type="button"
-          onClick={chooseWorkspace}
+          onClick={() => setPickerOpen(true)}
           disabled={selecting}
         >
           {selecting ? "Selecting..." : "Choose Folder"}
@@ -310,6 +298,14 @@ export default function SessionSidebar({
           <span>Settings</span>
         </button>
       </div>
+      {pickerOpen && (
+        <WorkspacePickerModal
+          initialPath={workspace}
+          busy={selecting}
+          onClose={() => setPickerOpen(false)}
+          onSelect={applyWorkspace}
+        />
+      )}
     </div>
   );
 }

@@ -16,6 +16,9 @@ export type IconName =
   | "error"
   | "write"
   | "book-open"
+  | "folder"
+  | "file"
+  | "diamond"
   | "check"
   | "x"
   | "flag"
@@ -81,6 +84,15 @@ const paths: Record<IconName, SVGProps<SVGPathElement>> = {
   },
   "book-open": {
     d: "M4 5.5A3.5 3.5 0 0 1 7.5 4H11v16H7.5A3.5 3.5 0 0 0 4 21.5V5.5zM20 5.5A3.5 3.5 0 0 0 16.5 4H13v16h3.5A3.5 3.5 0 0 1 20 21.5V5.5z",
+  },
+  folder: {
+    d: "M3 6.5A2.5 2.5 0 0 1 5.5 4H10l2 2.5h6.5A2.5 2.5 0 0 1 21 9v8.5A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5v-11zM3 9h18",
+  },
+  file: {
+    d: "M7 3h7l5 5v13H7V3zM14 3v5h5M10 13h6M10 17h6",
+  },
+  diamond: {
+    d: "M12 3l9 9-9 9-9-9 9-9z",
   },
   chart: {
     d: "M3 3v18h18M7 16V8M11 12V6M15 16v-4M19 12v-2",
