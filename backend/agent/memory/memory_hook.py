@@ -123,6 +123,12 @@ class MemoryHook(BaseHook):
             f"query={user_question[:80]!r} candidates={len(candidates)}",
             flush=True,
         )
+        for i, rec in enumerate(candidates, 1):
+            print(
+                f"[MemoryHook]   candidate [{i}] "
+                f"[{rec.kind}/{rec.scope}] {_memory_feature(rec)}",
+                flush=True,
+            )
         if not candidates:
             return []
 
@@ -163,6 +169,12 @@ class MemoryHook(BaseHook):
             f"kinds={sorted(grouped.keys())}",
             flush=True,
         )
+        for kind in sorted(grouped.keys()):
+            for item in grouped[kind]:
+                print(
+                    f"[MemoryHook]   selected [{kind}] {item[:120]}",
+                    flush=True,
+                )
         return [{"role": "system", "content": "\n".join(lines)}]
 
     async def on_message_finish(
@@ -294,7 +306,11 @@ class MemoryHook(BaseHook):
             question=question,
             candidates="\n".join(lines),
         )
-        raw = await self._llm_call(prompt, max_tokens=30, call_type="memory_rerank")
+        raw = await self._llm_call(prompt, max_tokens=80, call_type="memory_rerank")
+        print(
+            f"[MemoryHook] rerank response: {raw.strip()!r}",
+            flush=True,
+        )
         if not raw or raw.strip().lower() == "none":
             return []
         indices: list[int] = []
@@ -329,6 +345,7 @@ class MemoryHook(BaseHook):
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
                 temperature=0.0,
+                extra_body={"thinking": {"type": "disabled"}},
             )
             content = resp.choices[0].message.content or ""
             usage = None
@@ -358,7 +375,7 @@ class MemoryHook(BaseHook):
         if self._metrics_store and model:
             latency_ms = int((time.time() - t0) * 1000)
             try:
-                from agent.metrics import LLMCallContext, utc_now_iso
+                from agent.metrics import LLMCallContext, _int, utc_now_iso
 
                 _usage = usage or {}
                 details = _usage.get("completion_tokens_details") or {}

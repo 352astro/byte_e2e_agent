@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from pathlib import Path
 from typing import Any
 
 from agent.tools import tool_registry
@@ -58,8 +59,14 @@ class SettingsService:
         return cleaned.model_dump()
 
 
+def _config_path(filename: str) -> Path:
+    from app.core.config import PROJECT_ROOT
+
+    return PROJECT_ROOT / ".agent" / filename
+
+
 def _load_settings(ctx: WorkspaceContext) -> SessionSettings:
-    path = ctx.core_workspace.agent_dir() / SESSION_DEFAULTS_FILE
+    path = _config_path(SESSION_DEFAULTS_FILE)
     if not path.is_file():
         return SessionSettings()
     try:
@@ -72,7 +79,7 @@ def _load_settings(ctx: WorkspaceContext) -> SessionSettings:
 
 
 def _write_settings(ctx: WorkspaceContext, settings: SessionSettings) -> None:
-    path = ctx.core_workspace.agent_dir() / SESSION_DEFAULTS_FILE
+    path = _config_path(SESSION_DEFAULTS_FILE)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(settings.model_dump(), indent=2, ensure_ascii=False) + "\n",
@@ -106,7 +113,7 @@ def _clean_settings(settings: SessionSettings) -> SessionSettings:
 
 
 def _load_tool_permissions(ctx: WorkspaceContext) -> ToolPermissionSettings:
-    path = ctx.core_workspace.agent_dir() / TOOL_PERMISSIONS_FILE
+    path = _config_path(TOOL_PERMISSIONS_FILE)
     if not path.is_file():
         return ToolPermissionSettings()
     try:
@@ -121,7 +128,7 @@ def _load_tool_permissions(ctx: WorkspaceContext) -> ToolPermissionSettings:
 def _write_tool_permissions(
     ctx: WorkspaceContext, settings: ToolPermissionSettings
 ) -> None:
-    path = ctx.core_workspace.agent_dir() / TOOL_PERMISSIONS_FILE
+    path = _config_path(TOOL_PERMISSIONS_FILE)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(settings.model_dump(), indent=2, ensure_ascii=False) + "\n",

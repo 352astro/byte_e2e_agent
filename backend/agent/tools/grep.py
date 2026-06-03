@@ -29,6 +29,17 @@ def _read_lines(path: Path) -> list[str] | None:
         return None
 
 
+def _truncate(text: str, max_bytes: int) -> str:
+    raw = text.encode("utf-8")
+    if len(raw) <= max_bytes:
+        return text
+    truncated = raw[:max_bytes].decode("utf-8", errors="replace")
+    return (
+        f"{truncated}\n"
+        f"[... truncated at {max_bytes} bytes, {len(raw) - max_bytes} bytes omitted]"
+    )
+
+
 class GrepInput(BaseModel):
     """Grep 工具输入参数。"""
 
@@ -45,6 +56,12 @@ class GrepInput(BaseModel):
         le=1000,
         description="Maximum number of matching lines to return.",
     )
+    max_bytes: int = Field(
+        default=50_000,
+        ge=1000,
+        le=500_000,
+        description="Maximum UTF-8 bytes to return before truncating.",
+    )
     regex: str = Field(
         ..., description="Regex pattern to search for (Python re syntax)."
     )
@@ -54,6 +71,7 @@ async def grep_handler(
     regex: str,
     include_pattern: str = "**/*",
     max_results: int = 200,
+    max_bytes: int = 50_000,
     *,
     ws,
 ) -> str:
@@ -96,10 +114,9 @@ async def grep_handler(
     if match_count == 0:
         return f"No matches for '{regex}' (scanned {files_scanned} files)."
 
-    results.append(
-        f"\n{match_count} match(es) for '{regex}' in {files_scanned} file(s)."
-    )
-    return "\n".join(results)
+    footer = f"\n{match_count} match(es) for '{regex}' in {files_scanned} file(s)."
+    body = "\n".join(results)
+    return _truncate(body, max_bytes) + footer
 
 
 grep_tool = StructuredTool.from_function(

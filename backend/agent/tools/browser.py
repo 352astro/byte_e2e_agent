@@ -93,6 +93,17 @@ async def _capture_state(page, *, with_html: bool = True) -> dict:
     return result
 
 
+def _truncate(text: str, max_bytes: int) -> str:
+    raw = text.encode("utf-8")
+    if len(raw) <= max_bytes:
+        return text
+    truncated = raw[:max_bytes].decode("utf-8", errors="replace")
+    return (
+        f"{truncated}\n"
+        f"[... truncated at {max_bytes} bytes, {len(raw) - max_bytes} bytes omitted]"
+    )
+
+
 # ═══════════════════════════════════════════════════
 # BrowserOpen
 # ═══════════════════════════════════════════════════
@@ -101,10 +112,18 @@ async def _capture_state(page, *, with_html: bool = True) -> dict:
 class BrowserOpenInput(BaseModel):
     """BrowserOpen 工具输入参数。"""
 
+    max_bytes: int = Field(
+        default=50_000,
+        ge=1000,
+        le=500_000,
+        description="Maximum UTF-8 bytes to return before truncating.",
+    )
     url: str = Field(..., description="URL to open (e.g. http://localhost:5173).")
 
 
-async def browser_open_handler(url: str, *, ws=None, interrupt_event=None) -> str:
+async def browser_open_handler(
+    url: str, max_bytes: int = 50_000, *, ws=None, interrupt_event=None
+) -> str:
     """Open a URL in the headless browser and return the page HTML + console logs."""
     try:
         page = await _ensure_browser()
@@ -125,7 +144,7 @@ async def browser_open_handler(url: str, *, ws=None, interrupt_event=None) -> st
     ]
     lines.extend(state["console"] if state["console"] else ["(empty)"])
     lines.extend(["", "── HTML ──", state["html"]])
-    return "\n".join(lines)
+    return _truncate("\n".join(lines), max_bytes)
 
 
 browser_open_tool = StructuredTool.from_function(
@@ -144,6 +163,12 @@ browser_open_tool = StructuredTool.from_function(
 class BrowserActInput(BaseModel):
     """BrowserAct 工具输入参数。"""
 
+    max_bytes: int = Field(
+        default=50_000,
+        ge=1000,
+        le=500_000,
+        description="Maximum UTF-8 bytes to return before truncating.",
+    )
     action: Literal["click", "type", "key"] = Field(
         ...,
         description="Action: 'click' to click, 'type' to fill text, 'key' to press a keyboard key.",
@@ -156,7 +181,13 @@ class BrowserActInput(BaseModel):
 
 
 async def browser_act_handler(
-    selector: str, action: str, value: str = "", *, ws=None, interrupt_event=None
+    selector: str,
+    action: str,
+    value: str = "",
+    max_bytes: int = 50_000,
+    *,
+    ws=None,
+    interrupt_event=None,
 ) -> str:
     """Click, type into, or press a key on an element in the browser page."""
     if interrupt_event and interrupt_event.is_set():
@@ -189,7 +220,7 @@ async def browser_act_handler(
     ]
     lines.extend(state["console"] if state["console"] else ["(empty)"])
     lines.extend(["", "── HTML ──", state["html"]])
-    return "\n".join(lines)
+    return _truncate("\n".join(lines), max_bytes)
 
 
 browser_act_tool = StructuredTool.from_function(

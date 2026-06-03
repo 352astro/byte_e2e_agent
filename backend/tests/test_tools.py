@@ -8,8 +8,8 @@ Tests cover:
 
 from __future__ import annotations
 
-import json
 import asyncio
+import json
 
 import pytest
 
@@ -284,7 +284,7 @@ class TestToolHandlers:
         tool = tool_registry.get("Shell")
         result = await tool.coroutine(
             command="printf 1234567890",
-            max_output_bytes=5,
+            max_bytes=5,
             ws=ws,
         )
         assert result.startswith("12345")

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from shared.hooks import BaseHook, GuardCheck, GuardDecision
 
@@ -11,10 +10,12 @@ TOOL_PERMISSIONS_FILE = "tool_permissions.json"
 
 
 class ToolPermissionHook(BaseHook):
-    """Read workspace-level tool permissions before tool execution."""
+    """Read global tool permissions from PROJECT_ROOT/.agent/."""
 
     def __init__(self, workspace: str) -> None:
-        self._workspace = Path(workspace)
+        from app.core.config import PROJECT_ROOT
+
+        self._permissions_path = PROJECT_ROOT / ".agent" / TOOL_PERMISSIONS_FILE
 
     async def on_guard_check(
         self,
@@ -32,7 +33,7 @@ class ToolPermissionHook(BaseHook):
         return GuardDecision.ALLOW
 
     def _load(self) -> dict[str, str]:
-        path = self._workspace / ".byte_agent" / TOOL_PERMISSIONS_FILE
+        path = self._permissions_path
         if not path.is_file():
             return {}
         try:

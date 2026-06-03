@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 class ReadInput(BaseModel):
     """Read 工具输入参数。"""
 
-    path: str = Field(..., description="File path to read (relative to workspace).")
     start_line: int = Field(
         default=1, ge=1, description="First line to read (1-based)."
     )
@@ -18,9 +17,34 @@ class ReadInput(BaseModel):
         ge=0,
         description="Last line to read (1-based, inclusive). 0 = read to end of file.",
     )
+    max_bytes: int = Field(
+        default=50_000,
+        ge=1000,
+        le=500_000,
+        description="Maximum UTF-8 bytes to return before truncating.",
+    )
+    path: str = Field(..., description="File path to read (relative to workspace).")
 
 
-async def read_handler(path: str, start_line: int = 1, end_line: int = 0, *, ws) -> str:
+def _truncate(text: str, max_bytes: int) -> str:
+    raw = text.encode("utf-8")
+    if len(raw) <= max_bytes:
+        return text
+    truncated = raw[:max_bytes].decode("utf-8", errors="replace")
+    return (
+        f"{truncated}\n"
+        f"[... truncated at {max_bytes} bytes, {len(raw) - max_bytes} bytes omitted]"
+    )
+
+
+async def read_handler(
+    path: str,
+    start_line: int = 1,
+    end_line: int = 0,
+    max_bytes: int = 50_000,
+    *,
+    ws,
+) -> str:
     """Read a file (or a line range) from the workspace."""
     full = await ws.read_file(path)
     if full.startswith("Error:"):
@@ -43,7 +67,9 @@ async def read_handler(path: str, start_line: int = 1, end_line: int = 0, *, ws)
 
     if start > 0 or end < total:
         result = f"[lines {start + 1}-{end} of {total}]\n" + result
-    return result if result else "(empty)"
+
+    result = result if result else "(empty)"
+    return _truncate(result, max_bytes)
 
 
 read_tool = StructuredTool.from_function(

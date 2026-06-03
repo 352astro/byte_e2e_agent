@@ -16,7 +16,7 @@ load_dotenv()
 AGENT_DIR = ".byte_agent"
 TMP_DIR = AGENT_DIR
 
-DEFAULT_LLM_METRICS_DB_PATH = f"{AGENT_DIR}/metrics.db"
+DEFAULT_LLM_METRICS_DB_PATH = ".agent/metrics.db"
 
 
 def resolve_agent_workspace(path: str) -> str:

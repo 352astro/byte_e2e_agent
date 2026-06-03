@@ -51,7 +51,7 @@ class ShellInput(BaseModel):
         le=120000,
         description="Timeout in milliseconds.",
     )
-    max_output_bytes: int = Field(
+    max_bytes: int = Field(
         default=20000,
         ge=1000,
         le=200000,
@@ -63,7 +63,7 @@ class ShellInput(BaseModel):
 async def shell_handler(
     cwd: str = ".",
     timeout_ms: int = 30000,
-    max_output_bytes: int = 20000,
+    max_bytes: int = 20000,
     command: str = "",
     *,
     ws,
@@ -165,7 +165,7 @@ async def shell_handler(
         if not chunk:
             return
         chunk_bytes = len(chunk.encode("utf-8", errors="replace"))
-        remaining = max_output_bytes - output_bytes
+        remaining = max_bytes - output_bytes
         if remaining <= 0:
             truncated_bytes += chunk_bytes
             return
@@ -175,7 +175,7 @@ async def shell_handler(
             return
         raw = chunk.encode("utf-8", errors="replace")[:remaining]
         output_parts.append(raw.decode("utf-8", errors="ignore"))
-        output_bytes = max_output_bytes
+        output_bytes = max_bytes
         truncated_bytes += chunk_bytes - remaining
 
     try:
@@ -241,7 +241,7 @@ async def shell_handler(
     output = "".join(output_parts).strip()
     if truncated_bytes > 0:
         output = (
-            f"{output}\n[output truncated after {max_output_bytes} bytes; "
+            f"{output}\n[output truncated after {max_bytes} bytes; "
             f"{truncated_bytes} bytes omitted]"
         ).strip()
 

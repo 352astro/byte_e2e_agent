@@ -100,7 +100,6 @@ class WorkspaceContext:
             del self._scoped_contexts[old_workspace]
         self._workspace = self._normalize(path)
         self._scoped_contexts[self._workspace] = self
-        self.metrics_store = self._build_metrics_store()
         self._sessions.clear()
         self._runtime = None
         self._shadow_repo = None
@@ -172,7 +171,9 @@ class WorkspaceContext:
     def _build_metrics_store(self) -> SQLiteLLMMetricsStore:
         metrics_path = Path(self._metrics_db_path).expanduser()
         if not metrics_path.is_absolute():
-            metrics_path = Path(self._workspace) / metrics_path
+            from app.core.config import PROJECT_ROOT
+
+            metrics_path = PROJECT_ROOT / metrics_path
         return SQLiteLLMMetricsStore(metrics_path)
 
     def _build_runtime(self) -> AgentRuntime:

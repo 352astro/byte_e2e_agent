@@ -32,12 +32,16 @@ def _find_free_port() -> int:
         return sock.getsockname()[1]
 
 
-def _wait_for_server(base_url: str, proc: subprocess.Popen[str], timeout: float = 30.0) -> None:
+def _wait_for_server(
+    base_url: str, proc: subprocess.Popen[str], timeout: float = 30.0
+) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             output = proc.stdout.read() if proc.stdout else ""
-            raise RuntimeError(f"Server exited early (code={proc.returncode}):\n{output}")
+            raise RuntimeError(
+                f"Server exited early (code={proc.returncode}):\n{output}"
+            )
         try:
             resp = httpx.get(f"{base_url}/api/hello", timeout=1.0)
             if resp.status_code == 200:
@@ -87,7 +91,7 @@ def api_server() -> str:
     workspace = tempfile.mkdtemp(prefix="byte_e2e_api_test_")
     env = os.environ.copy()
     env["AGENT_WORKSPACE"] = workspace
-    env["LLM_METRICS_DB_PATH"] = str(Path(workspace) / ".tmp" / "metrics.db")
+    env["LLM_METRICS_DB_PATH"] = str(Path(workspace) / ".agent" / "metrics.db")
 
     proc = subprocess.Popen(
         [
@@ -168,7 +172,10 @@ class TestWorkspaceEndpoints:
 @pytest.mark.integration
 class TestSessionEndpoints:
     def test_session_lifecycle(self, client: httpx.Client) -> None:
-        create = client.post("/api/session", json={"name": "", "preamble": "", "rules": [], "preloaded_skills": []})
+        create = client.post(
+            "/api/session",
+            json={"name": "", "preamble": "", "rules": [], "preloaded_skills": []},
+        )
         assert create.status_code == 200
         created = create.json()
         assert "session_id" in created
@@ -283,17 +290,24 @@ class TestMetricsEndpoints:
         assert dashboard_body["recent_calls"] == []
 
     def test_metrics_query_params(self, client: httpx.Client) -> None:
-        create = client.post("/api/session", json={"name": "", "preamble": "", "rules": [], "preloaded_skills": []})
+        create = client.post(
+            "/api/session",
+            json={"name": "", "preamble": "", "rules": [], "preloaded_skills": []},
+        )
         assert create.status_code == 200
         sid = create.json()["session_id"]
         try:
-            calls = client.get("/api/metrics/llm/calls", params={"limit": 10, "offset": 0})
+            calls = client.get(
+                "/api/metrics/llm/calls", params={"limit": 10, "offset": 0}
+            )
             assert calls.status_code == 200
             body = calls.json()
             assert body["pagination"]["limit"] == 10
             assert body["pagination"]["offset"] == 0
 
-            filtered = client.get("/api/metrics/llm/summary", params={"session_id": sid})
+            filtered = client.get(
+                "/api/metrics/llm/summary", params={"session_id": sid}
+            )
             assert filtered.status_code == 200
             assert filtered.json()["total_calls"] == 0
 
@@ -310,7 +324,10 @@ class TestMetricsEndpoints:
 @pytest.mark.integration
 class TestStreamEndpoints:
     def test_stream_idle_empty_session(self, client: httpx.Client) -> None:
-        create = client.post("/api/session", json={"name": "", "preamble": "", "rules": [], "preloaded_skills": []})
+        create = client.post(
+            "/api/session",
+            json={"name": "", "preamble": "", "rules": [], "preloaded_skills": []},
+        )
         assert create.status_code == 200
         sid = create.json()["session_id"]
         try:
