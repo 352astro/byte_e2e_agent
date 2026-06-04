@@ -19,7 +19,6 @@ import uuid as _uuid
 from datetime import datetime, timezone
 
 from agent.actions import (
-    execute_one_tool,
     model_call,
 )
 from agent.core.config import SessionConfig, ToolSetPreset
@@ -33,8 +32,9 @@ from agent.tools.shell import get_platform_hint
 from agent.tools.skill import skill_context_message
 from agent.tools.task import task_context_message
 from agent.tools.toolset import ToolSet
+from agent.tool_execution import execute_tool_calls
 from app.core.config import TMP_DIR
-from shared.hooks import BaseHook, GuardCheck, GuardDecision, HookManager
+from shared.hooks import BaseHook, GuardCheck, HookManager
 from shared.types import Message
 
 # ═══════════════════════════════════════════════════════════
@@ -660,148 +660,49 @@ class AgentRuntime:
                     await self._hooks.on_message_finish(msg=error_msg, session_id=sid)
                     break
 
-                # 执行工具调用
-                for tc in assistant_msg.tool_calls:
-                    if intr.is_set():
-                        raise InterruptedError("Interrupted between tools")
-
-                    func_name = tc.function.name
-                    func_args_str = tc.function.arguments
-                    tool_call_id = tc.id or _uuid.uuid4().hex
-
-                    # ── on_chunk_complete (tool_calls) ──
-                    await self._hooks.on_chunk_complete(
-                        msg=assistant_msg,
-                        field="tool_calls",
-                        full_content=func_args_str,
-                        tool_name=func_name,
-                        tool_args=func_args_str,
-                        session_id=sid,
+                async def invoke_child_agent(
+                    prompt,
+                    max_steps=5,
+                    with_skills=None,
+                    tool_call_id="",
+                ):
+                    return await self.invoke_subagent(
+                        sid,
+                        prompt,
+                        max_steps=max_steps,
+                        with_skills=with_skills,
+                        parent_message_id=assistant_msg.id,
+                        parent_tool_call_id=tool_call_id,
                     )
 
-                    # 执行
-                    tool_error = None
-                    tool_output = ""
-                    tool_status = "success"
-                    tool_status_source = "tool"
-                    tool_status_reason = ""
-                    tc_dict = {
-                        "id": tool_call_id,
-                        "function": {"name": func_name, "arguments": func_args_str},
-                    }
-                    guard_check = GuardCheck(
-                        action_type="tool.execute",
-                        subject=func_name,
-                        payload={
-                            "tool_name": func_name,
-                            "tool_args": func_args_str,
-                        },
+                async def request_human_input(
+                    payload,
+                    interrupt_event=None,
+                    tool_call_id="",
+                ):
+                    return await self._ask_user_input(
+                        payload,
+                        interrupt_event or intr,
                         session_id=sid,
                         turn_id=turn_id,
                         message_id=assistant_msg.id,
                         tool_call_id=tool_call_id,
                     )
-                    guard_decision = await self._hooks.guard_check(guard_check)
-                    if guard_decision == GuardDecision.DENY:
-                        tool_status = "denied"
-                        tool_status_source = "permission"
-                        tool_status_reason = "disabled_by_policy"
-                        tool_output = (
-                            f"Permission denied: tool '{func_name}' is disabled "
-                            "by global tool permissions."
-                        )
-                    elif guard_decision == GuardDecision.ASK:
-                        approved = await self._ask_guard(guard_check, intr)
-                        if not approved:
-                            tool_status = "denied"
-                            tool_status_source = "user"
-                            tool_status_reason = "rejected_by_user"
-                            tool_output = (
-                                f"Permission denied: user rejected tool "
-                                f"'{func_name}'."
-                            )
 
-                    async def invoke_child_agent(
-                        prompt,
-                        max_steps=5,
-                        with_skills=None,
-                        tool_call_id="",
-                    ):
-                        return await self.invoke_subagent(
-                            sid,
-                            prompt,
-                            max_steps=max_steps,
-                            with_skills=with_skills,
-                            parent_message_id=assistant_msg.id,
-                            parent_tool_call_id=tool_call_id,
-                        )
-
-                    async def request_human_input(payload, interrupt_event=None):
-                        return await self._ask_user_input(
-                            payload,
-                            interrupt_event or intr,
-                            session_id=sid,
-                            turn_id=turn_id,
-                            message_id=assistant_msg.id,
-                            tool_call_id=tool_call_id,
-                        )
-
-                    if not tool_output:
-                        try:
-                            tool_exec = await execute_one_tool(
-                                tc_dict,
-                                ws,
-                                toolset,
-                                interrupt_event=intr,
-                                openai_client=openai_client,
-                                model_id=model_id,
-                                session_id=sid,
-                                hook_manager=self._hooks,
-                                agent_invoker=invoke_child_agent,
-                                human_input_requester=request_human_input,
-                            )
-                            tool_output = tool_exec.output
-                            tool_status = tool_exec.status
-                            tool_status_source = tool_exec.source
-                            tool_status_reason = tool_exec.reason
-                        except InterruptedError:
-                            raise
-                        except Exception as exc:
-                            tool_error = exc
-                            tool_status = "error"
-                            tool_status_source = "tool"
-                            tool_status_reason = str(exc)
-                            tool_output = str(exc)
-
-                    # ── 构建 tool_result Message ──────
-                    rid = _uuid.uuid4().hex
-                    tool_result_msg = Message.tool_message(
-                        rid,
-                        turn_id,
-                        tool_call_id,
-                        func_name,
-                        tool_output,
-                        tool_status=tool_status,
-                        tool_status_source=tool_status_source,
-                        tool_status_reason=tool_status_reason,
-                    )
-                    await self._hooks.on_message_start(
-                        msg=tool_result_msg, session_id=sid
-                    )
-                    await self._hooks.on_chunk_complete(
-                        msg=tool_result_msg,
-                        field="tool_result",
-                        full_content=tool_output,
-                        tool_name=func_name,
-                        is_error=tool_status != "success",
-                        tool_status=tool_status,
-                        tool_status_source=tool_status_source,
-                        tool_status_reason=tool_status_reason,
-                        session_id=sid,
-                    )
-                    await self._hooks.on_message_finish(
-                        msg=tool_result_msg, session_id=sid
-                    )
+                await execute_tool_calls(
+                    assistant_msg=assistant_msg,
+                    ws=ws,
+                    toolset=toolset,
+                    interrupt_event=intr,
+                    openai_client=openai_client,
+                    model_id=model_id,
+                    session_id=sid,
+                    turn_id=turn_id,
+                    hook_manager=self._hooks,
+                    ask_guard=self._ask_guard,
+                    invoke_subagent=invoke_child_agent,
+                    request_human_input=request_human_input,
+                )
 
         except InterruptedError:
             error_id = _uuid.uuid4().hex
