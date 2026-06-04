@@ -6,6 +6,7 @@ import type {
   RecoverData,
   StreamEvent,
 } from "../types";
+import type { Notice, NoticeLevel } from "../components/NoticeHost";
 
 // ── types ────────────────────────────────────────────
 
@@ -15,7 +16,7 @@ interface UseAgentStreamOptions {
   scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
-const BUSY_MESSAGE = "系统正在繁忙，请稍后再试";
+const NOTICE_EXIT_MS = 180;
 
 export interface UseAgentStreamReturn {
   // ── 只读状态 ──
@@ -49,6 +50,8 @@ export interface UseAgentStreamReturn {
   runError: string | null;
   clearRunError: () => void;
   pendingGuard: GuardRequest | null;
+  notices: Notice[];
+  dismissNotice: (id: string) => void;
 }
 
 // ── helpers ───────────────────────────────────────────
@@ -124,6 +127,7 @@ export default function useAgentStream({
   const [interrupting, setInterrupting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [pendingGuard, setPendingGuard] = useState<GuardRequest | null>(null);
+  const [notices, setNotices] = useState<Notice[]>([]);
 
   // ═══════════════════════════════════════════════════
   //  Refs (mutable, no re-render on change)
@@ -138,6 +142,7 @@ export default function useAgentStream({
   const chatStreamActiveRef = useRef(false);
   const lastIdRef = useRef<string | null>(null);
   const prevSidRef = useRef<string | null>(sessionId);
+  const noticeRemoveTimersRef = useRef<Map<string, number>>(new Map());
   const completedIdsRef = useRef<Set<string>>(new Set());
   const pendingToolMetaRef = useRef<Map<string, string[]>>(new Map());
 
@@ -191,15 +196,121 @@ export default function useAgentStream({
     completedIdsRef.current = new Set(completed.map((m) => m.id));
   }, [completed]);
 
+  const dismissNotice = useCallback((id: string) => {
+    setNotices((prev) =>
+      prev.map((notice) =>
+        notice.id === id ? { ...notice, exiting: true } : notice,
+      ),
+    );
+    const existing = noticeRemoveTimersRef.current.get(id);
+    if (existing != null) window.clearTimeout(existing);
+    const timer = window.setTimeout(() => {
+      noticeRemoveTimersRef.current.delete(id);
+      setNotices((prev) => prev.filter((notice) => notice.id !== id));
+    }, NOTICE_EXIT_MS);
+    noticeRemoveTimersRef.current.set(id, timer);
+  }, []);
+
+  const upsertNotice = useCallback(
+    (notice: {
+      id: string;
+      level?: NoticeLevel;
+      title?: string;
+      detail?: string;
+      progress?: string;
+      retryAfterMs?: number | null;
+      retryAt?: number | null;
+      ttlMs?: number;
+      sticky?: boolean;
+    }) => {
+      const now = Date.now();
+      const existingTimer = noticeRemoveTimersRef.current.get(notice.id);
+      if (existingTimer != null) {
+        window.clearTimeout(existingTimer);
+        noticeRemoveTimersRef.current.delete(notice.id);
+      }
+      setNotices((prev) => {
+        const idx = prev.findIndex((item) => item.id === notice.id);
+        const next: Notice = {
+          id: notice.id,
+          level: notice.level || prev[idx]?.level || "info",
+          title: notice.title || prev[idx]?.title || "Notice",
+          detail: notice.detail ?? prev[idx]?.detail,
+          progress: notice.progress ?? prev[idx]?.progress,
+          retryAfterMs:
+            notice.retryAfterMs === undefined
+              ? prev[idx]?.retryAfterMs
+              : notice.retryAfterMs || undefined,
+          retryAt:
+            notice.retryAt === undefined
+              ? prev[idx]?.retryAt
+              : notice.retryAt || undefined,
+          updatedAt: now,
+          ttlMs: notice.ttlMs ?? prev[idx]?.ttlMs ?? 4500,
+          sticky: notice.sticky ?? prev[idx]?.sticky ?? false,
+          exiting: false,
+        };
+        if (idx < 0) return [next, ...prev].slice(0, 4);
+        const copy = [...prev];
+        copy[idx] = next;
+        return copy;
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      for (const notice of notices) {
+        if (notice.sticky || notice.exiting) continue;
+        if (now - notice.updatedAt > notice.ttlMs) {
+          dismissNotice(notice.id);
+        }
+      }
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [dismissNotice, notices]);
+
+  useEffect(() => {
+    return () => {
+      for (const timer of noticeRemoveTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      noticeRemoveTimersRef.current.clear();
+    };
+  }, []);
+
   const clearRunError = useCallback(() => {
     setRunError(null);
   }, []);
 
   useEffect(() => {
     if (!runError) return;
+    upsertNotice({
+      id: "run-error",
+      level: "error",
+      title: "Request failed",
+      detail: runError,
+      ttlMs: 5000,
+    });
     const timer = window.setTimeout(() => setRunError(null), 5000);
     return () => window.clearTimeout(timer);
-  }, [runError]);
+  }, [runError, upsertNotice]);
+
+  useEffect(() => {
+    if (runtimeBusy && !running) {
+      upsertNotice({
+        id: "runtime-busy",
+        level: "warn",
+        title: "Runtime busy",
+        detail: "Another agent task is running.",
+        ttlMs: 3000,
+      });
+      return;
+    }
+    dismissNotice("runtime-busy");
+  }, [dismissNotice, running, runtimeBusy, upsertNotice]);
 
   // ═══════════════════════════════════════════════════
   //  createSession
@@ -288,6 +399,24 @@ export default function useAgentStream({
 
   const dispatchStreamEvent = useCallback(
     (ev: StreamEvent, gen: number) => {
+      if (ev.kind === "runtime_notice") {
+        upsertNotice({
+          id: ev.notice_id || ev.message_id || `runtime-notice:${ev.turn_id}`,
+          level: ev.level || "info",
+          title: ev.title || "Runtime notice",
+          detail: ev.detail || ev.reason || "",
+          progress: ev.progress || "",
+          retryAfterMs:
+            ev.retry_after_ms && ev.retry_after_ms > 0
+              ? ev.retry_after_ms
+              : null,
+          retryAt: ev.retry_at && ev.retry_at > 0 ? ev.retry_at : null,
+          ttlMs: ev.ttl_ms || 4500,
+          sticky: Boolean(ev.sticky),
+        });
+        return;
+      }
+
       switch (ev.kind) {
         case "message_start": {
           if (genRef.current !== gen) return;
@@ -413,7 +542,7 @@ export default function useAgentStream({
         }
       }
     },
-    [appendCompleted],
+    [appendCompleted, upsertNotice],
   );
 
   // ═══════════════════════════════════════════════════
@@ -599,7 +728,13 @@ export default function useAgentStream({
               setRunning(false);
               setRuntimeBusy(true);
               keepRuntimeBusy = true;
-              setRunError(BUSY_MESSAGE);
+              upsertNotice({
+                id: "runtime-busy",
+                level: "warn",
+                title: "Runtime busy",
+                detail: "Another agent task is running.",
+                ttlMs: 5000,
+              });
               return;
             }
             throw new Error(`Server returned ${streamRes.status}`);
@@ -630,6 +765,7 @@ export default function useAgentStream({
       onSessionCreated,
       interruptInternal,
       readSSEStream,
+      upsertNotice,
     ],
   );
 
@@ -767,5 +903,7 @@ export default function useAgentStream({
     runError,
     clearRunError,
     pendingGuard,
+    notices,
+    dismissNotice,
   };
 }

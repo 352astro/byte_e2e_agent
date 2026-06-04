@@ -48,4 +48,9 @@ def get_model_id() -> str:
 
 def create_client_from_env() -> OpenAI:
     """从环境变量创建客户端（最简用法）。"""
-    return create_client()
+    timeout_raw = os.getenv("LLM_TIMEOUT", "").strip()
+    try:
+        timeout = int(timeout_raw) if timeout_raw else None
+    except ValueError:
+        timeout = None
+    return create_client(timeout=timeout)

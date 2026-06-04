@@ -62,6 +62,7 @@ class StreamEventKind(str, Enum):
     TURN_COMPLETE = "turn_complete"
     INTERRUPTED = "interrupted"
     GUARD_REQUEST = "guard_request"
+    RUNTIME_NOTICE = "runtime_notice"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -229,6 +230,15 @@ class StreamEvent(BaseModel):
     output_tokens: int = 0
     usage: dict = Field(default_factory=dict)
     reason: str = ""  # interrupted 时的原因
+    notice_id: str = ""
+    level: str = ""
+    title: str = ""
+    detail: str = ""
+    progress: str = ""
+    retry_after_ms: int = 0
+    retry_at: int = 0
+    ttl_ms: int = 0
+    sticky: bool = False
 
     # ═══════════════════════════════════════════════════════
     # 工厂方法
@@ -350,6 +360,39 @@ class StreamEvent(BaseModel):
             message_id=request_id,
             field="guard_request",
             full_content=full_content,
+        )
+
+    @classmethod
+    def runtime_notice(
+        cls,
+        notice_id: str,
+        *,
+        level: str = "info",
+        title: str = "Runtime notice",
+        detail: str = "",
+        progress: str = "",
+        retry_after_ms: int = 0,
+        retry_at: int = 0,
+        ttl_ms: int = 4500,
+        sticky: bool = False,
+        session_id: str = "",
+        turn_id: str = "",
+        message_id: str = "",
+    ) -> "StreamEvent":
+        return cls(
+            kind=StreamEventKind.RUNTIME_NOTICE,
+            session_id=session_id,
+            turn_id=turn_id,
+            message_id=message_id,
+            notice_id=notice_id,
+            level=level,
+            title=title,
+            detail=detail,
+            progress=progress,
+            retry_after_ms=retry_after_ms,
+            retry_at=retry_at,
+            ttl_ms=ttl_ms,
+            sticky=sticky,
         )
 
 

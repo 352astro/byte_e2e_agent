@@ -19,7 +19,6 @@ from agent.tools.toolset import ToolSet
 from shared.hooks import GuardCheck, GuardDecision, HookManager
 from shared.types import Message, ToolCall
 
-
 AskGuardFn = Callable[[GuardCheck, asyncio.Event], Awaitable[bool]]
 InvokeSubagentFn = Callable[..., Awaitable[str]]
 RequestHumanInputFn = Callable[..., Awaitable[dict]]
@@ -95,7 +94,9 @@ async def execute_tool_calls(
     - ASK guard decisions force singleton execution.
     """
 
-    infos = [_tool_call_info(tc, idx) for idx, tc in enumerate(assistant_msg.tool_calls)]
+    infos = [
+        _tool_call_info(tc, idx) for idx, tc in enumerate(assistant_msg.tool_calls)
+    ]
     index = 0
     while index < len(infos):
         if interrupt_event.is_set():
@@ -330,10 +331,12 @@ async def _run_tool_job(
             tool_call_id=tool_call_id or info.id,
         )
 
-    async def job_request_human_input(payload, interrupt_event_override=None):
+    outer_interrupt_event = interrupt_event
+
+    async def job_request_human_input(payload, interrupt_event=None):
         return await request_human_input(
             payload,
-            interrupt_event=interrupt_event_override or interrupt_event,
+            interrupt_event=interrupt_event or outer_interrupt_event,
             tool_call_id=info.id,
         )
 
