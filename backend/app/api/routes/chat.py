@@ -159,10 +159,10 @@ async def stream_events(
         raise HTTPException(status_code=409, detail=str(exc))
 
     driver = stream.driver
-    session = stream.session
+    messages = stream.messages
 
     async def event_generator():
-        for msg in session.get_messages():
+        for msg in messages:
             for ev in _message_replay_events(msg, sid):
                 yield _sse_event_line(ev)
 

@@ -25,7 +25,7 @@ class CheckpointService:
     def list_commits(self, session_id: str) -> list[dict]:
         try:
             ctx = self._scoped_context(session_id)
-            ctx.get_session(session_id)
+            ctx.get_info(session_id)
         except (KeyError, SessionNotFound) as exc:
             raise SessionNotFound(session_id) from exc
         return ctx.shadow_repo.list_commits(session_id)
@@ -33,7 +33,7 @@ class CheckpointService:
     def get_commit(self, session_id: str, sha: str) -> dict:
         try:
             ctx = self._scoped_context(session_id)
-            ctx.get_session(session_id)
+            ctx.get_info(session_id)
         except (KeyError, SessionNotFound) as exc:
             raise SessionNotFound(session_id) from exc
         try:

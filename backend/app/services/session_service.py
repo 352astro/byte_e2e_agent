@@ -138,10 +138,10 @@ class SessionService:
     def get_history(self, session_id: str) -> list[dict]:
         try:
             scope = self._locator.resolve(session_id)
-            return (
-                self._ctx.scoped(scope.workspace)
-                .get_session(session_id)
-                .get_messages()
+            ctx = self._ctx.scoped(scope.workspace)
+            return ctx.get_session_messages(
+                session_id,
+                repair=not self._ctx.any_runtime_running(),
             )
         except (KeyError, SessionNotFound) as exc:
             raise SessionNotFound(session_id) from exc
@@ -219,7 +219,7 @@ class SessionService:
         try:
             scope = self._locator.resolve(session_id)
             ctx = self._ctx.scoped(scope.workspace)
-            ctx.get_session(session_id)
+            ctx.get_info(session_id)
         except (KeyError, SessionNotFound) as exc:
             raise SessionNotFound(session_id) from exc
         session_running = ctx.scheduler.is_running_session(session_id)
@@ -235,17 +235,19 @@ class SessionService:
         try:
             scope = self._locator.resolve(session_id)
             ctx = self._ctx.scoped(scope.workspace)
-            session = ctx.get_session(session_id)
+            ctx.get_info(session_id)
         except (KeyError, SessionNotFound) as exc:
             raise SessionNotFound(session_id) from exc
         runtime = ctx.scheduler
         is_running = runtime.is_running_session(session_id)
+        runtime_busy = self._ctx.any_runtime_running()
         current_msg = runtime.current_message if is_running else None
+        messages = ctx.get_session_messages(session_id, repair=not runtime_busy)
         return {
             "session": ctx.get_info(session_id),
-            "messages": session.get_messages(),
+            "messages": messages,
             "session_running": is_running,
-            "runtime_busy": self._ctx.any_runtime_running(),
+            "runtime_busy": runtime_busy,
             "current_message": current_msg.model_dump(mode="json")
             if current_msg
             else None,
@@ -256,7 +258,7 @@ class SessionService:
         try:
             scope = self._locator.resolve(session_id)
             ctx = self._ctx.scoped(scope.workspace)
-            ctx.get_session(session_id)
+            ctx.get_info(session_id)
         except (KeyError, SessionNotFound) as exc:
             raise SessionNotFound(session_id) from exc
         return await ctx.scheduler.interrupt()

@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid as _uuid
 from typing import Callable
 
-from shared.types import Message, MessageRole
+from shared.types import Message, MessageRole, ToolExecutionStatus
 
 # ── 流水线阶段类型 ──────────────────────────────────────
 # 每个阶段签名为: (list[Message]) -> list[Message]
@@ -57,6 +57,9 @@ def _find_unpaired_messages(messages: list[Message]) -> list[Message]:
                             "Error: The user interrupted before "
                             "this tool could execute."
                         ),
+                        tool_status=ToolExecutionStatus.INTERRUPTED.value,
+                        tool_status_source="repair",
+                        tool_status_reason="user_interrupted_before_execution",
                     )
                 )
         break  # 只处理最近一条 assistant 消息
@@ -104,4 +107,3 @@ def repair_messages(
     for stage in stages:
         result = stage(result)
     return result
-

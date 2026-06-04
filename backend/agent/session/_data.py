@@ -113,6 +113,9 @@ def load_session(
     llm_client=None,
     toolset: ToolSet | None = None,
     ws: Workspace | None = None,
+    *,
+    repair: bool = True,
+    persist_repair: bool = True,
 ) -> Session:
     """从磁盘 JSONL 重建 Session。"""
     session = Session(
@@ -126,11 +129,12 @@ def load_session(
         return session
 
     msgs = _load_messages(messages_path)
-    if msgs:
+    if msgs and repair:
         from agent.errors import repair_messages
 
         msgs = repair_messages(msgs)
-        session.replace_messages(msgs, persist=True)
+    if msgs:
+        session.replace_messages(msgs, persist=repair and persist_repair)
     return session
 
 
