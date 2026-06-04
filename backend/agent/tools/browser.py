@@ -11,13 +11,125 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextvars import ContextVar
 from typing import Literal
 
 from langchain_core.tools import StructuredTool
 from playwright.async_api import Page
 from pydantic import BaseModel, Field
 
-# ── Playwright 单例 ─────────────────────────────────────
+# ── Browser session scope ────────────────────────────────
+
+
+class BrowserSession:
+    """One Playwright browser/page lifecycle."""
+
+    def __init__(self) -> None:
+        self._page: Page | None = None
+        self._playwright = None
+
+    async def ensure_page(self) -> Page:
+        if self._page is not None:
+            try:
+                await self._page.title()
+                return self._page
+            except Exception:
+                self._page = None
+
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            raise RuntimeError(
+                "Playwright not installed. Run: pip install playwright && "
+                "playwright install chromium"
+            )
+
+        headless = _is_headless()
+        self._playwright = await async_playwright().__aenter__()
+        browser = await self._playwright.chromium.launch(headless=headless)
+        self._page = await browser.new_page()
+        return self._page
+
+    async def current_page(self) -> Page | None:
+        if self._page is None:
+            return None
+        try:
+            await self._page.title()
+            return self._page
+        except Exception:
+            self._page = None
+            return None
+
+    async def close(self) -> None:
+        if self._playwright is not None:
+            try:
+                await self._playwright.__aexit__(None, None, None)
+            except Exception:
+                pass
+        self._playwright = None
+        self._page = None
+
+
+class BrowserSessionManager:
+    """Browser sessions keyed by agent session id."""
+
+    def __init__(self) -> None:
+        self._sessions: dict[str, BrowserSession] = {}
+
+    def get(self, session_id: str) -> BrowserSession:
+        session = self._sessions.get(session_id)
+        if session is None:
+            session = BrowserSession()
+            self._sessions[session_id] = session
+        return session
+
+    def peek(self, session_id: str) -> BrowserSession | None:
+        return self._sessions.get(session_id)
+
+    async def close(self, session_id: str) -> None:
+        session = self._sessions.pop(session_id, None)
+        if session is not None:
+            await session.close()
+
+    async def close_all(self) -> None:
+        sessions = list(self._sessions.values())
+        self._sessions.clear()
+        await asyncio.gather(
+            *(session.close() for session in sessions),
+            return_exceptions=True,
+        )
+
+
+_browser_sessions = BrowserSessionManager()
+
+_active_browser_session: ContextVar[BrowserSession | None] = ContextVar(
+    "active_browser_session",
+    default=None,
+)
+
+
+def set_active_browser_session(session: BrowserSession | None):
+    return _active_browser_session.set(session)
+
+
+def reset_active_browser_session(token) -> None:
+    _active_browser_session.reset(token)
+
+
+async def close_browser_session(session_id: str) -> None:
+    await _browser_sessions.close(session_id)
+
+
+async def close_all_browser_sessions() -> None:
+    await _browser_sessions.close_all()
+    await _shutdown_browser()
+
+
+def close_all_browser_sessions_sync() -> None:
+    asyncio.run(close_all_browser_sessions())
+
+
+# ── Legacy global fallback ───────────────────────────────
 
 _page: Page | None = None
 _playwright: Playwright | None = None
@@ -27,8 +139,14 @@ def _is_headless() -> bool:
     return os.getenv("BROWSER_HEADLESS", "1").lower() not in ("0", "false", "no")
 
 
-async def _ensure_browser():
+async def _ensure_browser(session_id: str = ""):
     global _page, _playwright
+    scoped_session = _active_browser_session.get()
+    if scoped_session is not None:
+        return await scoped_session.ensure_page()
+    if session_id:
+        return await _browser_sessions.get(session_id).ensure_page()
+
     if _page is not None:
         try:
             await _page.title()
@@ -93,6 +211,40 @@ async def _capture_state(page, *, with_html: bool = True) -> dict:
     return result
 
 
+async def _current_page(session_id: str = "") -> Page | None:
+    scoped_session = _active_browser_session.get()
+    if scoped_session is not None:
+        return await scoped_session.current_page()
+    if session_id:
+        session = _browser_sessions.peek(session_id)
+        return await session.current_page() if session is not None else None
+    return _page
+
+
+async def open_url(url: str, max_bytes: int = 50_000, *, session_id: str = "") -> str:
+    """Open a URL in the active browser scope and return page state."""
+    try:
+        page = await _ensure_browser(session_id=session_id)
+    except RuntimeError as exc:
+        return str(exc)
+
+    try:
+        await page.goto(url, wait_until="networkidle", timeout=15000)
+        state = await _capture_state(page)
+    except Exception as exc:
+        return f"Error navigating to {url}: {exc}"
+
+    lines = [
+        f"Title: {state['title']}",
+        f"URL: {state['url']}",
+        "",
+        "── Console ──",
+    ]
+    lines.extend(state["console"] if state["console"] else ["(empty)"])
+    lines.extend(["", "── HTML ──", state["html"]])
+    return _truncate("\n".join(lines), max_bytes)
+
+
 def _truncate(text: str, max_bytes: int) -> str:
     raw = text.encode("utf-8")
     if len(raw) <= max_bytes:
@@ -122,29 +274,15 @@ class BrowserOpenInput(BaseModel):
 
 
 async def browser_open_handler(
-    url: str, max_bytes: int = 50_000, *, ws=None, interrupt_event=None
+    url: str,
+    max_bytes: int = 50_000,
+    *,
+    ws=None,
+    session_id: str = "",
+    interrupt_event=None,
 ) -> str:
     """Open a URL in the headless browser and return the page HTML + console logs."""
-    try:
-        page = await _ensure_browser()
-    except RuntimeError as exc:
-        return str(exc)
-
-    try:
-        await page.goto(url, wait_until="networkidle", timeout=15000)
-        state = await _capture_state(page)
-    except Exception as exc:
-        return f"Error navigating to {url}: {exc}"
-
-    lines = [
-        f"Title: {state['title']}",
-        f"URL: {state['url']}",
-        "",
-        "── Console ──",
-    ]
-    lines.extend(state["console"] if state["console"] else ["(empty)"])
-    lines.extend(["", "── HTML ──", state["html"]])
-    return _truncate("\n".join(lines), max_bytes)
+    return await open_url(url, max_bytes, session_id=session_id)
 
 
 browser_open_tool = StructuredTool.from_function(
@@ -187,12 +325,13 @@ async def browser_act_handler(
     max_bytes: int = 50_000,
     *,
     ws=None,
+    session_id: str = "",
     interrupt_event=None,
 ) -> str:
     """Click, type into, or press a key on an element in the browser page."""
     if interrupt_event and interrupt_event.is_set():
         return "[BrowserAct interrupted]"
-    page = _page
+    page = await _current_page(session_id=session_id)
     if page is None:
         return "Error: Browser not open. Use BrowserOpen first."
 
@@ -239,6 +378,7 @@ browser_act_tool = StructuredTool.from_function(
 class BrowserInspectInput(BaseModel):
     """BrowserInspect 工具输入参数。"""
 
+    url: str = Field(..., description="URL to open before inspection.")
     max_steps: int = Field(
         default=8,
         ge=1,
@@ -248,9 +388,8 @@ class BrowserInspectInput(BaseModel):
     prompt: str = Field(
         ...,
         description=(
-            "Task for the browser inspector sub-agent. Include the URL "
-            "to open and what to look for (e.g. 'Open http://localhost:5173, "
-            "check for console errors, verify the Send button exists').\n"
+            "Task for the browser inspector sub-agent after the URL is open "
+            "(e.g. 'Check for console errors and verify the Send button exists').\n"
             "\n"
             "CRITICAL: the sub-agent starts with an EMPTY context — it sees "
             "nothing from the parent conversation. You MUST embed ALL relevant "

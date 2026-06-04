@@ -709,6 +709,24 @@ class TestBrowserOpenExecution:
             assert "Example" in result or "test" in result
 
     @pytest.mark.asyncio
+    async def test_session_id_uses_per_session_browser(self):
+        """BrowserOpen routes ordinary calls through the per-session manager."""
+        handler = _get_handler("BrowserOpen")
+
+        with patch("agent.tools.browser._ensure_browser") as mock_browser:
+            mock_page = AsyncMock()
+            mock_page.on = MagicMock()
+            mock_page.content = AsyncMock(return_value="<html>session</html>")
+            mock_page.url = "http://example.com"
+            mock_page.title = AsyncMock(return_value="Session Browser")
+            mock_browser.return_value = mock_page
+
+            result = await handler(url="http://example.com", session_id="sid-a")
+
+        mock_browser.assert_called_once_with(session_id="sid-a")
+        assert "Session Browser" in result or "session" in result
+
+    @pytest.mark.asyncio
     async def test_interrupt_not_supported(self):
         pytest.skip(
             "BrowserOpen accepts interrupt_event parameter but "
@@ -787,8 +805,52 @@ class TestBrowserInspectExecution:
     async def test_direct_call_returns_error(self):
         """BrowserInspect called directly returns dispatch error."""
         handler = _get_handler("BrowserInspect")
-        result = await handler(prompt="inspect something")
+        result = await handler(url="http://example.com", prompt="inspect something")
         assert "must be dispatched" in result.lower() or "Error" in result
+
+    @pytest.mark.asyncio
+    async def test_dispatch_uses_ephemeral_browser_session(self, tmp_path):
+        """BrowserInspect creates and closes an isolated browser scope."""
+        from agent.actions import execute_one_tool
+        from agent.core.workspace import Workspace
+
+        closed = False
+
+        class FakeBrowserSession:
+            async def close(self):
+                nonlocal closed
+                closed = True
+
+        with (
+            patch("agent.actions.BrowserSession", return_value=FakeBrowserSession()),
+            patch("agent.actions.set_active_browser_session") as set_active,
+            patch("agent.actions.reset_active_browser_session") as reset_active,
+            patch("agent.actions.open_url", AsyncMock(return_value="opened")),
+            patch("agent.actions.run_subagent", AsyncMock(return_value="inspected")),
+        ):
+            set_active.return_value = "token"
+            result = await execute_one_tool(
+                {
+                    "id": "tc_browser",
+                    "function": {
+                        "name": "BrowserInspect",
+                        "arguments": json.dumps(
+                            {
+                                "url": "http://example.com",
+                                "prompt": "inspect something",
+                            }
+                        ),
+                    },
+                },
+                Workspace(tmp_path),
+                ToolSet(tool_registry, "BrowserInspect"),
+                interrupt_event=asyncio.Event(),
+                session_id="sid",
+            )
+
+        assert result.output == "inspected"
+        assert closed
+        reset_active.assert_called_once_with("token")
 
     @pytest.mark.asyncio
     async def test_interrupt_not_supported(self):

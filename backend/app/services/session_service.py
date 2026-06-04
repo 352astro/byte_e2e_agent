@@ -14,6 +14,7 @@ from agent.tools import tool_registry
 from agent.core.workspace import Workspace as CoreWorkspace
 from agent.llm import get_model_id
 from agent.session import clear
+from agent.tools.browser import close_browser_session
 from app.schemas.session import CreateSessionRequest
 from app.services.context import WorkspaceContext
 from app.services.errors import SessionNotFound
@@ -149,6 +150,7 @@ class SessionService:
         scope = self._locator.resolve(session_id)
         ctx = self._ctx.scoped(scope.workspace)
         child_scopes = self._child_scopes(scope.workspace, session_id)
+        await close_browser_session(session_id)
         agent = ctx.pop_session(session_id)
         if agent is not None:
             await clear(agent)

@@ -12,6 +12,12 @@ from dataclasses import dataclass
 
 from agent.core.workspace import Workspace
 from agent.errors import InterruptedError
+from agent.tools.browser import (
+    BrowserSession,
+    open_url,
+    reset_active_browser_session,
+    set_active_browser_session,
+)
 from agent.tools import tool_registry
 from agent.tools.result import ToolResult
 from agent.tools.toolset import ToolSet
@@ -305,27 +311,37 @@ async def execute_one_tool(
             )
     elif tool.name == "BrowserInspect":
         browser_toolset = ToolSet(tool_registry, "BrowserOpen", "BrowserAct")
-        result_str = await run_subagent(
-            ws,
-            browser_toolset,
-            prompt=args.get("prompt", ""),
-            max_steps=args.get("max_steps", 8),
-            openai_client=openai_client,
-            model_id=model_id,
-            session_id=session_id,
-            interrupt_event=interrupt_event,
-            hook_manager=hook_manager,
-            system_extra=(
-                "You are a browser inspection sub-agent. Your toolset "
-                "contains ONLY browser tools (BrowserOpen, BrowserAct). "
-                "Keep your reasoning extremely brief — one short sentence "
-                "at most — then call BrowserOpen to open the page. "
-                "After the page loads, inspect what was asked and report "
-                "what you see. Do not plan. Do not summarize at length. "
-                "Open the browser, check, report. That is your entire job."
-            ),
-            human_input_requester=human_input_requester,
-        )
+        inspect_url = args.get("url", "")
+        browser_session = BrowserSession()
+        token = set_active_browser_session(browser_session)
+        try:
+            open_result = await open_url(inspect_url, max_bytes=20_000)
+            result_str = await run_subagent(
+                ws,
+                browser_toolset,
+                prompt=args.get("prompt", ""),
+                max_steps=args.get("max_steps", 8),
+                openai_client=openai_client,
+                model_id=model_id,
+                session_id=session_id,
+                interrupt_event=interrupt_event,
+                hook_manager=hook_manager,
+                system_extra=(
+                    "You are a browser inspection sub-agent. Your toolset "
+                    "contains ONLY browser tools (BrowserOpen, BrowserAct). "
+                    f"The page has already been opened at: {inspect_url}\n"
+                    "Do not call BrowserOpen unless you must navigate to a "
+                    "different page. Inspect the current page and report what "
+                    "you see. Keep your reasoning extremely brief — one short "
+                    "sentence at most."
+                    "\n\nInitial page state:\n"
+                    f"{open_result}"
+                ),
+                human_input_requester=human_input_requester,
+            )
+        finally:
+            reset_active_browser_session(token)
+            await browser_session.close()
     else:
         try:
             # 注入 workspace 和 session_id 到工具 handler

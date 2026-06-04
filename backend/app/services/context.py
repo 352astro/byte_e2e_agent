@@ -23,6 +23,7 @@ from agent.metrics import SQLiteLLMMetricsStore
 from agent.runtime import AgentRuntime
 from agent.session import Session, load_session
 from agent.shadow_repo import ShadowRepo
+from agent.tools.browser import close_all_browser_sessions_sync
 from app.services.errors import AgentBusy
 from shared.hooks import HookManager
 
@@ -95,6 +96,7 @@ class WorkspaceContext:
     def set_workspace(self, path: str) -> None:
         if self._any_runtime_busy():
             raise AgentBusy("Cannot switch workspace while an agent task is running")
+        close_all_browser_sessions_sync()
         old_workspace = self._workspace
         if self._scoped_contexts.get(old_workspace) is self:
             del self._scoped_contexts[old_workspace]
