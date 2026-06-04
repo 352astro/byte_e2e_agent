@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -81,10 +81,10 @@ class TestModelCall:
         assert msg.content == "answer"
         assert msg.reasoning == "think "
         hooks.on_chunk_delta.assert_any_call(
-            msg=msg, field="reasoning", delta="think "
+            msg=msg, field="reasoning", delta="think ", session_id="s1"
         )
         hooks.on_chunk_delta.assert_any_call(
-            msg=msg, field="content", delta="answer"
+            msg=msg, field="content", delta="answer", session_id="s1"
         )
 
     @pytest.mark.asyncio
@@ -136,6 +136,59 @@ class TestModelCall:
                 "m1",
                 interrupt_event=interrupt_event,
             )
+
+    @pytest.mark.asyncio
+    async def test_retries_retriable_error_before_first_chunk(self):
+        client = MagicMock()
+        client.chat.completions.create.side_effect = [
+            RuntimeError("temporary network failure"),
+            [_chunk(content="answer", finish_reason="stop")],
+        ]
+        hooks = AsyncMock(spec=HookManager)
+        interrupt_event = asyncio.Event()
+
+        with (
+            patch("agent.actions._is_retriable_model_error", return_value=True),
+            patch("agent.actions._sleep_or_interrupt", new_callable=AsyncMock),
+        ):
+            msg, finish_reason = await model_call(
+                client,
+                "test-model",
+                "s1",
+                [{"role": "user", "content": "q"}],
+                [],
+                "m1",
+                turn_id="t1",
+                interrupt_event=interrupt_event,
+                hook_manager=hooks,
+            )
+
+        assert finish_reason == "stop"
+        assert msg.content == "answer"
+        assert client.chat.completions.create.call_count == 2
+        hooks.on_runtime_notice.assert_any_call(
+            notice_id="model-retry:s1:t1",
+            level="warn",
+            title="Model request retrying",
+            detail="RuntimeError",
+            progress="2/3",
+            retry_after_ms=800,
+            retry_at=ANY,
+            ttl_ms=5000,
+            session_id="s1",
+            turn_id="t1",
+            message_id="m1",
+        )
+        hooks.on_runtime_notice.assert_any_call(
+            notice_id="model-retry:s1:t1",
+            level="success",
+            title="Model request recovered",
+            detail="Streaming resumed.",
+            ttl_ms=1800,
+            session_id="s1",
+            turn_id="t1",
+            message_id="m1",
+        )
 
 
 class TestExecuteOneTool:

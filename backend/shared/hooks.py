@@ -165,6 +165,23 @@ class BaseHook(ABC):
         """Notify listeners that runtime is waiting for user approval."""
         pass
 
+    async def on_runtime_notice(
+        self,
+        *,
+        notice_id: str,
+        level: str = "info",
+        title: str = "Runtime notice",
+        detail: str = "",
+        progress: str = "",
+        retry_after_ms: int = 0,
+        retry_at: int = 0,
+        ttl_ms: int = 4500,
+        sticky: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        """Notify listeners about transient runtime state."""
+        pass
+
     # ── 上下文注入 ──────────────────────────────────────
 
     async def on_context_assemble(
@@ -325,6 +342,9 @@ class HookManager:
 
     async def on_guard_request(self, **kwargs: Any) -> None:
         await self.dispatch("on_guard_request", **kwargs)
+
+    async def on_runtime_notice(self, **kwargs: Any) -> None:
+        await self.dispatch("on_runtime_notice", **kwargs)
 
     async def on_context_assemble(self, **kwargs: Any) -> list[dict]:
         return await self.gather_context(**kwargs)

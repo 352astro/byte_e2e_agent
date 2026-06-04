@@ -15,6 +15,7 @@ import MessageCard from "./MessageCard";
 import ToolPairCard from "./ToolPairCard";
 import AgentInput from "./AgentInput";
 import EditableUserBubble from "./EditableUserBubble";
+import NoticeHost from "./NoticeHost";
 import { pairToolCalls } from "../hooks/pairTools";
 import {
   type CommitInfo,
@@ -304,9 +305,9 @@ export default function AgentDemo({
     reloadMessages,
     truncateMessages,
     resetRunning,
-    runError,
-    clearRunError,
     pendingGuard,
+    notices,
+    dismissNotice,
   } = useAgentStream({
     sessionId,
     onSessionCreated,
@@ -691,19 +692,7 @@ export default function AgentDemo({
         </div>
       </div>
 
-      {runError && (
-        <div className="agent-run-error" role="alert">
-          <span>{runError}</span>
-          <button
-            type="button"
-            className="agent-run-error-dismiss"
-            aria-label="关闭"
-            onClick={clearRunError}
-          >
-            ×
-          </button>
-        </div>
-      )}
+      <NoticeHost notices={notices} onDismiss={dismissNotice} />
 
       {pendingGuard && (
         <PendingRequestPanel request={pendingGuard} onRespond={respondPending} />

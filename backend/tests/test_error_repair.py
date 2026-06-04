@@ -15,7 +15,13 @@ from agent.errors.repair import (
     repair_messages,
     repair_unpaired_tool_calls,
 )
-from shared.types import Message, MessageRole, ToolCall, ToolCallFunction
+from shared.types import (
+    Message,
+    MessageRole,
+    ToolCall,
+    ToolCallFunction,
+    ToolExecutionStatus,
+)
 
 # ── helpers ──────────────────────────────────────────────
 
@@ -95,6 +101,9 @@ class TestFindUnpairedMessages:
         assert r.tool_call_id == "tc2"
         assert r.tool_name == "TestTool"
         assert "interrupted" in r.tool_result.lower()
+        assert r.tool_status == ToolExecutionStatus.INTERRUPTED.value
+        assert r.tool_status_source == "repair"
+        assert r.tool_status_reason == "user_interrupted_before_execution"
         assert r.turn_id == "t1"  # inherits from assistant
 
     def test_multiple_unpaired_tool_calls_generate_repairs(self):

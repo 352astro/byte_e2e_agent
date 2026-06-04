@@ -21,7 +21,7 @@ class ActiveStream:
 
 @dataclass
 class SessionStream:
-    session: Session
+    messages: list[dict]
     driver: StreamDriverHook | None
 
 
@@ -36,7 +36,7 @@ class ChatService:
         try:
             scope = self._locator.resolve(session_id)
             ctx = self._ctx.scoped(scope.workspace)
-            ctx.get_session(session_id)
+            ctx.get_info(session_id)
         except (KeyError, SessionNotFound) as exc:
             raise SessionNotFound(session_id) from exc
         driver = ctx.stream_driver
@@ -57,11 +57,14 @@ class ChatService:
         try:
             scope = self._locator.resolve(session_id)
             ctx = self._ctx.scoped(scope.workspace)
-            session = ctx.get_session(session_id)
+            messages = ctx.get_session_messages(
+                session_id,
+                repair=not self._ctx.any_runtime_running(),
+            )
         except (KeyError, SessionNotFound) as exc:
             raise SessionNotFound(session_id) from exc
         return SessionStream(
-            session=session,
+            messages=messages,
             driver=ctx.stream_driver,
         )
 

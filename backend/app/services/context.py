@@ -143,6 +143,16 @@ class WorkspaceContext:
             raise KeyError(f"Session not found: {session_id}")
         return self.build_session(session_id)
 
+    def get_session_messages(
+        self,
+        session_id: str,
+        *,
+        repair: bool = True,
+    ) -> list[dict]:
+        if not self.messages_path(session_id).is_file():
+            raise KeyError(f"Session not found: {session_id}")
+        return self.build_session(session_id, repair=repair).get_messages()
+
     def get_info(self, session_id: str) -> dict[str, Any]:
         if not self.messages_path(session_id).is_file():
             raise KeyError(f"Session not found: {session_id}")
@@ -151,9 +161,9 @@ class WorkspaceContext:
     def pop_session(self, session_id: str) -> Session | None:
         return self._sessions.pop(session_id, None)
 
-    def build_session(self, session_id: str) -> Session:
+    def build_session(self, session_id: str, *, repair: bool = True) -> Session:
         ws = Workspace(self._workspace)
-        return load_session(self._workspace, session_id, ws=ws)
+        return load_session(self._workspace, session_id, ws=ws, repair=repair)
 
     def session_dir(self, session_id: str) -> Path:
         if not self.valid_session_id(session_id):

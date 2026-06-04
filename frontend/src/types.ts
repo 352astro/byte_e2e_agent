@@ -29,7 +29,7 @@ export type ToolSetPreset = components["schemas"]["ToolSetPreset"];
 // ── StreamEvent（SSE 协议，手写保持与 shared/types.py 一致）──
 
 export interface StreamEvent {
-  kind: StreamEventKind;
+  kind: StreamEventKind | "runtime_notice";
   session_id: string;
   message_id: string;
   turn_id: string;
@@ -49,6 +49,15 @@ export interface StreamEvent {
   output_tokens: number;
   usage?: Record<string, unknown>;
   reason: string;
+  notice_id?: string;
+  level?: "info" | "warn" | "error" | "success";
+  title?: string;
+  detail?: string;
+  progress?: string;
+  retry_after_ms?: number;
+  retry_at?: number;
+  ttl_ms?: number;
+  sticky?: boolean;
 }
 
 // ── 前端专用类型 ──────────────────────────────────────

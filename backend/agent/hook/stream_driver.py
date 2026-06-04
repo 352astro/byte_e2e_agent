@@ -282,3 +282,35 @@ class StreamDriverHook(BaseHook):
                 session_id=check.session_id,
             )
         )
+
+    async def on_runtime_notice(
+        self,
+        *,
+        notice_id: str,
+        level: str = "info",
+        title: str = "Runtime notice",
+        detail: str = "",
+        progress: str = "",
+        retry_after_ms: int = 0,
+        retry_at: int = 0,
+        ttl_ms: int = 4500,
+        sticky: bool = False,
+        **kwargs,
+    ) -> None:
+        session_id = kwargs.get("session_id", "")
+        self._broadcast(
+            StreamEvent.runtime_notice(
+                notice_id,
+                level=level,
+                title=title,
+                detail=detail,
+                progress=progress,
+                retry_after_ms=retry_after_ms,
+                retry_at=retry_at,
+                ttl_ms=ttl_ms,
+                sticky=sticky,
+                session_id=session_id,
+                turn_id=kwargs.get("turn_id", ""),
+                message_id=kwargs.get("message_id", ""),
+            )
+        )
