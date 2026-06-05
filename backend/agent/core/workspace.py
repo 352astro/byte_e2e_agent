@@ -2,17 +2,18 @@
 
 ── 职责 ──
 - 定义工作区根目录
-- 管理系统内部目录（.byte_agent/）
+- 管理系统内部目录（PROJECT_ROOT/.agent/workspaces/{uuid}/）
 - Session 独享目录和文件路径
 - 安全路径解析（防越界）
 - Shell 执行（临时子进程）
 - 文件读写
 
 ── 目录结构 ──
-    {workspace}/
-      .byte_agent/
-        sessions/{session_id}/
-          session.db / config.json / tasks.json / messages.jsonl
+    PROJECT_ROOT/
+      .agent/
+        workspaces/{uuid}/
+          sessions/{session_id}/
+            session.db / config.json / tasks.json / messages.jsonl
 """
 
 from __future__ import annotations
@@ -28,7 +29,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from agent.core.config import SessionConfig
 
-BYTE_AGENT_DIR = ".byte_agent"
 SESSION_ID_PATTERN = r"^[a-z0-9][a-z0-9-]*$"
 _SESSION_ID_RE = re.compile(SESSION_ID_PATTERN)
 
@@ -54,10 +54,9 @@ def validate_session_id(session_id: str) -> None:
 class Workspace:
     """工作区 = 路径管理 + 纯 I/O 执行。无状态、不持终端、不做安全检查。"""
 
-    def __init__(self, root: str | Path | None = None) -> None:
-        if root is None:
-            root = Path.cwd()
+    def __init__(self, root: str | Path, workspace_uuid: str) -> None:
         self.root = Path(root).expanduser().resolve()
+        self.uuid = workspace_uuid
         os.makedirs(self.root, exist_ok=True)
 
     # ═══════════════════════════════════════════════════════
@@ -65,7 +64,9 @@ class Workspace:
     # ═══════════════════════════════════════════════════════
 
     def agent_dir(self) -> Path:
-        return self.root / BYTE_AGENT_DIR
+        from agent.paths import workspace_data_dir
+
+        return workspace_data_dir(self.uuid)
 
     def sessions_dir(self) -> Path:
         return self.agent_dir() / "sessions"
@@ -326,4 +327,4 @@ class Workspace:
                 pass
 
     def __repr__(self) -> str:
-        return f"Workspace({self.root})"
+        return f"Workspace({self.root}, uuid={self.uuid})"

@@ -23,11 +23,12 @@ class WorkspaceService:
     def list_registered_workspaces(self) -> list[str]:
         from app.services.workspace_registry import list_workspaces
 
-        workspaces = list_workspaces()
+        mapping = list_workspaces()
+        paths = list(mapping.values())
         current = self._ctx.workspace
-        if current not in workspaces:
-            workspaces = [current, *workspaces]
-        return workspaces
+        if current not in paths:
+            paths = [current, *paths]
+        return paths
 
     def resolve_workspace(self, path: str | None = None) -> str:
         return self._ctx.resolve_workspace(path)

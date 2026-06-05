@@ -211,12 +211,14 @@ CREATE INDEX IF NOT EXISTS idx_memories_hash
 class SQLiteMemoryStore(MemoryStore):
     """SQLite FTS5 persistent memory store.
 
-    Stored at ``{workspace_root}/.byte_agent/memory.db``.
+    Stored at ``PROJECT_ROOT/.agent/workspaces/{uuid}/memory.db``.
     """
 
-    def __init__(self, workspace_root: str | Path) -> None:
-        self._workspace_root = str(Path(workspace_root).resolve())
-        self._db_path = Path(self._workspace_root) / ".byte_agent" / "memory.db"
+    def __init__(self, workspace_uuid: str) -> None:
+        from agent.paths import workspace_data_dir
+
+        self._workspace_uuid = workspace_uuid
+        self._db_path = workspace_data_dir(workspace_uuid) / "memory.db"
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
 
@@ -254,7 +256,7 @@ class SQLiteMemoryStore(MemoryStore):
         now = time.time()
         conn.execute(
             "UPDATE memories SET workspace = ? WHERE workspace = ''",
-            (self._workspace_root,),
+            (self._workspace_uuid,),
         )
         conn.execute("UPDATE memories SET updated_at = ? WHERE updated_at = 0", (now,))
         rows = conn.execute(
@@ -282,7 +284,7 @@ class SQLiteMemoryStore(MemoryStore):
         feature = (record.feature or content).strip()
         scope = record.scope if record.scope in MEMORY_SCOPES else "workspace"
         kind = record.kind if record.kind in MEMORY_KINDS else "summary"
-        workspace = record.workspace or self._workspace_root
+        workspace = record.workspace or self._workspace_uuid
         content_hash = record.content_hash or memory_content_hash(content)
         try:
             existing = conn.execute(
@@ -623,7 +625,5 @@ class InMemoryMemoryStore(MemoryStore):
         if session_id is None:
             return sum(1 for r in self._records if not r.archived)
         return sum(
-            1
-            for r in self._records
-            if r.session_id == session_id and not r.archived
+            1 for r in self._records if r.session_id == session_id and not r.archived
         )

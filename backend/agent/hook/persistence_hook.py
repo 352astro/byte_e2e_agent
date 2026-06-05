@@ -22,12 +22,12 @@ class PersistenceHook(BaseHook):
     """将每个完成的 Message 追加写入 Session 的 JSONL 文件。
 
     用法:
-        hook = PersistenceHook(workspace_root="/path/to/project")
+        hook = PersistenceHook(workspace_uuid="abc123")
         hooks = HookManager([hook, ...])
     """
 
-    def __init__(self, workspace_root: str | Path) -> None:
-        self._workspace_root = Path(workspace_root).resolve()
+    def __init__(self, workspace_uuid: str) -> None:
+        self._workspace_uuid = workspace_uuid
 
     async def on_message_start(self, *, msg: Message, **kwargs: Any) -> None:
         """Message 开始 — 暂不写盘（等 finish）。"""
@@ -52,13 +52,9 @@ class PersistenceHook(BaseHook):
     # ── 内部 ────────────────────────────────────────────
 
     def _messages_path(self, session_id: str) -> Path:
-        return (
-            self._workspace_root
-            / ".byte_agent"
-            / "sessions"
-            / session_id
-            / "messages.jsonl"
-        )
+        from agent.paths import messages_path as _msg_path
+
+        return _msg_path(self._workspace_uuid, session_id)
 
     def _append_message(self, session_id: str, msg: Message) -> None:
         path = self._messages_path(session_id)

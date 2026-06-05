@@ -11,12 +11,11 @@ PROJECT_ROOT = BACKEND_DIR.parent
 load_dotenv(BACKEND_DIR / ".env")
 load_dotenv()
 
-# Central constant for the agent's internal storage directory.
-# TMP_DIR is kept as a compatibility alias for older imports.
-AGENT_DIR = ".byte_agent"
-TMP_DIR = AGENT_DIR
+# Central constant for the agent's internal storage directory
+# (under PROJECT_ROOT).
+AGENT_DATA_DIR = ".byte_agent"
 
-DEFAULT_LLM_METRICS_DB_PATH = ".agent/metrics.db"
+DEFAULT_LLM_METRICS_DB_PATH = f"{AGENT_DATA_DIR}/metrics.db"
 
 
 def resolve_agent_workspace(path: str) -> str:

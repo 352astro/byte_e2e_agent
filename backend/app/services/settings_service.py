@@ -60,9 +60,9 @@ class SettingsService:
 
 
 def _config_path(filename: str) -> Path:
-    from app.core.config import PROJECT_ROOT
+    from app.core.config import AGENT_DATA_DIR, PROJECT_ROOT
 
-    return PROJECT_ROOT / ".agent" / filename
+    return PROJECT_ROOT / AGENT_DATA_DIR / filename
 
 
 def _load_settings(ctx: WorkspaceContext) -> SessionSettings:

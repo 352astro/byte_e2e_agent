@@ -24,6 +24,7 @@ from agent.runtime import AgentRuntime
 from agent.session import Session, load_session
 from agent.shadow_repo import ShadowRepo
 from agent.tools.browser import close_all_browser_sessions_sync
+from app.services.workspace_registry import register_workspace
 from app.services.errors import AgentBusy
 from shared.hooks import HookManager
 
@@ -39,6 +40,7 @@ class WorkspaceContext:
         _shared_contexts: dict[str, "WorkspaceContext"] | None = None,
     ) -> None:
         self._workspace = self._normalize(workspace)
+        _, self._workspace_uuid = register_workspace(workspace)
         self._metrics_db_path = metrics_db_path
         from app.core.config import get_settings
 
@@ -59,18 +61,18 @@ class WorkspaceContext:
 
     @property
     def core_workspace(self) -> CoreWorkspace:
-        return CoreWorkspace(self._workspace)
+        return CoreWorkspace(self._workspace, workspace_uuid=self._workspace_uuid)
 
     @property
     def shadow_repo(self) -> ShadowRepo:
         if self._shadow_repo is None:
-            self._shadow_repo = ShadowRepo(self._workspace)
+            self._shadow_repo = ShadowRepo(self._workspace, workspace_uuid=self._workspace_uuid)
         return self._shadow_repo
 
     @property
     def memory_store(self) -> SQLiteMemoryStore:
         if self._memory_store is None:
-            self._memory_store = SQLiteMemoryStore(self._workspace)
+            self._memory_store = SQLiteMemoryStore(self._workspace_uuid)
         return self._memory_store
 
     @property
@@ -101,6 +103,7 @@ class WorkspaceContext:
         if self._scoped_contexts.get(old_workspace) is self:
             del self._scoped_contexts[old_workspace]
         self._workspace = self._normalize(path)
+        _, self._workspace_uuid = register_workspace(path)
         self._scoped_contexts[self._workspace] = self
         self._sessions.clear()
         self._runtime = None
@@ -162,8 +165,8 @@ class WorkspaceContext:
         return self._sessions.pop(session_id, None)
 
     def build_session(self, session_id: str, *, repair: bool = True) -> Session:
-        ws = Workspace(self._workspace)
-        return load_session(self._workspace, session_id, ws=ws, repair=repair)
+        ws = Workspace(self._workspace, workspace_uuid=self._workspace_uuid)
+        return load_session(self._workspace_uuid, session_id, ws=ws, repair=repair)
 
     def session_dir(self, session_id: str) -> Path:
         if not self.valid_session_id(session_id):
@@ -196,7 +199,7 @@ class WorkspaceContext:
                 model_id=self._model_id,
                 workspace_root=self._workspace,
             ),
-            PersistenceHook(self._workspace),
+            PersistenceHook(self._workspace_uuid),
             ShadowCommitHook(self.shadow_repo),
             ToolPermissionHook(self._workspace),
         ]

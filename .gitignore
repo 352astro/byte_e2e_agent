@@ -39,8 +39,10 @@ pnpm-debug.log*
 # ─── Persistence ────────────────────────────────────
 .tmp/
 .byte_agent/
-.agent/
 
 # ─── OS ──────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+
+MagicMock/

@@ -33,14 +33,15 @@ class Session:
 
     def __init__(
         self,
+        ws: Workspace,
         llm_client=None,
         toolset: ToolSet | None = None,
-        ws: Workspace | None = None,
         session_id: str | None = None,
     ) -> None:
         self.llm_client = llm_client
         self._toolset = toolset or _default_toolset()
-        self._ws = ws or Workspace()
+        self._ws = ws
+        self._workspace_uuid = ws.uuid
         self.session_id = session_id or _uuid.uuid4().hex[:12]
         self._messages: list[Message] = []
         self._llm_context: list[dict] = []
@@ -78,7 +79,7 @@ class Session:
         self._messages = messages
         self._llm_context = _build_llm_context(messages)
         if persist:
-            _rewrite_messages_file(str(self._ws.root), self.session_id, messages)
+            _rewrite_messages_file(self._ws.uuid, self.session_id, messages)
 
     def truncate_by_id(self, msg_id: str, keep: bool = False) -> int:
         """按 message id 截断。keep=False → 删除此 id 及以后；keep=True → 保留此 id。"""
@@ -97,7 +98,7 @@ class Session:
         removed = len(self._messages) - cutoff
         self._messages = kept
         self._llm_context = _build_llm_context(kept)
-        _rewrite_messages_file(str(self._ws.root), self.session_id, kept)
+        _rewrite_messages_file(self._ws.uuid, self.session_id, kept)
         return removed
 
 
@@ -107,23 +108,23 @@ class Session:
 
 
 def load_session(
-    workspace: str | Path,
+    workspace_uuid: str,
     session_id: str,
+    ws: Workspace,
     llm_client=None,
     toolset: ToolSet | None = None,
-    ws: Workspace | None = None,
     *,
     repair: bool = True,
     persist_repair: bool = True,
 ) -> Session:
     """从磁盘 JSONL 重建 Session。"""
     session = Session(
+        ws=ws,
         llm_client=llm_client,
         toolset=toolset,
-        ws=ws,
         session_id=session_id,
     )
-    messages_path = _messages_path(workspace, session_id)
+    messages_path = _messages_path(workspace_uuid, session_id)
     if not messages_path.exists():
         return session
 
@@ -178,7 +179,7 @@ def _save_message_sync(
     msg: Message,
 ) -> None:
     """追加一条 Message 到 JSONL。"""
-    messages_path = _messages_path(workspace, session_id)
+    messages_path = _messages_path(workspace_uuid, session_id)
     messages_path.parent.mkdir(parents=True, exist_ok=True)
     record = msg.model_dump(mode="json")
     with open(messages_path, "a", encoding="utf-8") as fh:
@@ -192,7 +193,7 @@ def _rewrite_messages_file(
     messages: list[Message],
 ) -> None:
     """重写整个 JSONL 文件。"""
-    messages_path = _messages_path(workspace, session_id)
+    messages_path = _messages_path(workspace_uuid, session_id)
     messages_path.parent.mkdir(parents=True, exist_ok=True)
     with open(messages_path, "w", encoding="utf-8") as fh:
         for m in messages:
@@ -390,12 +391,13 @@ def _safe_json_loads(value: str) -> dict:
 # ═══════════════════════════════════════════════════════════
 
 
-def _messages_path(workspace: str | Path, session_id: str) -> Path:
-    return _session_dir(workspace, session_id) / "messages.jsonl"
+def _messages_path(workspace_uuid: str, session_id: str) -> Path:
+    return _session_dir(workspace_uuid, session_id) / "messages.jsonl"
 
 
-def _session_dir(workspace: str | Path, session_id: str) -> Path:
-    return Workspace(workspace).session_dir(session_id)
+def _session_dir(workspace_uuid: str, session_id: str) -> Path:
+    from agent.paths import session_dir as _sdir
+    return _sdir(workspace_uuid, session_id)
 
 
 def _validate_session_id(session_id: str) -> None:

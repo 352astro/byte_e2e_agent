@@ -28,13 +28,13 @@ from agent.core.workspace import Workspace
 from agent.errors import InterruptedError
 from agent.session.entry import SessionEntry
 from agent.session.status import RuntimeStatus, SessionStatus
+from agent.tool_execution import execute_tool_calls
 from agent.tools import tool_registry
 from agent.tools.shell import get_platform_hint
 from agent.tools.skill import skill_context_message
 from agent.tools.task import task_context_message
 from agent.tools.toolset import ToolSet
-from agent.tool_execution import execute_tool_calls
-from app.core.config import TMP_DIR
+from app.core.config import AGENT_DATA_DIR
 from shared.hooks import BaseHook, GuardCheck, HookManager
 from shared.types import Message
 
@@ -621,10 +621,9 @@ class AgentRuntime:
                         "role": "system",
                         "content": (
                             f"## System Directory\n"
-                            f"The `{TMP_DIR}/` directory at the workspace root is managed by "
-                            f"the system for session state, task lists, and internal storage. "
-                            f"Do NOT read, edit, create, or delete files under `{TMP_DIR}/` — "
-                            f"it is not user code."
+                            f"The `{AGENT_DATA_DIR}/` directory at the project root is managed by "
+                            f"the system for internal storage. "
+                            f"Do NOT read, edit, create, or delete files under `{AGENT_DATA_DIR}/`."
                         ),
                     },
                     skill_context_message(),

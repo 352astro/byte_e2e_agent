@@ -13,9 +13,9 @@ class ToolPermissionHook(BaseHook):
     """Read global tool permissions from PROJECT_ROOT/.agent/."""
 
     def __init__(self, workspace: str) -> None:
-        from app.core.config import PROJECT_ROOT
+        from app.core.config import AGENT_DATA_DIR, PROJECT_ROOT
 
-        self._permissions_path = PROJECT_ROOT / ".agent" / TOOL_PERMISSIONS_FILE
+        self._permissions_path = PROJECT_ROOT / AGENT_DATA_DIR / TOOL_PERMISSIONS_FILE
 
     async def on_guard_check(
         self,
