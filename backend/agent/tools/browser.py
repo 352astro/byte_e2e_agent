@@ -136,7 +136,8 @@ _playwright: Playwright | None = None
 
 
 def _is_headless() -> bool:
-    return os.getenv("BROWSER_HEADLESS", "1").lower() not in ("0", "false", "no")
+    from app.core.config import get_settings
+    return get_settings().browser_headless
 
 
 async def _ensure_browser(session_id: str = ""):

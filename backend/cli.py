@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -60,17 +59,22 @@ def _short(s: str, n: int = 40) -> str:
 
 
 def _check_env() -> None:
-    missing = [
-        k for k in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL_ID") if not os.getenv(k)
-    ]
+    s = get_settings()
+    missing = []
+    if not s.llm_api_key:
+        missing.append("LLM_API_KEY")
+    if not s.llm_base_url:
+        missing.append("LLM_BASE_URL")
+    if not s.llm_model_id:
+        missing.append("LLM_MODEL_ID")
     if missing:
         print(f"Missing env vars: {', '.join(missing)}")
         print("Set them in backend/.env or export in your shell.")
         sys.exit(1)
 
 
-async def _run_once(workspace_root: str, question: str) -> None:
-    ws = Workspace(workspace_root)
+async def _run_once(workspace_root: str, workspace_uuid: str, question: str) -> None:
+    ws = Workspace(workspace_root, workspace_uuid=workspace_uuid)
     hooks = HookManager([LoggingHook(verbose=True)])
     runtime = AgentRuntime(ws, hooks)
     model_id = get_model_id()
@@ -88,8 +92,8 @@ async def _run_once(workspace_root: str, question: str) -> None:
             pass
 
 
-async def _run_repl(workspace_root: str) -> None:
-    ws = Workspace(workspace_root)
+async def _run_repl(workspace_root: str, workspace_uuid: str) -> None:
+    ws = Workspace(workspace_root, workspace_uuid=workspace_uuid)
     hooks = HookManager([LoggingHook(verbose=True)])
     runtime = AgentRuntime(ws, hooks)
     model_id = get_model_id()
@@ -137,10 +141,12 @@ async def _run_repl(workspace_root: str) -> None:
 if __name__ == "__main__":
     _check_env()
 
-    workspace = os.environ.get("AGENT_WORKSPACE", os.getcwd())
+    settings = get_settings()
+    workspace = settings.agent_workspace or os.getcwd()
+    _, ws_uuid = register_workspace(workspace)
     args = sys.argv[1:]
 
     if args:
-        asyncio.run(_run_once(workspace, " ".join(args)))
+        asyncio.run(_run_once(workspace, ws_uuid, " ".join(args)))
     else:
-        asyncio.run(_run_repl(workspace))
+        asyncio.run(_run_repl(workspace, ws_uuid))

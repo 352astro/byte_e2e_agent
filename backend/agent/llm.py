@@ -7,9 +7,9 @@
 
 from __future__ import annotations
 
-import os
-
 from openai import OpenAI
+
+from app.core.config import get_settings
 
 
 def create_client(
@@ -21,20 +21,22 @@ def create_client(
     """创建 openai.OpenAI 客户端。
 
     Args:
-        model_id: 模型 ID（默认从 LLM_MODEL_ID 环境变量读取）
-        api_key: API key（默认从 LLM_API_KEY 环境变量读取）
-        base_url: API base URL（默认从 LLM_BASE_URL 环境变量读取）
+        model_id: 模型 ID（默认从 Settings 读取）
+        api_key: API key（默认从 Settings 读取）
+        base_url: API base URL（默认从 Settings 读取）
         timeout: 超时时间（秒）
     Returns:
         (client, model_id) — 客户端实例和解析后的 model_id
     """
-    api_key = api_key or os.getenv("LLM_API_KEY", "")
+    settings = get_settings()
+    api_key = api_key or settings.llm_api_key
     if not api_key:
         raise ValueError("LLM_API_KEY must be set in environment or passed explicitly")
 
     kwargs: dict = dict(api_key=api_key)
-    if base_url or os.getenv("LLM_BASE_URL"):
-        kwargs["base_url"] = base_url or os.getenv("LLM_BASE_URL", "")
+    base_url = base_url or settings.llm_base_url
+    if base_url:
+        kwargs["base_url"] = base_url
     if timeout is not None:
         kwargs["timeout"] = timeout
 
@@ -42,15 +44,11 @@ def create_client(
 
 
 def get_model_id() -> str:
-    """获取模型 ID（从环境变量）。"""
-    return os.getenv("LLM_MODEL_ID", "gpt-4o")
+    """获取模型 ID（从 Settings）。"""
+    return get_settings().llm_model_id
 
 
 def create_client_from_env() -> OpenAI:
-    """从环境变量创建客户端（最简用法）。"""
-    timeout_raw = os.getenv("LLM_TIMEOUT", "").strip()
-    try:
-        timeout = int(timeout_raw) if timeout_raw else None
-    except ValueError:
-        timeout = None
-    return create_client(timeout=timeout)
+    """从 Settings 创建客户端（最简用法）。"""
+    settings = get_settings()
+    return create_client(timeout=settings.llm_timeout)

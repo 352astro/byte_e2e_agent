@@ -89,25 +89,12 @@ async def _next_stream_chunk_async(iterator, *, threaded: bool):
     return await asyncio.to_thread(_next_stream_chunk, iterator)
 
 
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name, "").strip()
-    if not raw:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
-
 
 def _model_retry_delay_ms(attempt: int) -> int:
-    base_ms = max(
-        0,
-        _env_int("LLM_RETRY_BASE_DELAY_MS", _DEFAULT_MODEL_RETRY_BASE_DELAY_MS),
-    )
-    max_ms = max(
-        base_ms,
-        _env_int("LLM_RETRY_MAX_DELAY_MS", _DEFAULT_MODEL_RETRY_MAX_DELAY_MS),
-    )
+    from app.core.config import get_settings
+    s = get_settings()
+    base_ms = max(0, s.llm_retry_base_delay_ms)
+    max_ms = max(base_ms, s.llm_retry_max_delay_ms)
     return min(max_ms, base_ms * (2**attempt))
 
 
@@ -219,7 +206,8 @@ async def model_call(
         kwargs["tools"] = tools
 
     request_client = _model_request_client(client)
-    max_retries = max(0, _env_int("LLM_MAX_RETRIES", _DEFAULT_MODEL_MAX_RETRIES))
+    from app.core.config import get_settings
+    max_retries = max(0, get_settings().llm_max_retries)
     max_attempts = max_retries + 1
     retry_notice_id = f"model-retry:{session_id}:{turn_id or message_id}"
 

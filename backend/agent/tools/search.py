@@ -21,7 +21,8 @@ class WebSearchInput(BaseModel):
 
 def _do_serpapi_search(query: str, gl: str, hl: str) -> dict:
     """同步执行 SerpApi 搜索（在线程池中调用）。"""
-    api_key = os.getenv("SERPAPI_KEY")
+    from app.core.config import get_settings
+    api_key = get_settings().serpapi_key
     if not api_key:
         raise RuntimeError("SERPAPI_KEY is not configured in the .env file.")
     client = serpapi.Client()

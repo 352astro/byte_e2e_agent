@@ -398,11 +398,11 @@ class SQLiteLLMMetricsStore:
             )
 
     def delete_pricing(self, model_id: str) -> None:
-        input_price = _env_float("LLM_INPUT_COST_YUAN_PER_1M_TOKENS", 3.0)
-        output_price = _env_float("LLM_OUTPUT_COST_YUAN_PER_1M_TOKENS", 6.0)
-        reasoning_price = _env_float(
-            "LLM_REASONING_COST_YUAN_PER_1M_TOKENS", output_price
-        )
+        from app.core.config import get_settings
+        s = get_settings()
+        input_price = s.llm_input_cost_yuan_per_1m_tokens
+        output_price = s.llm_output_cost_yuan_per_1m_tokens
+        reasoning_price = s.llm_reasoning_cost_yuan_per_1m_tokens
         with self._lock, self._connect() as conn:
             has_calls = conn.execute(
                 "SELECT 1 FROM llm_calls WHERE model = ? LIMIT 1", (model_id,)
@@ -538,11 +538,11 @@ class SQLiteLLMMetricsStore:
             ).fetchone()
             if exists:
                 return
-        input_price = _env_float("LLM_INPUT_COST_YUAN_PER_1M_TOKENS", 3.0)
-        output_price = _env_float("LLM_OUTPUT_COST_YUAN_PER_1M_TOKENS", 6.0)
-        reasoning_price = _env_float(
-            "LLM_REASONING_COST_YUAN_PER_1M_TOKENS", output_price
-        )
+        from app.core.config import get_settings
+        s = get_settings()
+        input_price = s.llm_input_cost_yuan_per_1m_tokens
+        output_price = s.llm_output_cost_yuan_per_1m_tokens
+        reasoning_price = s.llm_reasoning_cost_yuan_per_1m_tokens
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
@@ -606,10 +606,12 @@ class SQLiteLLMMetricsStore:
         price = pricing.get(model_id) or {}
         input_price = price.get("input_price_per_1m")
         if input_price is None:
-            input_price = _env_float("LLM_INPUT_COST_YUAN_PER_1M_TOKENS", 3.0)
+            from app.core.config import get_settings
+            input_price = get_settings().llm_input_cost_yuan_per_1m_tokens
         output_price = price.get("output_price_per_1m")
         if output_price is None:
-            output_price = _env_float("LLM_OUTPUT_COST_YUAN_PER_1M_TOKENS", 6.0)
+            from app.core.config import get_settings
+            output_price = get_settings().llm_output_cost_yuan_per_1m_tokens
         reasoning_price = price.get("reasoning_price_per_1m")
         if reasoning_price is None:
             reasoning_price = output_price
@@ -705,13 +707,6 @@ def _int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def _env_float(name: str, default: float) -> float:
-    try:
-        return float(os.getenv(name, default))
-    except (TypeError, ValueError):
-        return default
 
 
 def _round(value: Any, digits: int = 2) -> float | None:
