@@ -28,6 +28,11 @@ from app.services.session_scope import (
 from app.services.workspace_registry import list_workspaces, register_workspace
 
 
+def _core_workspace_for_path(workspace: str) -> CoreWorkspace:
+    resolved, workspace_uuid = register_workspace(workspace)
+    return CoreWorkspace(resolved, workspace_uuid=workspace_uuid)
+
+
 class SessionService:
     def __init__(self, ctx: WorkspaceContext) -> None:
         self._ctx = ctx
@@ -54,7 +59,10 @@ class SessionService:
             tool_set_preset=tool_set_preset,
             custom_tools=custom_tools,
         )
-        CoreWorkspace(self._ctx.workspace).save_session_config(session_id, config)
+        _core_workspace_for_path(self._ctx.workspace).save_session_config(
+            session_id,
+            config,
+        )
         scope = self._locator.resolve(session_id, workspace_hint=self._ctx.workspace)
         write_session_metadata(scope)
         metadata = read_session_metadata(scope)
@@ -69,7 +77,7 @@ class SessionService:
         return self._sessions_for_workspace(self._ctx.workspace)
 
     def list_all_sessions(self) -> list[dict[str, Any]]:
-        workspaces = list_workspaces()
+        workspaces = list(list_workspaces().values())
         current = self._ctx.workspace
         if current not in workspaces:
             workspaces = [current, *workspaces]
@@ -81,7 +89,7 @@ class SessionService:
         return combined
 
     def _sessions_for_workspace(self, workspace: str) -> list[dict[str, Any]]:
-        sessions_dir = CoreWorkspace(workspace).sessions_dir()
+        sessions_dir = _core_workspace_for_path(workspace).sessions_dir()
         if not sessions_dir.is_dir():
             return []
         result: list[tuple[float, dict[str, Any]]] = []
@@ -185,7 +193,7 @@ class SessionService:
     def _child_scopes(
         self, workspace: str, parent_session_id: str | None = None
     ) -> list[SessionScope]:
-        sessions_dir = CoreWorkspace(workspace).sessions_dir()
+        sessions_dir = _core_workspace_for_path(workspace).sessions_dir()
         if not sessions_dir.is_dir():
             return []
         result: list[SessionScope] = []

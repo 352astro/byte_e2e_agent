@@ -138,7 +138,10 @@ class WorkspaceContext:
         return self.scheduler.create_session(
             config,
             session_id=session_id,
-            ws=CoreWorkspace(self._workspace),
+            ws=CoreWorkspace(
+                self._workspace,
+                workspace_uuid=self._workspace_uuid,
+            ),
         )
 
     def get_session(self, session_id: str) -> Session:
@@ -216,7 +219,13 @@ class WorkspaceContext:
             )
         hook_list.append(LoggingHook(verbose=True))
         hooks = HookManager(hook_list)
-        return AgentRuntime(CoreWorkspace(self._workspace), hooks)
+        return AgentRuntime(
+            CoreWorkspace(
+                self._workspace,
+                workspace_uuid=self._workspace_uuid,
+            ),
+            hooks,
+        )
 
     def _load_session_config(self, session_id: str):
         from agent.core.config import SessionConfig, ToolSetPreset

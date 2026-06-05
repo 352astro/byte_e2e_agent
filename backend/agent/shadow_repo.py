@@ -24,6 +24,7 @@ from dulwich.repo import Repo
 from dulwich.walk import Walker
 
 from agent.paths import shadow_repo_dir
+from app.core.config import AGENT_DATA_DIR
 
 
 def _ensure_dir(p: str) -> None:

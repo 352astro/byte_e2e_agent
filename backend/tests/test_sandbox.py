@@ -24,26 +24,26 @@ def tmp_workspace():
 
 @pytest.fixture
 def ws(tmp_workspace):
-    return Workspace(root=tmp_workspace)
+    return Workspace(root=tmp_workspace, workspace_uuid="test-workspace")
 
 
 class TestWorkspaceConstruction:
     def test_root_stored_as_absolute_path(self, ws):
         assert ws.root.is_absolute()
 
-    def test_default_root_is_cwd(self):
-        w = Workspace()
-        assert w.root == Path.cwd()
+    def test_requires_workspace_uuid(self, tmp_workspace):
+        with pytest.raises(TypeError):
+            Workspace(root=tmp_workspace)
 
     def test_root_with_path_object(self, tmp_workspace):
         p = Path(tmp_workspace)
-        w = Workspace(root=p)
+        w = Workspace(root=p, workspace_uuid="test-workspace")
         assert w.root == p.resolve()
 
     def test_creates_directory_if_missing(self):
         with tempfile.TemporaryDirectory() as td:
             new_dir = Path(td) / "new_workspace"
-            w = Workspace(root=new_dir)
+            w = Workspace(root=new_dir, workspace_uuid="test-workspace")
             assert new_dir.exists()
 
 
@@ -74,8 +74,8 @@ class TestWorkspacePathManagement:
 
     def test_agent_dir(self, ws):
         d = ws.agent_dir()
-        assert d.name == ".byte_agent"
-        assert d.parent == ws.root
+        assert d.name == ws.uuid
+        assert d.parent.name == "workspaces"
 
     def test_sessions_dir(self, ws):
         d = ws.sessions_dir()

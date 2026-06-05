@@ -11,7 +11,7 @@ from typing import Any
 from agent.core.workspace import Workspace as CoreWorkspace
 from app.services.context import WorkspaceContext
 from app.services.errors import AmbiguousSession, SessionNotFound
-from app.services.workspace_registry import list_workspaces
+from app.services.workspace_registry import list_workspaces, register_workspace
 
 SESSION_META_FILE = "session.json"
 
@@ -70,7 +70,11 @@ class SessionLocator:
 
     @staticmethod
     def _scope_if_exists(workspace: str, session_id: str) -> SessionScope | None:
-        core = CoreWorkspace(workspace)
+        try:
+            resolved_workspace, workspace_uuid = register_workspace(workspace)
+        except ValueError:
+            return None
+        core = CoreWorkspace(resolved_workspace, workspace_uuid=workspace_uuid)
         try:
             session_dir = core.session_dir(session_id)
         except ValueError:
@@ -80,7 +84,7 @@ class SessionLocator:
             return None
         return SessionScope(
             session_id=session_id,
-            workspace=workspace,
+            workspace=resolved_workspace,
             session_dir=session_dir,
             messages_path=messages_path,
             config_path=session_dir / "config.json",

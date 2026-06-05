@@ -16,6 +16,8 @@ All tests use mocks — no real LLM calls.
 from __future__ import annotations
 
 import asyncio
+import tempfile
+import uuid as _uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -106,8 +108,16 @@ def _make_runtime(
 ) -> AgentRuntime:
     """Create an AgentRuntime with sensible test defaults."""
     return AgentRuntime(
-        workspace=workspace or Workspace(),
+        workspace=workspace or _make_workspace(),
         hook_manager=hook_manager or HookManager(),
+    )
+
+
+def _make_workspace() -> Workspace:
+    """Create an isolated Workspace with the required storage identity."""
+    return Workspace(
+        tempfile.mkdtemp(prefix="runtime-test-"),
+        workspace_uuid=f"test-{_uuid.uuid4().hex[:12]}",
     )
 
 
@@ -126,34 +136,27 @@ class TestAgentRuntimeConstruction:
 
     def test_constructor_accepts_all_params(self):
         """Constructor accepts workspace, hook_manager, and llm."""
-        ws = Workspace()
+        ws = _make_workspace()
         hm = HookManager()
         runtime = AgentRuntime(workspace=ws, hook_manager=hm, llm=None)
         assert runtime._workspace is ws
         assert runtime._hooks is hm
         assert runtime._llm is None
 
-    def test_constructor_defaults(self):
-        """Constructor provides sensible defaults when no args given."""
-        runtime = AgentRuntime()
-        assert isinstance(runtime._workspace, Workspace)
-        assert isinstance(runtime._hooks, HookManager)
-        assert runtime._llm is None
-        assert runtime._sessions == {}
-        assert runtime._running_session_id is None
-        assert runtime._interrupt_event is None
-        assert runtime._loop_task is None
-        assert runtime._pending == {}
+    def test_constructor_requires_workspace(self):
+        """Constructor requires a workspace with root and uuid."""
+        with pytest.raises(ValueError):
+            AgentRuntime()
 
     def test_hooks_property_returns_hook_manager(self):
         """hooks property returns the hook_manager instance."""
         hm = HookManager()
-        runtime = AgentRuntime(hook_manager=hm)
+        runtime = AgentRuntime(workspace=_make_workspace(), hook_manager=hm)
         assert runtime.hooks is hm
 
     def test_workspace_property_returns_workspace(self):
         """workspace property returns the workspace instance."""
-        ws = Workspace()
+        ws = _make_workspace()
         runtime = AgentRuntime(workspace=ws)
         assert runtime.workspace is ws
 
@@ -512,7 +515,7 @@ class TestInvokeAgent:
         # self._hooks.on_subagent_start/end directly — which are the
         # HookManager convenience methods that call dispatch.
         # We mock the convenience methods directly.
-        runtime = AgentRuntime(workspace=Workspace(), hook_manager=hm)
+        runtime = AgentRuntime(workspace=_make_workspace(), hook_manager=hm)
 
         config = _make_config()
         runtime.create_session(config, session_id="target-id")
