@@ -14,7 +14,7 @@ from pathlib import Path
 
 from agent.core.workspace import Workspace, validate_session_id
 from agent.tools.toolset import ToolSet
-from shared.types import Message, MessageRole
+from shared.types import Message, MessageRole, MessageStatus, ToolCall
 
 
 def _default_toolset() -> ToolSet:
@@ -59,10 +59,9 @@ class Session:
             msg,
         )
 
-        # 更新 LLM 上下文缓存
-        openai_msg = _message_to_openai(msg)
-        if openai_msg is not None:
-            self._llm_context.append(openai_msg)
+        # 更新 LLM 上下文缓存。这里重建全量投影，让残缺 tool 序列、
+        # interrupted 半截消息等跨消息修复规则始终一致。
+        self._llm_context = _build_llm_context(self._messages)
 
     def get_messages(self) -> list[dict]:
         """返回所有 Message 的序列化形式（API / SSE 用）。"""
@@ -229,34 +228,152 @@ def _message_to_openai(msg: Message) -> dict | None:
     return None
 
 
+def _system_synthesis(text: str) -> dict:
+    return {"role": "system", "content": f"[History repair] {text}"}
+
+
+def _assistant_synthesis(text: str) -> dict:
+    return {"role": "assistant", "content": f"[History repair] {text}"}
+
+
+def _tool_synthesis(tool_call_id: str, tool_name: str) -> dict:
+    label = f" for {tool_name}" if tool_name else ""
+    return {
+        "role": "tool",
+        "tool_call_id": tool_call_id,
+        "content": f"Error: The interrupted tool call{label} did not complete.",
+    }
+
+
+def _valid_tool_call(tc: ToolCall) -> tuple[bool, str]:
+    if not tc.id:
+        return False, "missing id"
+    if tc.type != "function":
+        return False, f"unsupported type {tc.type!r}"
+    if not tc.function.name:
+        return False, "missing function name"
+    if not isinstance(tc.function.arguments, str):
+        return False, "arguments is not a string"
+    try:
+        json.loads(tc.function.arguments or "{}")
+    except json.JSONDecodeError:
+        return False, "arguments is not valid JSON"
+    return True, ""
+
+
+def _assistant_content_for_context(msg: Message) -> str:
+    if msg.error:
+        return msg.error
+    content = msg.content
+    if content and msg.status != MessageStatus.COMPLETE:
+        return content + "\n\n[History repair] Interrupted before completion."
+    return content
+
+
 def _build_llm_context(messages: list[Message]) -> list[dict]:
-    """从 Message 列表重建 OpenAI 上下文，过滤孤立的 tool 消息。"""
+    """从 Message 列表重建 OpenAI 上下文。
+
+    原始 Message 历史可以保留 interrupted / streaming 的半截事实；
+    这里输出的是给 OpenAI 的合法投影，尽量 synthesis 修复而不是丢弃。
+    """
     result: list[dict] = []
     open_ids: set[str] = set()
+    open_names: dict[str, str] = {}
+
+    def close_open_tool_calls() -> None:
+        nonlocal open_ids, open_names
+        for tcid in list(open_ids):
+            result.append(_tool_synthesis(tcid, open_names.get(tcid, "")))
+        open_ids = set()
+        open_names = {}
 
     for msg in messages:
         if msg.role == MessageRole.TOOL:
             if msg.tool_call_id not in open_ids:
+                result.append(
+                    _system_synthesis(
+                        "Omitted orphaned tool result "
+                        f"for tool_call_id={msg.tool_call_id or '<missing>'}."
+                    )
+                )
                 continue
             result.append(
                 {
                     "role": "tool",
                     "tool_call_id": msg.tool_call_id,
-                    "content": msg.tool_result,
+                    "content": msg.tool_result
+                    or msg.content
+                    or "[History repair] Tool returned no content.",
                 }
             )
             open_ids.discard(msg.tool_call_id)
+            open_names.pop(msg.tool_call_id, None)
             continue
 
-        openai_msg = _message_to_openai(msg)
-        if openai_msg is None:
-            continue
-        result.append(openai_msg)
+        if open_ids:
+            close_open_tool_calls()
 
-        if msg.role == MessageRole.ASSISTANT and msg.tool_calls:
-            open_ids = {tc.id for tc in msg.tool_calls}
+        if msg.role == MessageRole.USER:
+            result.append(
+                {
+                    "role": "user",
+                    "content": msg.content or "[History repair] Empty user message.",
+                }
+            )
+            continue
+
+        if msg.role != MessageRole.ASSISTANT:
+            continue
+
+        valid_tool_calls: list[ToolCall] = []
+        invalid_tool_notes: list[str] = []
+        for idx, tc in enumerate(msg.tool_calls):
+            valid, reason = _valid_tool_call(tc)
+            if valid:
+                valid_tool_calls.append(tc)
+            else:
+                name = tc.function.name or "<unknown>"
+                invalid_tool_notes.append(f"#{idx + 1} {name}: {reason}")
+
+        if invalid_tool_notes:
+            result.append(
+                _system_synthesis(
+                    "Omitted malformed assistant tool call(s): "
+                    + "; ".join(invalid_tool_notes)[:600]
+                )
+            )
+
+        content = _assistant_content_for_context(msg)
+        if valid_tool_calls:
+            openai_msg: dict = {
+                "role": "assistant",
+                "content": content or None,
+                "tool_calls": [
+                    tc.model_dump(mode="json") for tc in valid_tool_calls
+                ],
+            }
+            result.append(openai_msg)
+            open_ids = {tc.id for tc in valid_tool_calls}
+            open_names = {tc.id: tc.function.name for tc in valid_tool_calls}
+            continue
+
+        if content:
+            result.append({"role": "assistant", "content": content})
+        elif msg.reasoning:
+            result.append(
+                _assistant_synthesis(
+                    "Interrupted during reasoning before producing visible output."
+                )
+            )
         else:
-            open_ids = set()
+            result.append(
+                _assistant_synthesis(
+                    "Interrupted before producing visible output."
+                )
+            )
+
+    if open_ids:
+        close_open_tool_calls()
 
     return result
 

@@ -404,35 +404,47 @@ class TestStart:
             runtime.start(mock_session, "hello")
 
     @pytest.mark.asyncio
-    async def test_creates_task_from_invoke_user(self):
-        """start creates an asyncio Task wrapping invoke_user."""
+    async def test_creates_turn_task(self):
+        """start creates an asyncio Task for _execute_turn."""
         runtime = _make_runtime()
         mock_session = MagicMock()
+        mock_session.id = "test-id"
         mock_session.session_id = "test-id"
+        mock_session.transition_to = MagicMock()
 
-        with patch.object(
-            runtime, "invoke_user", new_callable=AsyncMock
-        ) as mock_invoke:
-            mock_invoke.return_value = "test-id"
+        with patch.object(runtime, "_execute_turn", new_callable=AsyncMock):
             runtime.start(mock_session, "hello")
             assert runtime._loop_task is not None
             assert isinstance(runtime._loop_task, asyncio.Task)
-            # The task name should follow the convention
-            assert "runtime-start-test-id" in runtime._loop_task.get_name()
+            assert "runtime-test-id" in runtime._loop_task.get_name()
 
     @pytest.mark.asyncio
     async def test_returns_session_id(self):
         """start returns the session's session_id."""
         runtime = _make_runtime()
         mock_session = MagicMock()
+        mock_session.id = "my-session"
         mock_session.session_id = "my-session"
+        mock_session.transition_to = MagicMock()
 
-        with patch.object(
-            runtime, "invoke_user", new_callable=AsyncMock
-        ) as mock_invoke:
-            mock_invoke.return_value = "my-session"
+        with patch.object(runtime, "_execute_turn", new_callable=AsyncMock):
             result = runtime.start(mock_session, "hello")
             assert result == "my-session"
+
+    @pytest.mark.asyncio
+    async def test_sets_running_state_synchronously(self):
+        """start exposes runtime/session running state before the task runs."""
+        runtime = _make_runtime()
+        mock_session = MagicMock()
+        mock_session.id = "sync-session"
+        mock_session.session_id = "sync-session"
+        mock_session.transition_to = MagicMock()
+
+        with patch.object(runtime, "_execute_turn", new_callable=AsyncMock):
+            runtime.start(mock_session, "hello")
+            assert runtime.status == RuntimeStatus.RUNNING
+            assert runtime.is_running_session("sync-session") is True
+            mock_session.transition_to.assert_called_with(SessionStatus.RUNNING)
 
 
 # ═══════════════════════════════════════════════════════════

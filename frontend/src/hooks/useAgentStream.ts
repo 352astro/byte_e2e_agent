@@ -25,12 +25,16 @@ export interface UseAgentStreamReturn {
   interrupting: boolean;
   messages: Message[];
   activeMessage: Message | null;
+  queuedSends: string[];
 
   // ── 命令（异步）──
   send: (
     question: string,
     sessionConfig?: CreateSessionRequest,
   ) => Promise<void>;
+  sendQueuedNow: (question?: string) => Promise<void>;
+  clearSendQueue: () => void;
+  updateQueuedSend: (index: number, value: string) => void;
   interrupt: () => Promise<void>;
   reloadMessages: () => Promise<void>;
   respondPending: (
@@ -139,6 +143,7 @@ export default function useAgentStream({
   const [runError, setRunError] = useState<string | null>(null);
   const [pendingGuard, setPendingGuard] = useState<GuardRequest | null>(null);
   const [notices, setNotices] = useState<Notice[]>([]);
+  const [queuedSends, setQueuedSends] = useState<string[]>([]);
 
   // ═══════════════════════════════════════════════════
   //  Refs (mutable, no re-render on change)
@@ -156,6 +161,10 @@ export default function useAgentStream({
   const noticeRemoveTimersRef = useRef<Map<string, number>>(new Map());
   const completedIdsRef = useRef<Set<string>>(new Set());
   const pendingToolMetaRef = useRef<Map<string, string[]>>(new Map());
+  const queuedBySessionRef = useRef<Map<string, string[]>>(new Map());
+  const lastTerminalEventRef = useRef<"turn_complete" | "interrupted" | null>(
+    null,
+  );
 
   // ═══════════════════════════════════════════════════
   //  Derived
@@ -174,6 +183,22 @@ export default function useAgentStream({
     runningRef.current = v;
     _setRunning(v);
   };
+
+  const syncQueuedSends = useCallback((sid: string | null) => {
+    setQueuedSends(sid ? [...(queuedBySessionRef.current.get(sid) || [])] : []);
+  }, []);
+
+  const takeQueuedSendText = useCallback(
+    (sid: string, extra?: string) => {
+      const parts = [...(queuedBySessionRef.current.get(sid) || [])];
+      const trimmedExtra = (extra || "").trim();
+      if (trimmedExtra) parts.push(trimmedExtra);
+      queuedBySessionRef.current.delete(sid);
+      syncQueuedSends(sessionId);
+      return parts.join("\n\n").trim();
+    },
+    [sessionId, syncQueuedSends],
+  );
 
   const bumpGen = () => {
     genRef.current += 1;
@@ -270,6 +295,17 @@ export default function useAgentStream({
     [],
   );
 
+  const enqueueSend = useCallback(
+    (sid: string, content: string) => {
+      const q = content.trim();
+      if (!q) return;
+      const next = [...(queuedBySessionRef.current.get(sid) || []), q];
+      queuedBySessionRef.current.set(sid, next);
+      syncQueuedSends(sessionId);
+    },
+    [sessionId, syncQueuedSends],
+  );
+
   useEffect(() => {
     const timer = window.setInterval(() => {
       const now = Date.now();
@@ -353,9 +389,14 @@ export default function useAgentStream({
         const data: RecoverData = await res.json();
         if (genRef.current !== gen) return; // gen gate
         const msgs: Message[] = data.messages || [];
+        const current = data.current_message || null;
         completedIdsRef.current = new Set(msgs.map((m) => m.id));
         setCompleted(msgs);
-        setActive(null);
+        if (current && !completedIdsRef.current.has(current.id)) {
+          setActive(current);
+        } else {
+          setActive(null);
+        }
         lastIdRef.current = msgs.length ? msgs[msgs.length - 1].id : null;
         setRuntimeBusy(Boolean(data.runtime_busy));
         setPendingGuard(data.pending_request?.message || null);
@@ -545,8 +586,11 @@ export default function useAgentStream({
         case "turn_complete":
         case "interrupted": {
           if (genRef.current !== gen) return;
+          lastTerminalEventRef.current = ev.kind;
           setActive((prev) => {
-            if (prev) appendCompleted({ ...prev, status: "complete" as const });
+            if (prev && hasRenderablePayload(prev)) {
+              appendCompleted({ ...prev, status: "complete" as const });
+            }
             return null;
           });
           setRunning(false);
@@ -597,10 +641,6 @@ export default function useAgentStream({
 
   const interruptInternal = useCallback(
     async (sid: string) => {
-      if (abortRef.current) {
-        abortRef.current.abort();
-        abortRef.current = null;
-      }
       try {
         await fetch(`/api/session/${sid}/interrupt`, { method: "POST" });
       } catch {
@@ -611,7 +651,6 @@ export default function useAgentStream({
         return null;
       });
       setRunning(false);
-      setRuntimeBusy(false);
       setInterrupting(false);
     },
     [appendCompleted],
@@ -623,21 +662,17 @@ export default function useAgentStream({
 
   const interrupt = useCallback(async (): Promise<void> => {
     if (!sessionId || !runningRef.current) return;
-    // NOTE: intentionally NOT checking opGuardRef here.
-    // send() holds opGuardRef while blocked on readSSEStream (e.g.
-    // during a long-running tool like sleep). If interrupt were gated
-    // by opGuardRef, the Stop button silently does nothing.
-    // Instead we always allow interrupt — it aborts the SSE stream
-    // first (via abortRef), causing send() to unwind and release the lock.
-    const gen = bumpGen();
+    // NOTE: intentionally NOT checking opGuardRef here. send() holds
+    // opGuardRef while blocked on readSSEStream. Stop must still be able
+    // to POST /interrupt, but the SSE connection must stay open so the
+    // runtime can stream the interrupted partial message and error bubble.
     setInterrupting(true);
     try {
       await interruptInternal(sessionId);
-      await reloadMessagesInternal(sessionId, gen);
     } finally {
       // No opGuardRef clearing here — interrupt is lock-free by design
     }
-  }, [sessionId, interruptInternal, reloadMessagesInternal]);
+  }, [sessionId, interruptInternal]);
 
   const respondPending = useCallback(
     async (
@@ -685,6 +720,16 @@ export default function useAgentStream({
         custom_tools: [],
       },
     ): Promise<void> => {
+      const prefill = prefillRef.current.trim();
+      const q = (prefill ? prefill + "\n" + question : question).trim();
+      if (!q) return;
+
+      if (sessionId && runningRef.current && streamSidRef.current === sessionId) {
+        if (prefill) prefillRef.current = "";
+        enqueueSend(sessionId, q);
+        return;
+      }
+
       if (opGuardRef.current) return;
       opGuardRef.current = true;
       const gen = bumpGen();
@@ -692,10 +737,7 @@ export default function useAgentStream({
       try {
         setRunError(null);
         setPendingGuard(null);
-        const prefill = prefillRef.current.trim();
         if (prefill) prefillRef.current = "";
-        const q = (prefill ? prefill + "\n" + question : question).trim();
-        if (!q) return;
 
         // Ensure session exists
         let sid = sessionId;
@@ -711,11 +753,12 @@ export default function useAgentStream({
           onSessionCreated?.(sid);
         }
 
-        // Interrupt any running stream (skip if we just created this session)
+        // Interrupt any other running stream (skip if we just created this session)
         if (!selfStarted && runningRef.current) {
           await interruptInternal(sid!);
         }
 
+        lastTerminalEventRef.current = null;
         setRunning(true);
         setRuntimeBusy(true);
         setInterrupting(false);
@@ -770,6 +813,19 @@ export default function useAgentStream({
         }
       } finally {
         opGuardRef.current = false;
+        const shouldDrain =
+          lastTerminalEventRef.current === "turn_complete" &&
+          streamSidRef.current != null &&
+          !runningRef.current;
+        const drainSid = streamSidRef.current;
+        if (shouldDrain && drainSid) {
+          const queued = takeQueuedSendText(drainSid);
+          if (queued) {
+            window.setTimeout(() => {
+              void send(queued);
+            }, 0);
+          }
+        }
       }
     },
     [
@@ -778,6 +834,73 @@ export default function useAgentStream({
       onSessionCreated,
       interruptInternal,
       readSSEStream,
+      upsertNotice,
+      enqueueSend,
+      takeQueuedSendText,
+    ],
+  );
+
+  const clearSendQueue = useCallback(() => {
+    if (!sessionId) return;
+    queuedBySessionRef.current.delete(sessionId);
+    syncQueuedSends(sessionId);
+  }, [sessionId, syncQueuedSends]);
+
+  const updateQueuedSend = useCallback(
+    (index: number, value: string) => {
+      if (!sessionId) return;
+      const current = [...(queuedBySessionRef.current.get(sessionId) || [])];
+      if (index < 0 || index >= current.length) return;
+      const nextValue = value.trim();
+      if (nextValue) {
+        current[index] = value;
+      } else {
+        current.splice(index, 1);
+      }
+      if (current.length) {
+        queuedBySessionRef.current.set(sessionId, current);
+      } else {
+        queuedBySessionRef.current.delete(sessionId);
+      }
+      syncQueuedSends(sessionId);
+    },
+    [sessionId, syncQueuedSends],
+  );
+
+  const sendQueuedNow = useCallback(
+    async (question = ""): Promise<void> => {
+      if (!sessionId) return;
+      const q = takeQueuedSendText(sessionId, question);
+      if (!q) return;
+
+      if (runningRef.current && streamSidRef.current === sessionId) {
+        lastTerminalEventRef.current = "interrupted";
+        await interruptInternal(sessionId);
+        for (let i = 0; i < 80 && opGuardRef.current; i += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 25));
+        }
+        if (opGuardRef.current) {
+          queuedBySessionRef.current.set(sessionId, [q]);
+          syncQueuedSends(sessionId);
+          upsertNotice({
+            id: `send-queue:${sessionId}`,
+            level: "warn",
+            title: "Send queued",
+            detail: "Waiting for the current request to stop.",
+            ttlMs: 3500,
+          });
+          return;
+        }
+      }
+
+      await send(q);
+    },
+    [
+      interruptInternal,
+      send,
+      sessionId,
+      syncQueuedSends,
+      takeQueuedSendText,
       upsertNotice,
     ],
   );
@@ -831,8 +954,11 @@ export default function useAgentStream({
       setRunning(false);
       setRuntimeBusy(false);
       streamSidRef.current = null;
+      syncQueuedSends(null);
       return;
     }
+
+    syncQueuedSends(sessionId);
 
     // If currently streaming on this exact session, don't interfere
     if (runningRef.current && streamSidRef.current === sessionId) return;
@@ -851,7 +977,7 @@ export default function useAgentStream({
     setRuntimeBusy(false);
     streamSidRef.current = null;
     reloadMessagesInternal(sessionId, gen);
-  }, [sessionId, reloadMessagesInternal]);
+  }, [sessionId, reloadMessagesInternal, syncQueuedSends]);
 
   // ═══════════════════════════════════════════════════
   //  Auto-reconnect effect (page refresh while running)
@@ -903,7 +1029,11 @@ export default function useAgentStream({
     interrupting,
     messages,
     activeMessage: active,
+    queuedSends,
     send,
+    sendQueuedNow,
+    clearSendQueue,
+    updateQueuedSend,
     interrupt,
     reloadMessages,
     respondPending,

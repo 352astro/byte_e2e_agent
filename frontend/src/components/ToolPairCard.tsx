@@ -64,7 +64,10 @@ function reduceStreamEvent(
 
   switch (ev.kind) {
     case "message_start": {
-      if (messages.some((m) => m.id === ev.message_id) || active?.id === ev.message_id) {
+      if (
+        messages.some((m) => m.id === ev.message_id) ||
+        active?.id === ev.message_id
+      ) {
         return { messages, active, done: false };
       }
       const nextMessages = active ? [...messages, active] : messages;
@@ -166,7 +169,8 @@ function SubAgentTranscript({
         const res = await fetch(`/api/session/${sessionId}/stream`, {
           signal: controller.signal,
         });
-        if (!res.ok || !res.body) throw new Error(`Server returned ${res.status}`);
+        if (!res.ok || !res.body)
+          throw new Error(`Server returned ${res.status}`);
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
@@ -290,16 +294,20 @@ function SubAgentToolCard({
 }) {
   const [collapsed, toggle] = useCollapsible(defaultCollapsed);
   const args = parseArgs(pair.toolCall?.function?.arguments || "");
-  const meta = ((pair.toolCall as any)?.tool_meta || {}) as Record<string, unknown>;
+  const meta = ((pair.toolCall as any)?.tool_meta || {}) as Record<
+    string,
+    unknown
+  >;
   const resultContent = pair.resultMessage?.tool_result || "";
   const toolStatus = pair.resultMessage?.tool_status || "";
   const toolStatusSource = pair.resultMessage?.tool_status_source || "";
   const toolStatusReason = pair.resultMessage?.tool_status_reason || "";
   const childSessionId =
     String(meta.child_session_id || "") || childSidFromResult(resultContent);
-  const status = toolStatus && toolStatus !== "success"
-    ? toolStatus
-    : String(meta.status || (resultContent ? "complete" : "running"));
+  const status =
+    toolStatus && toolStatus !== "success"
+      ? toolStatus
+      : String(meta.status || (resultContent ? "complete" : "running"));
   const prompt = String(args.prompt || "");
   const maxSteps = args.max_steps != null ? String(args.max_steps) : "";
   const canNest = Boolean(childSessionId) && depth < 3;
@@ -371,10 +379,7 @@ const ToolPairCard = React.memo(function ToolPairCard({
       <span className="file-call-path">{filePath}</span>
     ) : undefined;
 
-  const bodyContent =
-    toolName === "Write" && rest
-      ? rest
-      : undefined;
+  const bodyContent = toolName === "Write" && rest ? rest : undefined;
 
   if (toolName === "SubAgent") {
     return (

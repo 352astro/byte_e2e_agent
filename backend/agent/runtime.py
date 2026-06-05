@@ -168,6 +168,29 @@ class AgentRuntime:
         """检查指定 session 是否正在运行。"""
         return self._running_session_id == session_id
 
+    def _start_entry(
+        self,
+        entry: SessionEntry,
+        question: str,
+        *,
+        max_steps: int = 50,
+        shadow_repo=None,
+    ) -> str:
+        if self._running_session_id is not None:
+            raise RuntimeError(
+                f"Runtime already running session {self._running_session_id}"
+            )
+
+        self._running_session_id = entry.id
+        entry.transition_to(SessionStatus.RUNNING)
+        self._interrupt_event = asyncio.Event()
+        self._pending.clear()
+        self._loop_task = asyncio.create_task(
+            self._execute_turn(entry, question, max_steps, shadow_repo),
+            name=f"runtime-{entry.id}",
+        )
+        return entry.id
+
     # ── Invoke: 用户 ────────────────────────────────────
 
     async def invoke_user(
@@ -194,24 +217,12 @@ class AgentRuntime:
         Raises:
             RuntimeError: 如果已有 Session 在运行
         """
-        if self._running_session_id is not None:
-            raise RuntimeError(
-                f"Runtime already running session {self._running_session_id}"
-            )
-
-        entry = session
-        self._running_session_id = entry.id
-        entry.transition_to(SessionStatus.RUNNING)
-        self._interrupt_event = asyncio.Event()
-        self._pending.clear()
-
-        # 启动主循环
-        self._loop_task = asyncio.create_task(
-            self._execute_turn(entry, question, max_steps, shadow_repo),
-            name=f"runtime-{entry.id}",
+        return self._start_entry(
+            session,
+            question,
+            max_steps=max_steps,
+            shadow_repo=shadow_repo,
         )
-
-        return entry.id
 
     def start(
         self,
@@ -222,18 +233,12 @@ class AgentRuntime:
         shadow_repo=None,
     ) -> str:
         """同步启动（fire-and-forget），供同步上下文使用。"""
-        if self._running_session_id is not None:
-            raise RuntimeError(
-                f"Runtime already running session {self._running_session_id}"
-            )
-        session_id = _entry_id(session)
-        self._loop_task = asyncio.create_task(
-            self.invoke_user(
-                session, question, max_steps=max_steps, shadow_repo=shadow_repo
-            ),
-            name=f"runtime-start-{session_id}",
+        return self._start_entry(
+            session,
+            question,
+            max_steps=max_steps,
+            shadow_repo=shadow_repo,
         )
-        return session_id
 
     # ── Invoke: Agent → Agent ────────────────────────────
 
@@ -506,6 +511,26 @@ class AgentRuntime:
         await self._hooks.on_message_finish(msg=msg, session_id=session_id)
         return msg
 
+    async def _finish_partial_streaming_message(self, *, session_id: str) -> None:
+        msg = self.current_message
+        if msg is None or not msg.id:
+            return
+        if not (
+            msg.content
+            or msg.reasoning
+            or msg.error
+            or msg.tool_result
+            or msg.tool_calls
+        ):
+            return
+        msg.mark_complete()
+        await self._hooks.on_message_finish(
+            msg=msg,
+            session_id=session_id,
+            finish_reason="interrupted",
+            usage=getattr(msg, "_usage", None) or {},
+        )
+
     async def interrupt(self) -> bool:
         """中断当前运行的 Session。
 
@@ -725,6 +750,7 @@ class AgentRuntime:
                 )
 
         except InterruptedError:
+            await self._finish_partial_streaming_message(session_id=sid)
             error_msg_obj = await self._emit_error_message(
                 session_id=sid,
                 turn_id=turn_id,

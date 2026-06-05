@@ -350,6 +350,7 @@ export default function AgentDemo({
   sessionId,
   onSessionCreated,
 }: AgentDemoProps) {
+  const demoRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const overlayStackRef = useOverlayStackMotion();
 
@@ -358,7 +359,11 @@ export default function AgentDemo({
     runtimeBusy,
     interrupting,
     messages,
+    queuedSends,
     send,
+    sendQueuedNow,
+    clearSendQueue,
+    updateQueuedSend,
     interrupt,
     respondPending,
     prefillRef,
@@ -385,6 +390,23 @@ export default function AgentDemo({
   });
   const [graphVersion, setGraphVersion] = useState(0);
   const graphRef = useRef<CommitGraphHandle>(null);
+
+  useEffect(() => {
+    const root = demoRef.current;
+    if (!root) return;
+    const input = root.querySelector<HTMLElement>(".agent-input-bar");
+    if (!input) return;
+
+    const apply = () => {
+      const height = input.getBoundingClientRect().height;
+      root.style.setProperty("--agent-overlay-bottom", `${height + 16}px`);
+    };
+    apply();
+
+    const observer = new ResizeObserver(apply);
+    observer.observe(input);
+    return () => observer.disconnect();
+  }, []);
 
   // ── Commit data (session-level, shared with panel and badge) ──
   const [commits, setCommits] = useState<CommitInfo[]>([]);
@@ -562,6 +584,13 @@ export default function AgentDemo({
     [send, sessionId, sessionConfig],
   );
 
+  const handleSendNow = useCallback(
+    (question?: string) => {
+      void sendQueuedNow(question);
+    },
+    [sendQueuedNow],
+  );
+
   // ── Independent workspace/message rewind ──────
 
   interface TruncateOpts {
@@ -659,7 +688,7 @@ export default function AgentDemo({
   );
 
   return (
-    <div className="agent-demo">
+    <div className="agent-demo" ref={demoRef}>
       <div className="agent-scroll" ref={scrollRef} onScroll={handleScroll}>
         <div className="agent-scroll-center">
           <FocusProvider focusedId={focusedId}>
@@ -773,10 +802,14 @@ export default function AgentDemo({
         running={running}
         runtimeBusy={runtimeBusy}
         interrupting={interrupting}
+        queuedSends={queuedSends}
         prefillRef={prefillRef}
         prefillContent={prefillContent}
         onPrefillChange={setPrefillContent}
         onSend={handleSend}
+        onSendNow={handleSendNow}
+        onClearQueue={clearSendQueue}
+        onUpdateQueue={updateQueuedSend}
         onInterrupt={interrupt}
         sessionConfig={sessionConfig}
         onSessionConfigChange={setSessionConfig}

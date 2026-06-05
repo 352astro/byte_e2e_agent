@@ -89,12 +89,13 @@ const MessageCard = React.memo(function MessageCard({
   const toolCalls: ToolCall[] = m.tool_calls || [];
   const hasThinking = (m.reasoning || "").length > 0;
   const hasContent = (m.content || "").length > 0;
+  const showThinkingBlock = hasThinking || (isStreaming && !hasContent);
 
   return (
     <div className="message-row">
       <div className="transcript-card assistant-card">
         {/* Reasoning block */}
-        {(hasThinking || isStreaming) && (
+        {showThinkingBlock && (
           <CollapsibleCard
             id={`${m.id}/thinking`}
             dataFid={focusedId ? `${m.id}/thinking` : undefined}
@@ -136,7 +137,7 @@ const MessageCard = React.memo(function MessageCard({
         )}
 
         {/* Streaming indicator */}
-        {isStreaming && !hasThinking && !hasContent && (
+        {isStreaming && !showThinkingBlock && !hasContent && (
           <div className="transcript-body streaming-indicator">
             <span className="message-empty-spinner" aria-label="Thinking" />
           </div>
