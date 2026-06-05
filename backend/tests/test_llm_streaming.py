@@ -171,7 +171,7 @@ class TestModelCall:
             level="warn",
             title="Model request retrying",
             detail="RuntimeError",
-            progress="2/3",
+            progress="1/3",
             retry_after_ms=800,
             retry_at=ANY,
             ttl_ms=5000,

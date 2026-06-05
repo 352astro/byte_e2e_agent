@@ -48,10 +48,8 @@ export default function NoticeHost({ notices, onDismiss }: NoticeHostProps) {
     return () => window.clearInterval(timer);
   }, [hasCountdown]);
 
-  if (!notices.length) return null;
-
   return (
-    <div className="agent-notice-host" aria-live="polite" aria-atomic="false">
+    <>
       {notices.map((notice) => {
         const retryRemaining =
           notice.retryAt != null ? Math.max(0, notice.retryAt - now) : 0;
@@ -61,6 +59,7 @@ export default function NoticeHost({ notices, onDismiss }: NoticeHostProps) {
         return (
           <div
             key={notice.id}
+            data-overlay-item={`notice-${notice.id}`}
             className={`agent-notice agent-notice--${notice.level}${
               notice.exiting ? " agent-notice--exiting" : ""
             }`}
@@ -91,6 +90,6 @@ export default function NoticeHost({ notices, onDismiss }: NoticeHostProps) {
           </div>
         );
       })}
-    </div>
+    </>
   );
 }

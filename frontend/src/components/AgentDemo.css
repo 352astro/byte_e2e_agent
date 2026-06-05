@@ -32,16 +32,18 @@
     flex-shrink: 0;
 }
 
-/* ── Runtime notice bubbles ─────────────────── */
+/* ── Runtime overlay stack ──────────────────── */
 
-.agent-notice-host {
+.agent-overlay-stack {
     position: fixed;
-    right: 26px;
+    left: 50%;
     bottom: 96px;
     z-index: 160;
+    transform: translateX(-50%);
     display: flex;
-    width: min(360px, calc(100vw - 40px));
+    width: min(640px, calc(100vw - 32px));
     flex-direction: column;
+    align-items: center;
     gap: 8px;
     pointer-events: none;
 }
@@ -51,6 +53,7 @@
     grid-template-columns: 24px minmax(0, 1fr) 22px;
     align-items: center;
     gap: 10px;
+    width: min(360px, 100%);
     padding: 10px 10px 10px 12px;
     border: 1px solid #e2e7ef;
     border-radius: 8px;
@@ -58,18 +61,21 @@
     color: #20242b;
     box-shadow: 0 12px 28px rgba(18, 28, 42, 0.14);
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
     transition:
-        opacity 180ms ease,
-        transform 180ms ease,
+        opacity 220ms ease,
+        transform 260ms cubic-bezier(0.4, 0, 0.2, 1),
         box-shadow 180ms ease;
     pointer-events: auto;
-    animation: agent-notice-enter 180ms ease both;
+    will-change: transform, opacity;
+    animation: agent-overlay-impact-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .agent-notice--exiting {
     opacity: 0;
-    transform: translateY(-5px) scale(0.985);
+    transform: translateY(8px);
+    pointer-events: none;
+    animation: agent-overlay-ease-out 260ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
 .agent-notice--warn {
@@ -168,32 +174,45 @@
     opacity: 1;
 }
 
-@keyframes agent-notice-enter {
-    from {
+@keyframes agent-overlay-impact-in {
+    0% {
         opacity: 0;
-        transform: translateY(-6px) scale(0.985);
+        transform: translateY(18px);
+    }
+    72% {
+        opacity: 1;
+        transform: translateY(-2px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes agent-overlay-ease-out {
+    from {
+        opacity: 1;
+        transform: translateY(0);
     }
     to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
+        opacity: 0;
+        transform: translateY(8px);
     }
 }
 
 .agent-guard-request {
-    position: fixed;
-    left: 50%;
-    bottom: 96px;
-    z-index: 101;
-    transform: translateX(-50%);
     display: flex;
     align-items: center;
     gap: 16px;
-    max-width: min(560px, calc(100vw - 32px));
+    width: min(560px, 100%);
     padding: 12px 14px;
     border: 1px solid #d7d7d7;
     border-radius: 8px;
     background: #fff;
     box-shadow: 0 12px 34px rgba(0, 0, 0, 0.14);
+    pointer-events: auto;
+    will-change: transform, opacity;
+    animation: agent-overlay-impact-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .agent-guard-main {
@@ -269,7 +288,7 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    width: min(640px, calc(100vw - 32px));
+    width: min(640px, 100%);
     max-height: min(520px, calc(100vh - 160px));
     gap: 12px;
 }

@@ -3,6 +3,7 @@ import {
   useState,
   useRef,
   useEffect,
+  useLayoutEffect,
   useCallback,
   useMemo,
 } from "react";
@@ -32,6 +33,56 @@ interface AgentDemoProps {
 
 type MessageAction = "delete" | "replay" | null;
 
+function useOverlayStackMotion() {
+  const ref = useRef<HTMLDivElement>(null);
+  const previousRectsRef = useRef<Map<string, DOMRect>>(new Map());
+  const previousSignatureRef = useRef("");
+
+  useLayoutEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+
+    const nextRects = new Map<string, DOMRect>();
+    const items = Array.from(
+      root.querySelectorAll<HTMLElement>("[data-overlay-item]"),
+    );
+    const signature = items
+      .map((item) => item.dataset.overlayItem || "")
+      .join("|");
+    const shouldAnimateLayout =
+      previousSignatureRef.current !== "" &&
+      previousSignatureRef.current !== signature;
+
+    for (const item of items) {
+      const key = item.dataset.overlayItem;
+      if (!key) continue;
+      const next = item.getBoundingClientRect();
+      const previous = previousRectsRef.current.get(key);
+      nextRects.set(key, next);
+
+      if (!previous) continue;
+      const dy = previous.top - next.top;
+      if (!shouldAnimateLayout || Math.abs(dy) < 0.5) continue;
+
+      item.animate(
+        [
+          { transform: `translateY(${dy}px)` },
+          { transform: "translate(0, 0)" },
+        ],
+        {
+          duration: 260,
+          easing: "cubic-bezier(0.16, 1, 0.3, 1)",
+        },
+      );
+    }
+
+    previousRectsRef.current = nextRects;
+    previousSignatureRef.current = signature;
+  });
+
+  return ref;
+}
+
 function PendingRequestPanel({
   request,
   onRespond,
@@ -48,7 +99,11 @@ function PendingRequestPanel({
 
   if (request.kind !== "user_input_request") {
     return (
-      <div className="agent-guard-request" role="alert">
+      <div
+        className="agent-guard-request"
+        role="alert"
+        data-overlay-item={`pending-${request.request_id}`}
+      >
         <div className="agent-guard-main">
           <span className="agent-guard-kicker">Permission Required</span>
           <span className="agent-guard-text">
@@ -129,7 +184,11 @@ function PendingRequestPanel({
   };
 
   return (
-    <div className="agent-guard-request agent-user-request" role="alert">
+    <div
+      className="agent-guard-request agent-user-request"
+      role="alert"
+      data-overlay-item={`pending-${request.request_id}`}
+    >
       <div className="agent-guard-main agent-user-request-main">
         <span className="agent-guard-kicker">Input Requested</span>
         <span className="agent-guard-text">{title}</span>
@@ -292,6 +351,7 @@ export default function AgentDemo({
   onSessionCreated,
 }: AgentDemoProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const overlayStackRef = useOverlayStackMotion();
 
   const {
     running,
@@ -692,10 +752,21 @@ export default function AgentDemo({
         </div>
       </div>
 
-      <NoticeHost notices={notices} onDismiss={dismissNotice} />
-
-      {pendingGuard && (
-        <PendingRequestPanel request={pendingGuard} onRespond={respondPending} />
+      {(notices.length > 0 || pendingGuard) && (
+        <div
+          className="agent-overlay-stack"
+          ref={overlayStackRef}
+          aria-live="polite"
+          aria-atomic="false"
+        >
+          <NoticeHost notices={notices} onDismiss={dismissNotice} />
+          {pendingGuard && (
+            <PendingRequestPanel
+              request={pendingGuard}
+              onRespond={respondPending}
+            />
+          )}
+        </div>
       )}
 
       <AgentInput

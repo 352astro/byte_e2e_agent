@@ -326,20 +326,21 @@ class MemoryHook(BaseHook):
     async def _llm_call(
         self, prompt: str, max_tokens: int = 120, call_type: str = "memory"
     ) -> str:
-        client = self._extract_client
-        model = self._extract_model
-        if client is None:
-            from agent.memory._side_client import (
-                create_side_client,
-                get_side_model_id,
-            )
-
-            client = create_side_client()
-            model = get_side_model_id()
-
         t0 = time.time()
+        usage = None
 
         def _sync_call():
+            client = self._extract_client
+            model = self._extract_model
+            if client is None:
+                from agent.memory._side_client import (
+                    create_side_client,
+                    get_side_model_id,
+                )
+
+                client = create_side_client()
+                model = get_side_model_id()
+
             resp = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
@@ -355,10 +356,10 @@ class MemoryHook(BaseHook):
                     if hasattr(resp.usage, "model_dump")
                     else resp.usage
                 )
-            return content, usage
+            return content, usage, model
 
         try:
-            content, usage = await asyncio.wait_for(
+            content, usage, model = await asyncio.wait_for(
                 asyncio.to_thread(_sync_call),
                 timeout=self._llm_timeout,
             )
@@ -366,10 +367,14 @@ class MemoryHook(BaseHook):
             logger.warning(
                 "MemoryHook: LLM call timed out after %.1fs", self._llm_timeout
             )
-            content, usage = "", None
-        except Exception:
-            logger.exception("MemoryHook: LLM call failed")
-            content, usage = "", None
+            content, model = "", self._extract_model
+        except Exception as exc:
+            logger.warning(
+                "MemoryHook: LLM call failed with %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            content, model = "", self._extract_model
 
         # Record side-query metrics
         if self._metrics_store and model:

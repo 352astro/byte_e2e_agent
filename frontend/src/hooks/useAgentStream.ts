@@ -16,7 +16,7 @@ interface UseAgentStreamOptions {
   scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
-const NOTICE_EXIT_MS = 180;
+const NOTICE_EXIT_MS = 320;
 
 export interface UseAgentStreamReturn {
   // ── 只读状态 ──
@@ -107,6 +107,17 @@ function applyToolMeta(message: Message, raw: string): Message {
     },
   };
   return { ...message, tool_calls: tcs as any };
+}
+
+function hasRenderablePayload(message: Message): boolean {
+  return Boolean(
+    message.content ||
+      message.reasoning ||
+      message.error ||
+      message.tool_result ||
+      message.tool_name ||
+      (message.tool_calls && message.tool_calls.length > 0),
+  );
 }
 
 // ── hook ──────────────────────────────────────────────
@@ -423,7 +434,9 @@ export default function useAgentStream({
           setActive((prev) => {
             if (completedIdsRef.current.has(ev.message_id)) return prev;
             if (prev?.id === ev.message_id) return prev;
-            if (prev) appendCompleted(prev);
+            if (prev && hasRenderablePayload(prev)) {
+              appendCompleted({ ...prev, status: "complete" });
+            }
             return emptyMessage(ev.message_id, ev.turn_id, ev.role);
           });
           break;

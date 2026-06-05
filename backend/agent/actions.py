@@ -30,7 +30,7 @@ from shared.types import Message, ToolCall
 
 _SUBAGENT_DEBUG = True  # 设为 False 关闭子智能体控制台调试输出
 _STREAM_END = object()
-_DEFAULT_MODEL_MAX_RETRIES = 2
+_DEFAULT_MODEL_MAX_RETRIES = 3
 _DEFAULT_MODEL_RETRY_BASE_DELAY_MS = 800
 _DEFAULT_MODEL_RETRY_MAX_DELAY_MS = 8000
 
@@ -355,7 +355,7 @@ async def model_call(
             )
             if not should_retry:
                 raise
-            next_attempt = attempt + 2
+            retry_index = attempt + 1
             delay_ms = _model_retry_delay_ms(attempt)
             retry_at = int(time.time() * 1000) + delay_ms
             if hook_manager is not None:
@@ -364,7 +364,7 @@ async def model_call(
                     level="warn",
                     title="Model request retrying",
                     detail=_model_error_detail(exc),
-                    progress=f"{next_attempt}/{max_attempts}",
+                    progress=f"{retry_index}/{max_retries}",
                     retry_after_ms=delay_ms,
                     retry_at=retry_at,
                     ttl_ms=5000,

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid as _uuid
 from datetime import datetime, timezone
 
@@ -36,6 +37,8 @@ from agent.tool_execution import execute_tool_calls
 from app.core.config import TMP_DIR
 from shared.hooks import BaseHook, GuardCheck, HookManager
 from shared.types import Message
+
+logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════
 # AgentRuntime
@@ -484,6 +487,25 @@ class AgentRuntime:
             if entry and entry.status == SessionStatus.PENDING:
                 entry.transition_to(SessionStatus.RUNNING)
 
+    async def _emit_error_message(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        error: str,
+    ) -> Message:
+        msg = Message.error_message(_uuid.uuid4().hex, turn_id, error)
+        await self._hooks.on_message_start(msg=msg, session_id=session_id)
+        await self._hooks.on_chunk_complete(
+            msg=msg,
+            field="error",
+            full_content=msg.error,
+            is_error=True,
+            session_id=session_id,
+        )
+        await self._hooks.on_message_finish(msg=msg, session_id=session_id)
+        return msg
+
     async def interrupt(self) -> bool:
         """中断当前运行的 Session。
 
@@ -651,13 +673,11 @@ class AgentRuntime:
                     break
 
                 if not has_tool_calls:
-                    error_msg = Message.error_message(
-                        _uuid.uuid4().hex,
-                        turn_id,
-                        "LLM returned no tool_calls and no content.",
+                    await self._emit_error_message(
+                        session_id=sid,
+                        turn_id=turn_id,
+                        error="LLM returned no tool_calls and no content.",
                     )
-                    await self._hooks.on_message_start(msg=error_msg, session_id=sid)
-                    await self._hooks.on_message_finish(msg=error_msg, session_id=sid)
                     break
 
                 async def invoke_child_agent(
@@ -705,27 +725,27 @@ class AgentRuntime:
                 )
 
         except InterruptedError:
-            error_id = _uuid.uuid4().hex
-            error_msg_obj = Message.error_message(
-                error_id,
-                turn_id,
-                (
+            error_msg_obj = await self._emit_error_message(
+                session_id=sid,
+                turn_id=turn_id,
+                error=(
                     "The user interrupted the agent before it could "
                     "finish. Summarize what you have done so far and ask "
                     "how to proceed."
                 ),
             )
-            await self._hooks.on_message_start(msg=error_msg_obj, session_id=sid)
-            await self._hooks.on_message_finish(msg=error_msg_obj, session_id=sid)
             final_answer = error_msg_obj.error
         except Exception as exc:
-            import traceback
-
-            traceback.print_exc()
-            error_id = _uuid.uuid4().hex
-            error_msg_obj = Message.error_message(error_id, turn_id, str(exc))
-            await self._hooks.on_message_start(msg=error_msg_obj, session_id=sid)
-            await self._hooks.on_message_finish(msg=error_msg_obj, session_id=sid)
+            logger.warning(
+                "AgentRuntime: turn failed with %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            error_msg_obj = await self._emit_error_message(
+                session_id=sid,
+                turn_id=turn_id,
+                error=str(exc),
+            )
             final_answer = error_msg_obj.error
         finally:
             # ── on_turn_end ───────────────────────────
