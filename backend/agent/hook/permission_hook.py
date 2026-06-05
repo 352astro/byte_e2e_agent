@@ -12,7 +12,7 @@ TOOL_PERMISSIONS_FILE = "tool_permissions.json"
 class ToolPermissionHook(BaseHook):
     """Read global tool permissions from PROJECT_ROOT/.agent/."""
 
-    def __init__(self, workspace: str) -> None:
+    def __init__(self) -> None:
         from app.core.config import AGENT_DATA_DIR, PROJECT_ROOT
 
         self._permissions_path = PROJECT_ROOT / AGENT_DATA_DIR / TOOL_PERMISSIONS_FILE
@@ -38,7 +38,7 @@ class ToolPermissionHook(BaseHook):
             return {}
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             return {}
         if not isinstance(data, dict):
             return {}

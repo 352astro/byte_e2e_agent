@@ -52,7 +52,7 @@ class SessionLocator:
         return matches[0]
 
     def _candidate_workspaces(self, workspace_hint: str | None) -> list[str]:
-        raw = [workspace_hint, self._ctx.workspace, *list_workspaces()]
+        raw = [workspace_hint, self._ctx.workspace, *list_workspaces().values()]
         result: list[str] = []
         seen: set[str] = set()
         for item in raw:

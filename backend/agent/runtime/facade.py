@@ -131,10 +131,7 @@ class AgentRuntime:
             config=config,
             llm_client=llm_client,
             ws=ws
-            or Workspace(
-                self._workspace.root,
-                workspace_uuid=self._workspace.uuid,
-            ),
+            or self._workspace,
         )
         self._sessions[sid] = entry
         return entry

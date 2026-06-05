@@ -165,10 +165,7 @@ async def invoke_subagent(
         config,
         session_id=child_id,
         llm_client=openai_client,
-        ws=Workspace(
-            runtime._workspace.root,
-            workspace_uuid=runtime._workspace.uuid,
-        ),
+        ws=runtime._workspace,
     )
     write_subagent_metadata(
         runtime._workspace,

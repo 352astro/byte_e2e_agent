@@ -9,8 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agent.core.workspace import Workspace, is_valid_session_id
-from agent.core.workspace import Workspace as CoreWorkspace
+from agent.core.workspace import Workspace as CoreWorkspace, is_valid_session_id
 from agent.hook.logging_hook import LoggingHook
 from agent.hook.metrics_hook import MetricsHook
 from agent.hook.permission_hook import ToolPermissionHook
@@ -24,8 +23,8 @@ from agent.runtime import AgentRuntime
 from agent.session import Session, load_session
 from agent.shadow_repo import ShadowRepo
 from agent.tools.browser import close_all_browser_sessions_sync
-from app.services.workspace_registry import register_workspace
 from app.services.errors import AgentBusy
+from app.services.workspace_registry import register_workspace
 from shared.hooks import HookManager
 
 
@@ -66,7 +65,7 @@ class WorkspaceContext:
     @property
     def shadow_repo(self) -> ShadowRepo:
         if self._shadow_repo is None:
-            self._shadow_repo = ShadowRepo(self._workspace, workspace_uuid=self._workspace_uuid)
+            self._shadow_repo = ShadowRepo(self.core_workspace)
         return self._shadow_repo
 
     @property
@@ -98,12 +97,15 @@ class WorkspaceContext:
     def set_workspace(self, path: str) -> None:
         if self._any_runtime_busy():
             raise AgentBusy("Cannot switch workspace while an agent task is running")
+        from app.core.config import validate_agent_workspace
+
+        resolved = validate_agent_workspace(path)
         close_all_browser_sessions_sync()
         old_workspace = self._workspace
         if self._scoped_contexts.get(old_workspace) is self:
             del self._scoped_contexts[old_workspace]
-        self._workspace = self._normalize(path)
-        _, self._workspace_uuid = register_workspace(path)
+        self._workspace = self._normalize(resolved)
+        _, self._workspace_uuid = register_workspace(resolved)
         self._scoped_contexts[self._workspace] = self
         self._sessions.clear()
         self._runtime = None
@@ -138,10 +140,7 @@ class WorkspaceContext:
         return self.scheduler.create_session(
             config,
             session_id=session_id,
-            ws=CoreWorkspace(
-                self._workspace,
-                workspace_uuid=self._workspace_uuid,
-            ),
+            ws=self.core_workspace,
         )
 
     def get_session(self, session_id: str) -> Session:
@@ -168,8 +167,8 @@ class WorkspaceContext:
         return self._sessions.pop(session_id, None)
 
     def build_session(self, session_id: str, *, repair: bool = True) -> Session:
-        ws = Workspace(self._workspace, workspace_uuid=self._workspace_uuid)
-        return load_session(self._workspace_uuid, session_id, ws=ws, repair=repair)
+        ws = self.core_workspace
+        return load_session(session_id, ws=ws, repair=repair)
 
     def session_dir(self, session_id: str) -> Path:
         if not self.valid_session_id(session_id):
@@ -204,7 +203,7 @@ class WorkspaceContext:
             ),
             PersistenceHook(self._workspace_uuid),
             ShadowCommitHook(self.shadow_repo),
-            ToolPermissionHook(self._workspace),
+            ToolPermissionHook(),
         ]
         if self._settings.memory_enabled:
             hook_list.append(
@@ -220,10 +219,7 @@ class WorkspaceContext:
         hook_list.append(LoggingHook(verbose=True))
         hooks = HookManager(hook_list)
         return AgentRuntime(
-            CoreWorkspace(
-                self._workspace,
-                workspace_uuid=self._workspace_uuid,
-            ),
+            self.core_workspace,
             hooks,
         )
 

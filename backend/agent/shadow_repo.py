@@ -23,6 +23,7 @@ from dulwich.objects import Blob, Commit, Tree
 from dulwich.repo import Repo
 from dulwich.walk import Walker
 
+from agent.core.workspace import Workspace
 from agent.paths import shadow_repo_dir
 from app.core.config import AGENT_DATA_DIR
 
@@ -62,9 +63,9 @@ class ShadowRepo:
     def _branch_ref(session_id: str) -> bytes:
         return f"refs/heads/{session_id}".encode()
 
-    def __init__(self, workdir: str, workspace_uuid: str) -> None:
-        self._workdir = os.path.abspath(workdir)
-        self._repodir = os.path.abspath(str(shadow_repo_dir(workspace_uuid)))
+    def __init__(self, ws: Workspace) -> None:
+        self._workdir = os.path.abspath(str(ws.root))
+        self._repodir = os.path.abspath(str(shadow_repo_dir(ws.uuid)))
 
         # ── open or init bare repo ──────────────────────
         _ensure_dir(self._repodir)
@@ -84,7 +85,11 @@ class ShadowRepo:
             except FileNotFoundError:
                 pass
         # also ignore the shadow repo itself and .git
-        self._ignores: set[str] = {".git", AGENT_DATA_DIR, os.path.basename(self._repodir)}
+        self._ignores: set[str] = {
+            ".git",
+            AGENT_DATA_DIR,
+            os.path.basename(self._repodir),
+        }
         self._ignore_mgr = IgnoreFilterManager(self._workdir, global_filters, False)
 
         # ── index (staging area on disk) ────────────────

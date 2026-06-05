@@ -15,7 +15,7 @@ from contextvars import ContextVar
 from typing import Literal
 
 from langchain_core.tools import StructuredTool
-from playwright.async_api import Page
+from playwright.async_api import Page, Playwright, async_playwright
 from pydantic import BaseModel, Field
 
 # ── Browser session scope ────────────────────────────────
@@ -35,14 +35,6 @@ class BrowserSession:
                 return self._page
             except Exception:
                 self._page = None
-
-        try:
-            from playwright.async_api import async_playwright
-        except ImportError:
-            raise RuntimeError(
-                "Playwright not installed. Run: pip install playwright && "
-                "playwright install chromium"
-            )
 
         headless = _is_headless()
         self._playwright = await async_playwright().__aenter__()
@@ -154,14 +146,6 @@ async def _ensure_browser(session_id: str = ""):
             return _page
         except Exception:
             _page = None
-
-    try:
-        from playwright.async_api import async_playwright
-    except ImportError:
-        raise RuntimeError(
-            "Playwright not installed. Run: pip install playwright && "
-            "playwright install chromium"
-        )
 
     headless = _is_headless()
     pw = await async_playwright().__aenter__()

@@ -8,13 +8,17 @@ import select
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterator
 
 if sys.platform != "win32":
     import termios
+
+from agent.utils import sysguard
 
 
 @dataclass
@@ -52,16 +56,37 @@ class PersistentTerminal:
         self._proc: subprocess.Popen | None = None
         self._master_fd: int | None = None
         self._cwd = ""
+        self._sandbox_root = ""
+        self._seatbelt_profile_path: str | None = None
         self._last_exit_code = -1
 
-    def start(self, cwd: str = ".") -> None:
+    def start(self, cwd: str = ".", *, sandbox_root: str | None = None) -> None:
         if self._proc is not None:
             self.stop()
 
         self._cwd = os.path.abspath(cwd)
+        self._sandbox_root = os.path.abspath(sandbox_root or self._cwd)
         env = os.environ.copy()
+        backend_root = str(Path(__file__).resolve().parents[2])
+        env["PYTHONPATH"] = (
+            f"{backend_root}{os.pathsep}{env['PYTHONPATH']}"
+            if env.get("PYTHONPATH")
+            else backend_root
+        )
         if sys.platform != "win32":
             env["TERM"] = "dumb"
+        venv = env.get("VIRTUAL_ENV")
+        if venv:
+            try:
+                Path(venv).resolve().relative_to(backend_root)
+                env.pop("VIRTUAL_ENV", None)
+                path_parts = env.get("PATH", "").split(os.pathsep)
+                venv_bin = str(Path(venv).resolve() / "bin")
+                env["PATH"] = os.pathsep.join(
+                    part for part in path_parts if part and part != venv_bin
+                )
+            except ValueError:
+                pass
 
         if sys.platform == "win32":
             self._start_win32(env)
@@ -74,8 +99,33 @@ class PersistentTerminal:
         attrs[3] &= ~termios.ECHO
         termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
 
+        shell_cmd = list(self._shell)
+        if sys.platform == "darwin":
+            if sysguard.seatbelt_available():
+                profile = sysguard.build_seatbelt_profile(self._sandbox_root)
+                tmpf = tempfile.NamedTemporaryFile(
+                    mode="w",
+                    suffix=".sb",
+                    delete=False,
+                    encoding="utf-8",
+                )
+                tmpf.write(profile)
+                tmpf.close()
+                self._seatbelt_profile_path = tmpf.name
+                shell_cmd = ["sandbox-exec", "-f", tmpf.name, "--", *shell_cmd]
+        elif sys.platform == "linux":
+            shell_cmd = [
+                sys.executable,
+                "-m",
+                "agent.utils.sysguard_exec",
+                "--workspace",
+                self._sandbox_root,
+                "--",
+                *shell_cmd,
+            ]
+
         self._proc = subprocess.Popen(
-            self._shell,
+            shell_cmd,
             stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,
@@ -102,21 +152,37 @@ class PersistentTerminal:
     def stop(self) -> None:
         if self._proc is None:
             return
+        proc = self._proc
+        try:
+            if sys.platform != "win32":
+                pgid = os.getpgid(proc.pid)
+                os.killpg(pgid, signal.SIGTERM)
+            else:
+                proc.terminate()
+            proc.wait(timeout=1)
+        except Exception:
+            try:
+                if sys.platform != "win32":
+                    pgid = os.getpgid(proc.pid)
+                    os.killpg(pgid, signal.SIGKILL)
+                else:
+                    proc.kill()
+                proc.wait(timeout=1)
+            except Exception:
+                pass
         try:
             if self._master_fd is not None:
                 os.close(self._master_fd)
                 self._master_fd = None
         except Exception:
             pass
-        try:
-            self._proc.terminate()
-            self._proc.wait(timeout=5)
-        except Exception:
-            try:
-                self._proc.kill()
-            except Exception:
-                pass
         self._proc = None
+        if self._seatbelt_profile_path:
+            try:
+                os.unlink(self._seatbelt_profile_path)
+            except OSError:
+                pass
+            self._seatbelt_profile_path = None
 
     @property
     def alive(self) -> bool:

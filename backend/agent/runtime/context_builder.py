@@ -71,7 +71,7 @@ def build_llm_messages(
 
     from agent.session import load_session
 
-    session = load_session(str(workspace.root), session_id, ws=workspace)
+    session = load_session(session_id, ws=workspace)
     messages.extend(session.get_llm_context())
 
     if injected_context:

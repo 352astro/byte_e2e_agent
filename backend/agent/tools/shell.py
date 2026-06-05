@@ -8,7 +8,10 @@ Architecture (ported from main):
 from __future__ import annotations
 
 import asyncio
+import queue
 import sys
+import threading
+import time
 from pathlib import Path
 
 from langchain_core.tools import StructuredTool
@@ -78,7 +81,6 @@ async def shell_handler(
       4. On interrupt/timeout: SIGINT to process group, drain, return.
       5. Normal exit: collect all output, return with exit code annotation.
     """
-    loop = asyncio.get_event_loop()
     try:
         workdir = str(ws.resolve(cwd))
     except PermissionError as exc:
@@ -104,157 +106,99 @@ async def shell_handler(
         )
 
     terminal = PersistentTerminal()
-    terminal.start(workdir)
+    terminal.start(workdir, sandbox_root=str(ws.root))
 
-    # ── Write command synchronously (fast — no I/O wait) ──
-    marker, start_time = terminal.write_command(command)
-
-    # ── Async queue for chunks from the executor thread ──
-    chunk_queue: asyncio.Queue[str | None] = asyncio.Queue()
-
-    async def _read_task() -> None:
-        """Read PTY output in an executor thread, feed chunks into async queue."""
-
-        def _run() -> None:
-            try:
-                for chunk in terminal.read_stream(marker, start_time, timeout_ms):
-                    loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
-            finally:
-                loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
-
-        await loop.run_in_executor(None, _run)
-
-    # ── Trigger: fires on timeout OR user interrupt ──
-    trigger = asyncio.Event()
-    timed_out = False
-
-    async def _timeout_task() -> None:
-        nonlocal timed_out
-        await asyncio.sleep(timeout_ms / 1000.0)
-        timed_out = True
-        trigger.set()
-
-    async def _intr_wait_task() -> None:
-        if interrupt_event is None:
-            return  # never triggers
-        await interrupt_event.wait()
-        trigger.set()
-
-    # ── Signal task: on trigger, send SIGINT to foreground process group ──
-    interrupted_flag = asyncio.Event()
-
-    async def _signal_task() -> None:
-        await trigger.wait()
-        terminal.interrupt()
-        interrupted_flag.set()
-
-    read_task = asyncio.create_task(_read_task())
-    timeout_task = asyncio.create_task(_timeout_task())
-    intr_wait_task = asyncio.create_task(_intr_wait_task())
-    signal_task = asyncio.create_task(_signal_task())
-
-    output_parts: list[str] = []
-    output_bytes = 0
-    truncated_bytes = 0
+    result_queue: queue.Queue[object] = queue.Queue(maxsize=1)
     result_status = "success"
     result_source = "tool"
     result_reason = ""
+    output = ""
 
-    def append_output(chunk: str) -> None:
-        nonlocal output_bytes, truncated_bytes
-        if not chunk:
-            return
-        chunk_bytes = len(chunk.encode("utf-8", errors="replace"))
-        remaining = max_bytes - output_bytes
-        if remaining <= 0:
-            truncated_bytes += chunk_bytes
-            return
-        if chunk_bytes <= remaining:
-            output_parts.append(chunk)
-            output_bytes += chunk_bytes
-            return
-        raw = chunk.encode("utf-8", errors="replace")[:remaining]
-        output_parts.append(raw.decode("utf-8", errors="ignore"))
-        output_bytes = max_bytes
-        truncated_bytes += chunk_bytes - remaining
+    def _run_terminal() -> None:
+        try:
+            result_queue.put_nowait(terminal.run(command, timeout_ms))
+        except Exception as exc:
+            result_queue.put_nowait(exc)
+
+    thread = threading.Thread(target=_run_terminal, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + timeout_ms / 1000.0
 
     try:
-        while not interrupted_flag.is_set():
-            chunk_future = asyncio.ensure_future(chunk_queue.get())
-            intr_future = asyncio.ensure_future(interrupted_flag.wait())
+        interrupted = False
+        while True:
+            try:
+                item = result_queue.get_nowait()
+                if isinstance(item, Exception):
+                    raise item
+                result = item
+                output = result.output
+                if result.exit_code not in (0, -1):
+                    result_status = "error"
+                    result_reason = f"exit_code={result.exit_code}"
+                    output = (
+                        f"{output.rstrip()}\n[exit code: {result.exit_code}]"
+                        if output.strip()
+                        else f"[exit code: {result.exit_code}]"
+                    )
+                break
+            except queue.Empty:
+                pass
 
-            done, _ = await asyncio.wait(
-                [chunk_future, intr_future],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-            if chunk_future in done:
-                intr_future.cancel()
-                chunk = chunk_future.result()
-                if chunk is None:
-                    break
-                append_output(chunk)
-            else:
-                chunk_future.cancel()
-
-        # ── Interrupted or timed out: drain remaining chunks ──
-        if interrupted_flag.is_set():
-            while True:
-                try:
-                    chunk = chunk_queue.get_nowait()
-                    if chunk is None:
-                        break
-                    append_output(chunk)
-                except asyncio.QueueEmpty:
-                    break
-
-            if timed_out:
-                result_status = "timeout"
-                result_reason = f"timeout_ms={timeout_ms}"
-                output_parts.append(f"\n[Command timed out after {timeout_ms}ms]")
-            else:
+            if interrupt_event is not None and interrupt_event.is_set():
+                interrupted = True
                 result_status = "interrupted"
                 result_source = "user"
                 result_reason = "interrupted_by_user"
-                output_parts.append("\n[Command interrupted]")
+                output = "[Command interrupted]"
+                terminal.interrupt()
+                break
 
-            # Terminal may be dirty after interrupt — reset for next command
+            if time.monotonic() >= deadline:
+                result_status = "timeout"
+                result_reason = f"timeout_ms={timeout_ms}"
+                output = f"[Command timed out after {timeout_ms}ms]"
+                terminal.interrupt()
+                break
+
+            await asyncio.sleep(0.02)
+
+        if result_status in {"timeout", "interrupted"}:
+            end_wait = time.monotonic() + 2.0
+            while time.monotonic() < end_wait:
+                try:
+                    item = result_queue.get_nowait()
+                    if not isinstance(item, Exception) and item.output.strip():
+                        output = f"{item.output.rstrip()}\n{output}"
+                    break
+                except queue.Empty:
+                    await asyncio.sleep(0.02)
+            if interrupted and not output.strip():
+                output = "[Command interrupted]"
+            if result_status == "timeout" and "timed out" not in output.lower():
+                output = f"{output.rstrip()}\n[Command timed out after {timeout_ms}ms]"
+        if thread.is_alive():
             terminal.stop()
-
+    except Exception as exc:
+        result_status = "error"
+        result_reason = "shell_error"
+        output = f"Error: {exc}"
     finally:
-        for t in (read_task, timeout_task, intr_wait_task, signal_task):
-            if not t.done():
-                t.cancel()
-        await asyncio.gather(
-            read_task,
-            timeout_task,
-            intr_wait_task,
-            signal_task,
-            return_exceptions=True,
-        )
-        # Ensure terminal is stopped if not already
-        try:
-            terminal.stop()
-        except Exception:
-            pass
+        if thread.is_alive():
+            try:
+                terminal.stop()
+            except Exception:
+                pass
 
-    output = "".join(output_parts).strip()
-    if truncated_bytes > 0:
+    output = output.strip()
+    raw = output.encode("utf-8", errors="replace")
+    if len(raw) > max_bytes:
+        omitted = len(raw) - max_bytes
+        output = raw[:max_bytes].decode("utf-8", errors="ignore").rstrip()
         output = (
             f"{output}\n[output truncated after {max_bytes} bytes; "
-            f"{truncated_bytes} bytes omitted]"
+            f"{omitted} bytes omitted]"
         ).strip()
-
-    # ── Append exit code for non-zero (normal exit path only) ──
-    if not interrupted_flag.is_set():
-        exit_code = terminal._last_exit_code
-        if exit_code not in (0, -1):
-            result_status = "error"
-            result_reason = f"exit_code={exit_code}"
-            if output:
-                output += f"\n[exit code: {exit_code}]"
-            else:
-                output = f"[exit code: {exit_code}]"
 
     return ToolResult(
         output if output else "(no output)",

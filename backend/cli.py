@@ -26,6 +26,8 @@ from agent.hook.logging_hook import LoggingHook  # noqa: E402
 from agent.llm import get_model_id  # noqa: E402
 from agent.runtime import AgentRuntime  # noqa: E402
 from shared.hooks import HookManager  # noqa: E402
+from app.core.config import get_settings  # noqa: E402
+from app.services.workspace_registry import register_workspace  # noqa: E402
 
 # ── ANSI ──────────────────────────────────────────────────
 
@@ -73,8 +75,7 @@ def _check_env() -> None:
         sys.exit(1)
 
 
-async def _run_once(workspace_root: str, workspace_uuid: str, question: str) -> None:
-    ws = Workspace(workspace_root, workspace_uuid=workspace_uuid)
+async def _run_once(ws: Workspace, question: str) -> None:
     hooks = HookManager([LoggingHook(verbose=True)])
     runtime = AgentRuntime(ws, hooks)
     model_id = get_model_id()
@@ -82,7 +83,7 @@ async def _run_once(workspace_root: str, workspace_uuid: str, question: str) -> 
     session = runtime.create_session(
         SessionConfig.user_main(name="cli", model_id=model_id),
     )
-    _banner(workspace_root, model_id)
+    _banner(str(ws.root), model_id)
 
     await runtime.invoke_user(session, question)
     if runtime._loop_task is not None:
@@ -92,8 +93,7 @@ async def _run_once(workspace_root: str, workspace_uuid: str, question: str) -> 
             pass
 
 
-async def _run_repl(workspace_root: str, workspace_uuid: str) -> None:
-    ws = Workspace(workspace_root, workspace_uuid=workspace_uuid)
+async def _run_repl(ws: Workspace) -> None:
     hooks = HookManager([LoggingHook(verbose=True)])
     runtime = AgentRuntime(ws, hooks)
     model_id = get_model_id()
@@ -101,7 +101,7 @@ async def _run_repl(workspace_root: str, workspace_uuid: str) -> None:
     session = runtime.create_session(
         SessionConfig.user_main(name="cli", model_id=model_id),
     )
-    _banner(workspace_root, model_id)
+    _banner(str(ws.root), model_id)
 
     while True:
         try:
@@ -146,7 +146,8 @@ if __name__ == "__main__":
     _, ws_uuid = register_workspace(workspace)
     args = sys.argv[1:]
 
+    ws = Workspace(workspace, workspace_uuid=ws_uuid)
     if args:
-        asyncio.run(_run_once(workspace, ws_uuid, " ".join(args)))
+        asyncio.run(_run_once(ws, " ".join(args)))
     else:
-        asyncio.run(_run_repl(workspace, ws_uuid))
+        asyncio.run(_run_repl(ws))

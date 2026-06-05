@@ -156,6 +156,10 @@ class SessionService:
 
     async def delete_session(self, session_id: str) -> None:
         scope = self._locator.resolve(session_id)
+        await self._delete_session_scope(scope)
+
+    async def _delete_session_scope(self, scope: SessionScope) -> None:
+        session_id = scope.session_id
         ctx = self._ctx.scoped(scope.workspace)
         child_scopes = self._child_scopes(scope.workspace, session_id)
         await close_browser_session(session_id)
@@ -174,7 +178,7 @@ class SessionService:
         if session_dir.is_dir():
             shutil.rmtree(session_dir)
         for child_scope in child_scopes:
-            await self.delete_session(child_scope.session_id)
+            await self._delete_session_scope(child_scope)
 
     async def delete_subagents_for_messages(
         self, workspace: str, parent_message_ids: set[str]
@@ -186,7 +190,7 @@ class SessionService:
             metadata = read_session_metadata(child_scope)
             if metadata.get("parent_message_id") not in parent_message_ids:
                 continue
-            await self.delete_session(child_scope.session_id)
+            await self._delete_session_scope(child_scope)
             deleted += 1
         return deleted
 

@@ -22,8 +22,22 @@ load_dotenv()
 # Central constant for the agent's internal storage directory
 # (under PROJECT_ROOT).
 AGENT_DATA_DIR = ".byte_agent"
+AGENT_PLAYGROUND_DIR = ".agent-playground"
 
 DEFAULT_LLM_METRICS_DB_PATH = f"{AGENT_DATA_DIR}/metrics.db"
+
+
+def _paths_overlap(left: Path, right: Path) -> bool:
+    try:
+        left.relative_to(right)
+        return True
+    except ValueError:
+        pass
+    try:
+        right.relative_to(left)
+        return True
+    except ValueError:
+        return False
 
 
 def resolve_agent_workspace(path: str) -> str:
@@ -32,6 +46,56 @@ def resolve_agent_workspace(path: str) -> str:
     if not p.is_absolute():
         p = PROJECT_ROOT / p
     return str(p.resolve())
+
+
+def playground_workspace() -> str:
+    """Return the repo-local ignored playground workspace path."""
+    path = PROJECT_ROOT / AGENT_PLAYGROUND_DIR
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path.resolve())
+
+
+def coerce_agent_workspace(path: str | Path) -> str:
+    """Normalize workspace and redirect repo paths to the local playground."""
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        p = PROJECT_ROOT / p
+    resolved = p.resolve()
+    try:
+        resolved.relative_to(PROJECT_ROOT)
+        return playground_workspace()
+    except ValueError:
+        return str(resolved)
+
+
+def validate_agent_workspace(path: str | Path) -> str:
+    """Return a resolved workspace path after enforcing global safety policy."""
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        p = PROJECT_ROOT / p
+    resolved = p.resolve()
+    if resolved == Path(playground_workspace()).resolve():
+        return str(resolved)
+    try:
+        PROJECT_ROOT.relative_to(resolved)
+        raise ValueError(
+            "Workspace cannot contain the application repository: "
+            f"{resolved}"
+        )
+    except ValueError as exc:
+        if "Workspace cannot" in str(exc):
+            raise
+    if _paths_overlap(resolved, PROJECT_ROOT):
+        raise ValueError(
+            "Workspace cannot be the application repository, contain it, "
+            f"or be inside it: {resolved}"
+        )
+    return str(resolved)
+
+
+def _default_agent_workspace() -> str:
+    """Create and return a safe default workspace outside PROJECT_ROOT."""
+    return playground_workspace()
 
 
 @dataclass(frozen=True)
@@ -83,8 +147,10 @@ def get_settings() -> Settings:
     return Settings(
         # ── App ────────────────────────────────
         app_title="Byte E2E Agent Backend",
-        agent_workspace=resolve_agent_workspace(
-            os.environ.get("AGENT_WORKSPACE", str(PROJECT_ROOT))
+        agent_workspace=validate_agent_workspace(
+            coerce_agent_workspace(
+                os.environ.get("AGENT_WORKSPACE") or _default_agent_workspace()
+            )
         ),
         cors_allow_origins=("http://localhost:5173",),
         cors_allow_origin_regex=r"http://localhost:\d+",

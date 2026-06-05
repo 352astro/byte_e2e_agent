@@ -11,7 +11,13 @@ import threading
 import uuid as _uuid
 from pathlib import Path
 
-from app.core.config import AGENT_DATA_DIR, PROJECT_ROOT, resolve_agent_workspace
+from app.core.config import (
+    AGENT_DATA_DIR,
+    PROJECT_ROOT,
+    coerce_agent_workspace,
+    resolve_agent_workspace,
+    validate_agent_workspace,
+)
 
 _REGISTRY_DIR = PROJECT_ROOT / AGENT_DATA_DIR
 _REGISTRY_FILE = _REGISTRY_DIR / "workspaces.json"
@@ -53,10 +59,15 @@ def _write_raw(mapping: dict[str, str]) -> None:
     )
 
 
-def _normalize_existing(path: str) -> str | None:
+def _normalize_existing(path: str, *, strict_policy: bool = False) -> str | None:
     try:
-        resolved = resolve_agent_workspace(path)
-    except ValueError, OSError:
+        resolved = coerce_agent_workspace(resolve_agent_workspace(path))
+        resolved = validate_agent_workspace(resolved)
+    except ValueError:
+        if strict_policy:
+            raise
+        return None
+    except OSError:
         return None
     if not Path(resolved).is_dir():
         return None
@@ -69,7 +80,7 @@ def register_workspace(path: str) -> tuple[str, str]:
     If the path is already registered, return the existing uuid.
     Otherwise generate a new uuid, persist, and return it.
     """
-    resolved = _normalize_existing(path)
+    resolved = _normalize_existing(path, strict_policy=True)
     if resolved is None:
         raise ValueError(f"Directory does not exist: {path}")
 
