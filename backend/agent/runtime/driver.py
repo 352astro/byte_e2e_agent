@@ -299,6 +299,15 @@ async def execute_turn(
         )
         final_answer = error_msg_obj.error
     finally:
+        # Clean up runtime state FIRST, before cancellable hook calls.
+        # If the task is cancelled during on_turn_end/flush, these must
+        # already be cleared so the system doesn't stay permanently busy.
+        runtime._streaming_holder = None
+        if top_level:
+            runtime._running_session_id = None
+            runtime._loop_task = None
+        entry.transition_to(SessionStatus.IDLE)
+
         await runtime._hooks.on_turn_end(
             turn_id=turn_id,
             session_id=sid,
@@ -306,10 +315,4 @@ async def execute_turn(
             output_tokens=total_output_tokens,
         )
         await runtime._hooks.flush()
-
-        runtime._streaming_holder = None
-        if top_level:
-            runtime._running_session_id = None
-            runtime._loop_task = None
-        entry.transition_to(SessionStatus.IDLE)
     return final_answer or "SubAgent completed (no output)."

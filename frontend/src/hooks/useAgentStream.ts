@@ -644,6 +644,7 @@ export default function useAgentStream({
         return null;
       });
       setRunning(false);
+      setRuntimeBusy(false);
       setInterrupting(false);
     },
     [appendCompleted],
@@ -654,7 +655,7 @@ export default function useAgentStream({
   // ═══════════════════════════════════════════════════
 
   const interrupt = useCallback(async (): Promise<void> => {
-    if (!sessionId || !runningRef.current) return;
+    if (!sessionId) return;
     // NOTE: intentionally NOT checking opGuardRef here. send() holds
     // opGuardRef while blocked on readSSEStream. Stop must still be able
     // to POST /interrupt, but the SSE connection must stay open so the

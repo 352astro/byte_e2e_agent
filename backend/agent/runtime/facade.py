@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import uuid as _uuid
 
 from agent.core.config import SessionConfig
@@ -329,16 +328,12 @@ class AgentRuntime:
     async def interrupt(self) -> bool:
         """中断当前运行的 Session。
 
-        设置中断标志后，等待主循环优雅退出（最多 5 秒），超时也返回 True。
-        主循环的 finally 块会完成清理工作。
+        只设置中断标志，不等待主循环退出。主循环的 finally
+        块会异步完成清理。调用方不应假设调用返回后状态已归位。
         """
         if self._interrupt_event is None:
             return False
         self._interrupt_event.set()
-        task = self._loop_task
-        if task is not None:
-            with contextlib.suppress(TimeoutError, asyncio.CancelledError, Exception):
-                await asyncio.wait_for(task, timeout=3.0)
         return True
 
     # ═══════════════════════════════════════════════════════
