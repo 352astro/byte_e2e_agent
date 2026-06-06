@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -28,11 +27,12 @@ from pydantic import BaseModel, Field
 
 
 class MessageRole(str, Enum):
-    """消息角色。USER/TOOL 天然 COMPLETE，ASSISTANT 从 STREAMING 开始。"""
+    """消息角色。USER/TOOL/SYSTEM 天然 COMPLETE，ASSISTANT 从 STREAMING 开始。"""
 
     USER = "user"
     ASSISTANT = "assistant"
     TOOL = "tool"
+    SYSTEM = "system"
 
 
 class MessageStatus(str, Enum):
@@ -188,6 +188,22 @@ class Message(BaseModel):
             role=MessageRole.ASSISTANT,
             status=MessageStatus.COMPLETE,
             error=error,
+        )
+
+    @classmethod
+    def system_message(
+        cls,
+        id: str,
+        turn_id: str,
+        content: str,
+    ) -> "Message":
+        """工厂：系统消息（append-only 上下文注入）。"""
+        return cls(
+            id=id,
+            turn_id=turn_id,
+            role=MessageRole.SYSTEM,
+            status=MessageStatus.COMPLETE,
+            content=content,
         )
 
 

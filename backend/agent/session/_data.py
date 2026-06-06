@@ -12,6 +12,7 @@ import json
 import uuid as _uuid
 from pathlib import Path
 
+from agent.core.config import SessionConfig
 from agent.core.workspace import Workspace, validate_session_id
 from agent.tools.toolset import ToolSet
 from shared.types import Message, MessageRole, MessageStatus, ToolCall
@@ -288,6 +289,10 @@ def _build_llm_context(messages: list[Message]) -> list[dict]:
         open_names = {}
 
     for msg in messages:
+        if msg.role == MessageRole.SYSTEM:
+            result.append({"role": "system", "content": msg.content or ""})
+            continue
+
         if msg.role == MessageRole.TOOL:
             if msg.tool_call_id not in open_ids:
                 result.append(
@@ -398,3 +403,80 @@ def _session_dir(ws: Workspace, session_id: str) -> Path:
 
 def _validate_session_id(session_id: str) -> None:
     validate_session_id(session_id)
+
+
+# ═══════════════════════════════════════════════════════════
+# Session immutable prefix — written once at session creation
+# ═══════════════════════════════════════════════════════════
+
+
+def write_session_prefix(ws: Workspace, session_id: str, config: SessionConfig) -> None:
+    """Write the immutable prefix messages to a new session's JSONL.
+
+    These messages form the KV-cache anchor — they never change across
+    the session's lifetime. Called once from AgentRuntime.create_session().
+    """
+    import uuid as _uuid
+
+    from agent.core.prompts import SYSTEM_PROMPT
+    from agent.tools.shell import get_platform_hint
+    from agent.tools.skill import get_skill, skill_context_message
+    from app.core.config import AGENT_DATA_DIR
+
+    turn_id = _uuid.uuid4().hex
+
+    prefix_messages: list[Message] = [
+        Message.system_message(_uuid.uuid4().hex, turn_id, SYSTEM_PROMPT),
+        Message.system_message(
+            _uuid.uuid4().hex,
+            turn_id,
+            f"## Platform\n{get_platform_hint()}",
+        ),
+        Message.system_message(
+            _uuid.uuid4().hex,
+            turn_id,
+            (
+                f"## System Directory\n"
+                f"The `{AGENT_DATA_DIR}/` directory at the project root is managed by "
+                f"the system for internal storage. "
+                f"Do NOT read, edit, create, or delete files under `{AGENT_DATA_DIR}`."
+            ),
+        ),
+        Message.system_message(
+            _uuid.uuid4().hex, turn_id, skill_context_message()["content"]
+        ),
+    ]
+
+    if config.preloaded_skills:
+        parts: list[str] = []
+        for skill_name in config.preloaded_skills:
+            skill = get_skill(skill_name)
+            if skill is None:
+                continue
+            parts.append(
+                f"[SKILL: {skill_name}]\n\n"
+                "The following skill methodology is pre-loaded into your context. "
+                "Follow it exactly.\n\n"
+                f"{skill.read()}"
+            )
+        if parts:
+            prefix_messages.append(
+                Message.system_message(_uuid.uuid4().hex, turn_id, "\n\n".join(parts))
+            )
+
+    if config.preamble:
+        prefix_messages.append(
+            Message.system_message(_uuid.uuid4().hex, turn_id, config.preamble)
+        )
+
+    if config.rules:
+        prefix_messages.append(
+            Message.system_message(
+                _uuid.uuid4().hex,
+                turn_id,
+                "## Session Rules\n" + "\n".join(f"- {rule}" for rule in config.rules),
+            )
+        )
+
+    for msg in prefix_messages:
+        _save_message_sync(ws, session_id, msg)

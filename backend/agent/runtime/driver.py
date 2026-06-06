@@ -8,7 +8,7 @@ import uuid as _uuid
 from agent.actions import model_call
 from agent.errors import InterruptedError
 from agent.runtime.context_builder import build_llm_messages
-from agent.runtime.messages import emit_error_message, extract_usage
+from agent.runtime.messages import emit_system_message, extract_usage
 from agent.runtime.tooling import default_toolset
 from agent.session.entry import SessionEntry
 from agent.session.status import SessionStatus
@@ -18,6 +18,86 @@ from agent.tools.toolset import ToolSet
 from shared.types import Message
 
 logger = logging.getLogger(__name__)
+
+# Number of consecutive user/assistant exchanges without a task-tool call
+# before the system reminds the model to check its task list.
+_TASK_STALE_THRESHOLD = 2
+
+
+# ── Turn-start context helpers ──────────────────────────
+
+
+def _find_last_skill_content(history: list[dict]) -> str | None:
+    """Scan message history (OpenAI-format) from the end for the most recent
+    skill summary system message and return its content."""
+    for m in reversed(history):
+        if m.get("role") != "system":
+            continue
+        content = m.get("content", "")
+        if content.startswith("## Available Skills"):
+            return content
+    # Fallback: use empty string so first diff always triggers an append
+    return ""
+
+
+def _skills_diff_append(
+    hooks,
+    *,
+    session_id: str,
+    turn_id: str,
+    history: list[dict],
+) -> str | None:
+    """Return the skill summary content if it differs from the last written one,
+    or None if unchanged. Also emits the system message via hooks."""
+    from agent.tools.skill import skill_context_message
+
+    current = skill_context_message()["content"]
+    previous = _find_last_skill_content(history)
+    if current == previous:
+        return None
+    return current
+
+
+def _count_turns_since_last_task_tool(history: list[dict]) -> int:
+    """Count user messages since the last assistant message that contained
+    a TaskRewrite or TaskUpdate tool call."""
+    turns = 0
+    for m in reversed(history):
+        role = m.get("role", "")
+        if role == "user":
+            turns += 1
+            continue
+        if role == "assistant":
+            tool_calls = m.get("tool_calls") or []
+            for tc in tool_calls:
+                name = (tc.get("function") or {}).get("name", "")
+                if name in ("TaskRewrite", "TaskUpdate"):
+                    return turns
+    # No task tool call found at all — count all turns
+    return turns
+
+
+def _tasks_exist(ws, session_id: str) -> bool:
+    """Check whether the session has a non-empty task list on disk."""
+    try:
+        from agent.tools.task import _load_tasks_sync, _tasks_path
+
+        path = _tasks_path(ws, session_id)
+        if not path.exists():
+            return False
+        tasks = _load_tasks_sync(path)
+        return len(tasks) > 0
+    except Exception:
+        return False
+
+
+_TASK_REMINDER = (
+    "Your task list may be stale. "
+    "Use TaskList to review current status and continue from the next pending task."
+)
+
+
+# ── Turn executor ───────────────────────────────────────
 
 
 async def execute_turn(
@@ -49,6 +129,7 @@ async def execute_turn(
     )
 
     try:
+        # ── 1. Append user message ──────────────────────
         user_id = _uuid.uuid4().hex
         user_msg = Message.user_message(user_id, turn_id, question)
         await runtime._hooks.on_message_start(msg=user_msg, session_id=sid)
@@ -60,29 +141,60 @@ async def execute_turn(
         )
         await runtime._hooks.on_message_finish(msg=user_msg, session_id=sid)
 
-        injected_context = await runtime._hooks.gather_context(
+        # ── 2. Load current history for diff checks ─────
+        history = build_llm_messages(session_id=sid, workspace=ws)
+
+        # ── 3. Skills diff → append if changed ─────────
+        new_skills = _skills_diff_append(
+            runtime._hooks,
+            session_id=sid,
+            turn_id=turn_id,
+            history=history,
+        )
+        if new_skills:
+            await emit_system_message(
+                runtime._hooks,
+                session_id=sid,
+                turn_id=turn_id,
+                content=new_skills,
+            )
+
+        # ── 4. Memory → append ─────────────────────────
+        injected = await runtime._hooks.gather_context(
             turn_id=turn_id,
             session_id=sid,
             user_question=question,
         )
+        for item in injected:
+            if item.get("role") == "system" and item.get("content"):
+                await emit_system_message(
+                    runtime._hooks,
+                    session_id=sid,
+                    turn_id=turn_id,
+                    content=item["content"],
+                )
 
+        # ── 5. Task stale reminder ─────────────────────
+        turns_since_task = _count_turns_since_last_task_tool(history)
+        if turns_since_task >= _TASK_STALE_THRESHOLD and _tasks_exist(ws, sid):
+            await emit_system_message(
+                runtime._hooks,
+                session_id=sid,
+                turn_id=turn_id,
+                content=_TASK_REMINDER,
+            )
+
+        # ── ReAct loop ─────────────────────────────────
         for _step in range(max_steps):
             if intr.is_set():
                 raise InterruptedError("Interrupted by user")
 
-            messages = build_llm_messages(
-                entry=entry,
-                workspace=ws,
-                session_id=sid,
-                injected_context=injected_context,
-            )
+            messages = build_llm_messages(session_id=sid, workspace=ws)
 
             assistant_id = _uuid.uuid4().hex
             tool_names = entry.config.tool_names()
             toolset = (
-                ToolSet(tool_registry, *tool_names)
-                if tool_names
-                else default_toolset()
+                ToolSet(tool_registry, *tool_names) if tool_names else default_toolset()
             )
 
             streaming_holder: list[Message | None] = [None]

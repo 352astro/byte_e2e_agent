@@ -9,11 +9,16 @@ from typing import Literal
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
+
 TaskStatus = Literal["pending", "progress", "done"]
 
 
 def task_context_message(ws, session_id: str = "") -> dict:
-    """返回本轮任务列表的系统消息。"""
+    """返回本轮任务列表的系统消息。
+
+    Deprecated: tasks are no longer injected as temporary context.
+    Kept for backward compatibility with existing callers.
+    """
     try:
         tasks = _load_tasks_for_context(ws, session_id)
         content = _format_task_context(tasks)
@@ -118,7 +123,11 @@ class TaskUpdateInput(BaseModel):
 async def task_update_handler(
     id: str, status: str, summary: str, *, ws=None, session_id: str = ""
 ) -> str:
-    """Update one task status and summary."""
+    """Update one task status and summary.
+
+    Returns enriched output with current task state and the next
+    actionable task so the model knows what to work on next.
+    """
     tasks = await _load_tasks(ws, session_id)
     index = _find_task_index(tasks, id)
     if index is None:
@@ -148,7 +157,19 @@ async def task_update_handler(
             )
 
     await _save_tasks(ws, next_tasks, session_id)
-    return "Task updated."
+
+    # Build enriched response with next-step guidance
+    annotated = _with_blocked(next_tasks)
+    counts = _task_counts(annotated)
+    next_up = _next_actionable_task(annotated)
+
+    lines = ["Task updated.", f"State: {counts}"]
+    if next_up:
+        lines.append(
+            f"Next: [{next_up['id']}] "
+            f"{next_up.get('name') or next_up.get('description', '')}"
+        )
+    return "\n".join(lines)
 
 
 task_update_tool = StructuredTool.from_function(
@@ -218,7 +239,10 @@ def _validate_tasks(tasks: list[dict]) -> str | None:
         if task.get("status") == "done" and not summary.strip():
             return f"task {task_id} is done but summary is empty"
         if task.get("status") in ("pending", "progress") and summary.strip():
-            return f"task {task_id} is {task.get('status')} but summary is not empty: {summary}"
+            return (
+                f"task {task_id} is {task.get('status')} but summary "
+                f"is not empty: {summary}"
+            )
         for dep_id in task.get("depends_on", []):
             if dep_id not in ids and dep_id not in {t.get("id") for t in tasks}:
                 return f"task {task_id} depends on missing task id: {dep_id}"
@@ -314,6 +338,38 @@ def _with_blocked(tasks: list[dict]) -> list[dict]:
             }
         )
     return result
+
+
+def _task_counts(tasks: list[dict]) -> str:
+    """Return a compact summary like '3 pending, 1 in progress, 2 done'."""
+    pending = sum(
+        1 for t in tasks if t.get("status") == "pending" and not t.get("blocked")
+    )
+    blocked = sum(1 for t in tasks if t.get("blocked"))
+    progress = sum(1 for t in tasks if t.get("status") == "progress")
+    done = sum(1 for t in tasks if t.get("status") == "done")
+    parts = []
+    if pending:
+        parts.append(f"{pending} pending")
+    if blocked:
+        parts.append(f"{blocked} blocked")
+    if progress:
+        parts.append(f"{progress} in progress")
+    if done:
+        parts.append(f"{done} done")
+    return ", ".join(parts) if parts else "no tasks"
+
+
+def _next_actionable_task(tasks: list[dict]) -> dict | None:
+    """Return the first pending task whose dependencies are all done."""
+    for task in tasks:
+        if task.get("status") == "pending" and not task.get("blocked"):
+            return task
+    # Fallback: return first pending (even if blocked) so model sees what's stuck
+    for task in tasks:
+        if task.get("status") == "pending":
+            return task
+    return None
 
 
 def _dump(data: dict) -> str:

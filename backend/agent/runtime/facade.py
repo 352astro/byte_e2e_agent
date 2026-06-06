@@ -126,6 +126,11 @@ class AgentRuntime:
         self._workspace.save_session_config(sid, config)
         self._workspace.messages_path(sid).touch(exist_ok=True)
 
+        # Write immutable prefix messages (KV-cache anchor) once at creation.
+        from agent.session import write_session_prefix
+
+        write_session_prefix(self._workspace, sid, config)
+
         entry = SessionEntry(
             id=sid,
             config=config,

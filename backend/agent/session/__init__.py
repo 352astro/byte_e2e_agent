@@ -14,6 +14,7 @@ from agent.session._data import (
     clear,
     get_history,
     load_session,
+    write_session_prefix,
 )
 from agent.session.entry import SessionEntry
 from agent.session.status import RuntimeStatus, SessionStatus
@@ -27,4 +28,5 @@ __all__ = [
     "SessionConfig",
     "SessionEntry",
     "SessionStatus",
+    "write_session_prefix",
 ]
