@@ -62,14 +62,10 @@ const FileContent = React.memo(function FileContent({
     );
   }
 
-  return (
-    <div className={className}>
-      <Markdown text={content} />
-    </div>
-  );
+  // Unknown extension — let highlight.js auto-detect
+  return <HighlightCode code={content} className={className} />;
 });
 
 export default FileContent;
-
 
 export { guessLanguage };
