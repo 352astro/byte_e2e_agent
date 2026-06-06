@@ -590,6 +590,7 @@
 }
 
 .skill-field input,
+.skill-field select,
 .skill-field textarea {
     width: 100%;
     border: 1px solid #d8d8d8;
@@ -599,7 +600,8 @@
     font: inherit;
 }
 
-.skill-field input {
+.skill-field input,
+.skill-field select {
     height: 34px;
     padding: 0 9px;
 }
@@ -1116,6 +1118,44 @@
     display: inline-flex;
     border: 1px solid #e0c2c2;
     border-radius: 6px;
+}
+
+.sysguard-panel {
+    min-height: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.sysguard-panel .skill-library-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.sysguard-panel .skill-library-item:has(input) {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.sysguard-section-label {
+    height: 24px;
+    padding: 8px 8px 0;
+    color: #8a8a8a;
+    font-size: 0.67rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.sysguard-panel .skill-field textarea {
+    flex: none;
+    min-height: 92px;
+}
+
+.sysguard-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: #444;
+    font-size: 0.8rem;
+    font-weight: 700;
 }
 
 .permissions-panel {

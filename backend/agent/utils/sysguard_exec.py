@@ -8,6 +8,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
+
+if sys.platform != "win32":
+    import fcntl
+    import termios
 
 from agent.utils import sysguard
 
@@ -24,10 +29,19 @@ def main() -> None:
     if not command:
         raise SystemExit("missing command")
 
+    _claim_controlling_tty()
     sysguard.apply(args.workspace)
     os.execvp(command[0], command)
 
 
+def _claim_controlling_tty() -> None:
+    if sys.platform == "win32" or not os.isatty(0):
+        return
+    try:
+        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+    except OSError:
+        pass
+
+
 if __name__ == "__main__":
     main()
-

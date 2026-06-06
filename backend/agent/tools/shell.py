@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import queue
+import re
 import sys
 import threading
 import time
@@ -19,8 +20,15 @@ from pydantic import BaseModel, Field
 
 from agent.tools.result import ToolResult
 from agent.tools.terminal import PersistentTerminal
+from agent.utils import sysguard
 
 _PLATFORM_MAP = {"linux": "Linux", "darwin": "macOS", "win32": "Windows"}
+_PERMISSION_DENIED_PATH_RE = re.compile(
+    r"(?P<path>/[^\s:'\"]+):\s+Permission denied"
+)
+_QUOTED_PERMISSION_DENIED_PATH_RE = re.compile(
+    r"['\"](?P<path>/[^'\"]+)['\"]:\s+Permission denied"
+)
 
 
 def get_platform_hint() -> str:
@@ -82,7 +90,7 @@ async def shell_handler(
       5. Normal exit: collect all output, return with exit code annotation.
     """
     try:
-        workdir = str(ws.resolve(cwd))
+        workdir = str(ws.resolve(cwd, external_mode="readwrite"))
     except PermissionError as exc:
         return ToolResult(
             f"Error: {exc}",
@@ -191,6 +199,12 @@ async def shell_handler(
                 pass
 
     output = output.strip()
+    metadata = _sysguard_denial_metadata(output, result_status, result_reason)
+    if metadata:
+        result_status = "denied"
+        result_source = "kernel"
+        result_reason = "sysguard_denied"
+
     raw = output.encode("utf-8", errors="replace")
     if len(raw) > max_bytes:
         omitted = len(raw) - max_bytes
@@ -205,7 +219,71 @@ async def shell_handler(
         status=result_status,
         source=result_source,
         reason=result_reason,
+        metadata=metadata,
     )
+
+
+def _sysguard_denial_metadata(
+    output: str,
+    status: str,
+    reason: str,
+) -> dict | None:
+    if "[sysguard]" in output:
+        return {
+            "label": "Sysguard setup",
+            "path": "",
+            "description": output,
+            "confidence": "confirmed",
+        }
+    if status != "error":
+        return None
+    if "Permission denied" not in output:
+        return None
+    match = _QUOTED_PERMISSION_DENIED_PATH_RE.search(output)
+    if match:
+        path = match.group("path")
+        candidate = _external_read_denial_candidate(path)
+        if candidate:
+            return candidate
+
+    match = _PERMISSION_DENIED_PATH_RE.search(output)
+    if not match:
+        return None
+    path = match.group("path")
+    candidate = _external_read_denial_candidate(path)
+    if candidate:
+        return candidate
+    if reason != "exit_code=126":
+        return None
+    rule = sysguard.detect_command_rule(path)
+    if rule is None:
+        return None
+    return {
+        "label": rule.label,
+        "path": rule.path,
+        "description": rule.description,
+        "confidence": "suspected",
+    }
+
+
+def _external_read_denial_candidate(path: str) -> dict | None:
+    try:
+        resolved = Path(path).expanduser().resolve()
+    except OSError:
+        return None
+    if not resolved.exists():
+        return None
+    if sysguard._overlaps_project_root(resolved):
+        return None
+    if sysguard.is_path_allowed(str(resolved), "readonly"):
+        return None
+    return {
+        "label": "Shell external path",
+        "path": str(resolved),
+        "mode": "readonly",
+        "description": f"Detected denied read access from shell output: {resolved}",
+        "confidence": "suspected",
+    }
 
 
 shell_tool = StructuredTool.from_function(

@@ -47,6 +47,16 @@ interface SkillDetail extends SkillInfo {
   content: string;
 }
 
+interface SysguardRule {
+  id: string;
+  label: string;
+  path: string;
+  mode: "readonly" | "readonly_exec" | "readwrite";
+  source: "builtin" | "custom";
+  enabled: boolean;
+  description: string;
+}
+
 type ToolPermissionMode = "allow" | "ask" | "deny";
 
 const memoryKinds = ["fact", "preference", "decision", "todo", "summary"];
@@ -76,7 +86,7 @@ export default function SettingsWindow({
   const [content, setContent] = useState("");
   const [kind, setKind] = useState("fact");
   const [activeTab, setActiveTab] = useState<
-    "memory" | "rules" | "skills" | "preamble" | "permissions"
+    "memory" | "rules" | "skills" | "preamble" | "permissions" | "sysguard"
   >("memory");
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [toolPermissions, setToolPermissions] = useState<
@@ -89,6 +99,16 @@ export default function SettingsWindow({
   const [skillDraftContent, setSkillDraftContent] = useState("");
   const [sessionSettings, setSessionSettings] =
     useState<SessionSettings | null>(null);
+  const [sysguardBuiltin, setSysguardBuiltin] = useState<SysguardRule[]>([]);
+  const [sysguardCustom, setSysguardCustom] = useState<SysguardRule[]>([]);
+  const [activeSysguardRule, setActiveSysguardRule] = useState("");
+  const [sysguardDraft, setSysguardDraft] = useState({
+    label: "",
+    path: "",
+    mode: "readonly_exec" as SysguardRule["mode"],
+    enabled: true,
+    description: "",
+  });
 
   const loadMemories = useCallback(async () => {
     setLoading(true);
@@ -133,6 +153,34 @@ export default function SettingsWindow({
   useEffect(() => {
     void loadPermissions();
   }, [loadPermissions, workspace]);
+
+  const loadSysguard = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/settings/sysguard");
+      if (!res.ok) throw new Error(`Sysguard returned ${res.status}`);
+      const data: { builtin?: SysguardRule[]; custom?: SysguardRule[] } =
+        await res.json();
+      const builtin = data.builtin || [];
+      const custom = data.custom || [];
+      setSysguardBuiltin(builtin);
+      setSysguardCustom(custom);
+      setActiveSysguardRule((current) => {
+        if (current === "__new__") return current;
+        if (current && custom.some((rule) => rule.id === current)) return current;
+        return custom[0]?.id || builtin[0]?.id || "";
+      });
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "sysguard") void loadSysguard();
+  }, [activeTab, loadSysguard, workspace]);
 
   const loadSkills = useCallback(async () => {
     setLoading(true);
@@ -392,6 +440,311 @@ export default function SettingsWindow({
     }
   };
 
+  const selectSysguardRule = (rule: SysguardRule) => {
+    setActiveSysguardRule(rule.id);
+    setSysguardDraft({
+      label: rule.label,
+      path: rule.path,
+      mode: rule.mode,
+      enabled: rule.enabled,
+      description: rule.description || "",
+    });
+  };
+
+  const newSysguardRule = () => {
+    setActiveSysguardRule("__new__");
+    setSysguardDraft({
+      label: "",
+      path: "",
+      mode: "readonly" as SysguardRule["mode"],
+      enabled: true,
+      description: "",
+    });
+  };
+
+  const saveSysguardRule = async () => {
+    const isNew = activeSysguardRule === "__new__";
+    if (!sysguardDraft.label.trim() || !sysguardDraft.path.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch(
+        isNew
+          ? "/api/settings/sysguard/custom"
+          : `/api/settings/sysguard/custom/${encodeURIComponent(activeSysguardRule)}`,
+        {
+          method: isNew ? "POST" : "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sysguardDraft),
+        },
+      );
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Server returned ${res.status}`);
+      }
+      const data: { builtin?: SysguardRule[]; custom?: SysguardRule[] } =
+        await res.json();
+      const custom = data.custom || [];
+      setSysguardBuiltin(data.builtin || []);
+      setSysguardCustom(custom);
+      setActiveSysguardRule(custom[custom.length - 1]?.id || "");
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteSysguardRule = async () => {
+    if (!activeSysguardRule || activeSysguardRule === "__new__") return;
+    setSaving(true);
+    try {
+      const res = await fetch(
+        `/api/settings/sysguard/custom/${encodeURIComponent(activeSysguardRule)}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      const data: { builtin?: SysguardRule[]; custom?: SysguardRule[] } =
+        await res.json();
+      const custom = data.custom || [];
+      setSysguardBuiltin(data.builtin || []);
+      setSysguardCustom(custom);
+      const next = custom[0] || data.builtin?.[0];
+      if (next) selectSysguardRule(next);
+      else newSysguardRule();
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const renderSysguardSettings = () => {
+    const builtinActive = sysguardBuiltin.find(
+      (rule) => rule.id === activeSysguardRule,
+    );
+    const customActive = sysguardCustom.find(
+      (rule) => rule.id === activeSysguardRule,
+    );
+    const activeRule = customActive || builtinActive || null;
+    const isNew = activeSysguardRule === "__new__";
+    const editable = isNew || activeRule?.source === "custom";
+    return (
+      <div className="sysguard-panel">
+        <div className="memory-panel-head">
+          <div>
+            <h2>Shell Sandbox</h2>
+            <div className="memory-workspace">
+              Read/execute allowlist for shell toolchains.
+            </div>
+          </div>
+          <button
+            className="settings-refresh-btn"
+            type="button"
+            onClick={() => void loadSysguard()}
+            disabled={loading}
+          >
+            {loading ? "Loading" : "Refresh"}
+          </button>
+        </div>
+        {error && <div className="memory-error">{error}</div>}
+        <div className="skill-library-layout">
+          <aside className="skill-library-sidebar">
+            <button
+              className={`skill-library-new ${isNew ? "active" : ""}`}
+              type="button"
+              onClick={newSysguardRule}
+            >
+              + New Rule
+            </button>
+            {sysguardBuiltin.length > 0 && (
+              <div className="sysguard-section-label">Built-in</div>
+            )}
+            {sysguardBuiltin.map((rule) => (
+              <div
+                className={`skill-library-item ${activeSysguardRule === rule.id ? "active" : ""}`}
+                key={rule.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => selectSysguardRule(rule)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    selectSysguardRule(rule);
+                  }
+                }}
+              >
+                <span className="skill-library-name">{rule.label}</span>
+                <span className="skill-source skill-source--builtin">
+                  {rule.mode}
+                </span>
+              </div>
+            ))}
+            {sysguardCustom.length > 0 && (
+              <div className="sysguard-section-label">Custom</div>
+            )}
+            {sysguardCustom.map((rule) => (
+              <div
+                className={`skill-library-item ${activeSysguardRule === rule.id ? "active" : ""}`}
+                key={rule.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => selectSysguardRule(rule)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    selectSysguardRule(rule);
+                  }
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={rule.enabled}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    void fetch(
+                      `/api/settings/sysguard/custom/${encodeURIComponent(rule.id)}`,
+                      {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          label: rule.label,
+                          path: rule.path,
+                          mode: rule.mode,
+                          enabled: e.target.checked,
+                          description: rule.description,
+                        }),
+                      },
+                    ).then(() => loadSysguard());
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <span className="skill-library-name">{rule.label}</span>
+                <span className="skill-source skill-source--custom">
+                  {rule.mode}
+                </span>
+              </div>
+            ))}
+          </aside>
+          <section className="skill-library-editor">
+            {!isNew && !activeRule ? (
+              <div className="memory-empty">Select a rule.</div>
+            ) : (
+              <>
+                <label className="skill-field">
+                  <span>Label</span>
+                  <input
+                    value={isNew || editable ? sysguardDraft.label : activeRule?.label || ""}
+                    onChange={(e) =>
+                      setSysguardDraft((draft) => ({
+                        ...draft,
+                        label: e.target.value,
+                      }))
+                    }
+                    disabled={!editable}
+                  />
+                </label>
+                <label className="skill-field">
+                  <span>Path</span>
+                  <input
+                    value={isNew || editable ? sysguardDraft.path : activeRule?.path || ""}
+                    onChange={(e) =>
+                      setSysguardDraft((draft) => ({
+                        ...draft,
+                        path: e.target.value,
+                      }))
+                    }
+                    disabled={!editable}
+                  />
+                </label>
+                <label className="skill-field">
+                  <span>Mode</span>
+                  <select
+                    value={
+                      isNew || editable
+                        ? sysguardDraft.mode
+                        : activeRule?.mode || "readonly_exec"
+                    }
+                    onChange={(e) =>
+                      setSysguardDraft((draft) => ({
+                        ...draft,
+                        mode: e.target.value as SysguardRule["mode"],
+                      }))
+                    }
+                    disabled={!editable}
+                  >
+                    <option value="readonly">Read only</option>
+                    <option value="readonly_exec">Read + execute</option>
+                    <option value="readwrite">Read + write</option>
+                  </select>
+                </label>
+                <label className="skill-field">
+                  <span>Description</span>
+                  <textarea
+                    value={
+                      isNew || editable
+                        ? sysguardDraft.description
+                        : activeRule?.description || ""
+                    }
+                    onChange={(e) =>
+                      setSysguardDraft((draft) => ({
+                        ...draft,
+                        description: e.target.value,
+                      }))
+                    }
+                    disabled={!editable}
+                    rows={4}
+                  />
+                </label>
+                <label className="sysguard-toggle">
+                  <input
+                    type="checkbox"
+                    checked={isNew || editable ? sysguardDraft.enabled : true}
+                    onChange={(e) =>
+                      setSysguardDraft((draft) => ({
+                        ...draft,
+                        enabled: e.target.checked,
+                      }))
+                    }
+                    disabled={!editable}
+                  />
+                  Enabled
+                </label>
+                <div className="skill-actions">
+                  {editable && (
+                    <button
+                      className="memory-add-btn"
+                      type="button"
+                      onClick={() => void saveSysguardRule()}
+                      disabled={
+                        saving ||
+                        !sysguardDraft.label.trim() ||
+                        !sysguardDraft.path.trim()
+                      }
+                    >
+                      {saving ? "Saving" : isNew ? "Create Rule" : "Save"}
+                    </button>
+                  )}
+                  {activeRule?.source === "custom" && (
+                    <button
+                      className="memory-delete-btn skill-danger-btn"
+                      type="button"
+                      onClick={() => void deleteSysguardRule()}
+                      disabled={saving}
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+      </div>
+    );
+  };
+
   const renderSkillsLibrary = () => {
     const selected = new Set(sessionSettings?.default_skill_names || []);
     const isNew = activeSkill === "__new__";
@@ -588,6 +941,13 @@ export default function SettingsWindow({
           >
             Permissions
           </button>
+          <button
+            className={`settings-nav-item ${activeTab === "sysguard" ? "active" : ""}`}
+            type="button"
+            onClick={() => setActiveTab("sysguard")}
+          >
+            Shell Sandbox
+          </button>
         </aside>
 
         <main className="settings-content">
@@ -718,6 +1078,8 @@ export default function SettingsWindow({
                 ))}
               </div>
             </div>
+          ) : activeTab === "sysguard" ? (
+            renderSysguardSettings()
           ) : (
             <SessionCustomizePanel
               mode="settings"

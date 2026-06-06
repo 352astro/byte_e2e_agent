@@ -8,9 +8,11 @@ of a single tool remains in agent.actions.execute_one_tool().
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 import uuid as _uuid
 from dataclasses import dataclass
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Literal
 
 from agent.actions import execute_one_tool
 from agent.core.workspace import Workspace
@@ -34,6 +36,14 @@ _PARALLEL_READ_TOOLS = frozenset(
         "WebFetch",
     }
 )
+
+_STRUCTURED_PATH_ACCESS: dict[str, dict[str, Literal["readonly", "readwrite"]]] = {
+    "Read": {"path": "readonly"},
+    "ListDir": {"path": "readonly"},
+    "Write": {"path": "readwrite"},
+    "Edit": {"path": "readwrite"},
+    "Shell": {"cwd": "readwrite"},
+}
 
 
 @dataclass(frozen=True)
@@ -342,6 +352,36 @@ async def _run_tool_job(
 
     if not tool_output:
         try:
+            path_approved = await _ask_structured_paths_if_needed(
+                info,
+                ws=ws,
+                assistant_msg=assistant_msg,
+                session_id=session_id,
+                turn_id=turn_id,
+                interrupt_event=interrupt_event,
+                ask_guard=ask_guard,
+            )
+            if path_approved is False:
+                tool_status = "denied"
+                tool_status_source = "user"
+                tool_status_reason = "sandbox_allow_rejected"
+                tool_output = "Permission denied: user rejected sandbox path access."
+            if info.name == "Shell":
+                preapproved = await _ask_shell_sysguard_if_needed(
+                    info,
+                    assistant_msg=assistant_msg,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    interrupt_event=interrupt_event,
+                    ask_guard=ask_guard,
+                )
+                if preapproved is False:
+                    tool_status = "denied"
+                    tool_status_source = "user"
+                    tool_status_reason = "sysguard_allow_rejected"
+                    tool_output = "Permission denied: user rejected sysguard allowlist update."
+            if tool_output:
+                raise _ToolOutputReady()
             tool_exec = await execute_one_tool(
                 info.tc_dict,
                 ws,
@@ -358,6 +398,35 @@ async def _run_tool_job(
             tool_status = tool_exec.status
             tool_status_source = tool_exec.source
             tool_status_reason = tool_exec.reason
+            if _is_sysguard_denial(tool_exec):
+                approved = await _ask_shell_sysguard_from_result(
+                    info,
+                    tool_exec,
+                    assistant_msg=assistant_msg,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    interrupt_event=interrupt_event,
+                    ask_guard=ask_guard,
+                )
+                if approved:
+                    retry_exec = await execute_one_tool(
+                        info.tc_dict,
+                        ws,
+                        toolset,
+                        interrupt_event=interrupt_event,
+                        openai_client=openai_client,
+                        model_id=model_id,
+                        session_id=session_id,
+                        hook_manager=hook_manager,
+                        agent_invoker=job_invoke_subagent,
+                        human_input_requester=job_request_human_input,
+                    )
+                    tool_output = retry_exec.output
+                    tool_status = retry_exec.status
+                    tool_status_source = retry_exec.source
+                    tool_status_reason = retry_exec.reason
+        except _ToolOutputReady:
+            pass
         except InterruptedError:
             raise
         except Exception as exc:
@@ -413,3 +482,210 @@ async def _emit_tool_result(
         session_id=session_id,
     )
     await hook_manager.on_message_finish(msg=msg, session_id=session_id)
+
+
+class _ToolOutputReady(Exception):
+    pass
+
+
+def _is_sysguard_denial(tool_exec) -> bool:
+    return (
+        tool_exec.status == "denied"
+        and tool_exec.source == "kernel"
+        and tool_exec.reason == "sysguard_denied"
+    )
+
+
+async def _ask_structured_paths_if_needed(
+    info: ToolCallInfo,
+    *,
+    ws: Workspace,
+    assistant_msg: Message,
+    session_id: str,
+    turn_id: str,
+    interrupt_event: asyncio.Event,
+    ask_guard: AskGuardFn,
+) -> bool | None:
+    access_by_field = _STRUCTURED_PATH_ACCESS.get(info.name)
+    if not access_by_field:
+        return None
+    try:
+        args = json.loads(info.args)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(args, dict):
+        return None
+
+    for field, mode in access_by_field.items():
+        value = args.get(field)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        candidate = _external_candidate_path(ws, value, mode)
+        if candidate is None:
+            continue
+        approved = await _ask_and_add_sysguard_rule(
+            rule_path=str(candidate),
+            label=f"{info.name} {field}",
+            description=(
+                f"Allow {info.name} to access structured `{field}` path "
+                f"as {mode}: {candidate}"
+            ),
+            mode=mode,
+            info=info,
+            assistant_msg=assistant_msg,
+            session_id=session_id,
+            turn_id=turn_id,
+            interrupt_event=interrupt_event,
+            ask_guard=ask_guard,
+        )
+        if not approved:
+            return False
+    return None
+
+
+def _external_candidate_path(
+    ws: Workspace,
+    value: str,
+    mode: Literal["readonly", "readwrite"],
+) -> Path | None:
+    from agent.utils import sysguard
+
+    raw = Path(value).expanduser()
+    resolved = raw.resolve() if raw.is_absolute() else (ws.root / raw).resolve()
+    try:
+        resolved.relative_to(ws.root)
+        return None
+    except ValueError:
+        pass
+    if sysguard.is_path_allowed(str(resolved), mode):
+        return None
+    if sysguard._overlaps_project_root(resolved):
+        return None
+    return resolved
+
+
+async def _ask_shell_sysguard_if_needed(
+    info: ToolCallInfo,
+    *,
+    assistant_msg: Message,
+    session_id: str,
+    turn_id: str,
+    interrupt_event: asyncio.Event,
+    ask_guard: AskGuardFn,
+) -> bool | None:
+    from agent.utils import sysguard
+
+    command = _shell_command_from_args(info.args)
+    if not command:
+        return None
+    rule = sysguard.detect_command_rule(command)
+    if rule is None or sysguard.is_path_allowed(rule.path):
+        return None
+    return await _ask_and_add_sysguard_rule(
+        rule_path=rule.path,
+        label=rule.label,
+        description=rule.description,
+        mode="readonly_exec",
+        info=info,
+        assistant_msg=assistant_msg,
+        session_id=session_id,
+        turn_id=turn_id,
+        interrupt_event=interrupt_event,
+        ask_guard=ask_guard,
+    )
+
+
+async def _ask_shell_sysguard_from_result(
+    info: ToolCallInfo,
+    tool_exec,
+    *,
+    assistant_msg: Message,
+    session_id: str,
+    turn_id: str,
+    interrupt_event: asyncio.Event,
+    ask_guard: AskGuardFn,
+) -> bool:
+    metadata = tool_exec.metadata or {}
+    path = str(metadata.get("path") or "")
+    if not path:
+        return False
+    mode = str(metadata.get("mode") or "readonly_exec")
+    if mode not in {"readonly", "readonly_exec", "readwrite"}:
+        mode = "readonly_exec"
+    return await _ask_and_add_sysguard_rule(
+        rule_path=path,
+        label=str(metadata.get("label") or "Shell toolchain"),
+        description=str(metadata.get("description") or "Detected from shell denial."),
+        mode=mode,
+        info=info,
+        assistant_msg=assistant_msg,
+        session_id=session_id,
+        turn_id=turn_id,
+        interrupt_event=interrupt_event,
+        ask_guard=ask_guard,
+    )
+
+
+async def _ask_and_add_sysguard_rule(
+    *,
+    rule_path: str,
+    label: str,
+    description: str,
+    mode: Literal["readonly", "readonly_exec", "readwrite"],
+    info: ToolCallInfo,
+    assistant_msg: Message,
+    session_id: str,
+    turn_id: str,
+    interrupt_event: asyncio.Event,
+    ask_guard: AskGuardFn,
+) -> bool:
+    check = GuardCheck(
+        action_type="sandbox.allow_path",
+        subject=info.name,
+        payload={
+            "kind": "permission_request",
+            "title": "Allow sandbox path",
+            "description": (
+                "The tool needs access to a path outside the current workspace. "
+                "Allow it and continue?"
+            ),
+            "path": rule_path,
+            "label": label,
+            "mode": mode,
+            "choices": [
+                {"id": "allow", "label": "Allow", "description": rule_path},
+                {"id": "deny", "label": "Deny", "description": "Keep blocked."},
+            ],
+        },
+        session_id=session_id,
+        turn_id=turn_id,
+        message_id=assistant_msg.id,
+        tool_call_id=info.id,
+    )
+    approved = await ask_guard(check, interrupt_event)
+    if not approved:
+        return False
+    from app.services.settings_service import add_custom_sysguard_rule
+
+    try:
+        add_custom_sysguard_rule(
+            label=label,
+            path=rule_path,
+            mode=mode,
+            description=description,
+            enabled=True,
+        )
+    except FileExistsError:
+        pass
+    return True
+
+
+def _shell_command_from_args(args: str) -> str:
+    try:
+        data = json.loads(args)
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    command = data.get("command")
+    return command if isinstance(command, str) else ""

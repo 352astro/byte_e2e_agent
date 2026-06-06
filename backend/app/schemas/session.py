@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from agent.core.config import ToolSetPreset
 
 ToolPermissionMode = Literal["allow", "ask", "deny"]
+SysguardRuleMode = Literal["readonly", "readonly_exec", "readwrite"]
 
 
 class CreateSessionRequest(BaseModel):
@@ -66,3 +67,26 @@ class ToolPresetListResponse(BaseModel):
 
 class ToolPermissionSettings(BaseModel):
     tools: dict[str, ToolPermissionMode] = Field(default_factory=dict)
+
+
+class SysguardRuleResponse(BaseModel):
+    id: str
+    label: str
+    path: str
+    mode: SysguardRuleMode = "readonly_exec"
+    source: Literal["builtin", "custom"] = "builtin"
+    enabled: bool = True
+    description: str = ""
+
+
+class SysguardSettingsResponse(BaseModel):
+    builtin: list[SysguardRuleResponse] = Field(default_factory=list)
+    custom: list[SysguardRuleResponse] = Field(default_factory=list)
+
+
+class SysguardRuleRequest(BaseModel):
+    label: str
+    path: str
+    mode: SysguardRuleMode = "readonly_exec"
+    enabled: bool = True
+    description: str = ""

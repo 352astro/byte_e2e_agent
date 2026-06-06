@@ -17,6 +17,8 @@ from app.schemas.session import (
     SkillDetailResponse,
     SkillListResponse,
     SkillUpsertRequest,
+    SysguardRuleRequest,
+    SysguardSettingsResponse,
     ToolPermissionSettings,
     ToolPresetListResponse,
 )
@@ -143,6 +145,53 @@ def update_tool_permissions(
     settings_service: SettingsService = Depends(get_settings_service),
 ) -> dict:
     return settings_service.update_tool_permissions(req)
+
+
+@router.get("/settings/sysguard", response_model=SysguardSettingsResponse)
+def get_sysguard_settings(
+    settings_service: SettingsService = Depends(get_settings_service),
+) -> dict:
+    return settings_service.get_sysguard_rules()
+
+
+@router.post("/settings/sysguard/custom", response_model=SysguardSettingsResponse)
+def add_sysguard_rule(
+    req: SysguardRuleRequest,
+    settings_service: SettingsService = Depends(get_settings_service),
+) -> dict:
+    try:
+        return settings_service.add_sysguard_rule(req)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.put("/settings/sysguard/custom/{rule_id}", response_model=SysguardSettingsResponse)
+def update_sysguard_rule(
+    rule_id: str,
+    req: SysguardRuleRequest,
+    settings_service: SettingsService = Depends(get_settings_service),
+) -> dict:
+    try:
+        return settings_service.update_sysguard_rule(rule_id, req)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Sysguard rule not found")
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.delete("/settings/sysguard/custom/{rule_id}", response_model=SysguardSettingsResponse)
+def delete_sysguard_rule(
+    rule_id: str,
+    settings_service: SettingsService = Depends(get_settings_service),
+) -> dict:
+    try:
+        return settings_service.delete_sysguard_rule(rule_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Sysguard rule not found")
 
 
 @router.post("/settings/session-rules", response_model=SessionSettings)

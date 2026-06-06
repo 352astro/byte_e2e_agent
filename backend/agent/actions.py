@@ -11,6 +11,7 @@ import os
 import time
 import uuid as _uuid
 from dataclasses import dataclass
+from typing import Any
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError
 
@@ -41,6 +42,7 @@ class ToolExecutionResult:
     status: str = "success"
     source: str = "tool"
     reason: str = ""
+    metadata: dict[str, Any] | None = None
 
     def __str__(self) -> str:
         return self.output
@@ -63,6 +65,7 @@ def _coerce_tool_result(result: object) -> ToolExecutionResult:
             status=result.status,
             source=result.source,
             reason=result.reason,
+            metadata=result.metadata,
         )
     return ToolExecutionResult(output=str(result))
 

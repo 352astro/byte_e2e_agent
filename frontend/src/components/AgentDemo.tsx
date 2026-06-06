@@ -96,8 +96,17 @@ function PendingRequestPanel({
   const [selected, setSelected] = useState<string[]>([]);
   const [custom, setCustom] = useState("");
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const payload = request.payload || {};
 
   if (request.kind !== "user_input_request") {
+    const title =
+      request.title ||
+      String(payload.title || "") ||
+      `${request.action_type}: ${request.subject}`;
+    const description =
+      request.description || String(payload.description || "");
+    const permissionPath = String(payload.path || "");
+    const permissionMode = String(payload.mode || "");
     return (
       <div
         className="agent-guard-request"
@@ -106,9 +115,26 @@ function PendingRequestPanel({
       >
         <div className="agent-guard-main">
           <span className="agent-guard-kicker">Permission Required</span>
-          <span className="agent-guard-text">
-            {request.action_type}: {request.subject}
-          </span>
+          <span className="agent-guard-text">{title}</span>
+          {description && (
+            <span className="agent-user-request-description">{description}</span>
+          )}
+          {(permissionPath || permissionMode) && (
+            <div className="agent-guard-details">
+              {permissionMode && (
+                <span>
+                  <strong>Mode</strong>
+                  <small>{permissionMode}</small>
+                </span>
+              )}
+              {permissionPath && (
+                <span>
+                  <strong>Path</strong>
+                  <small>{permissionPath}</small>
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div className="agent-guard-actions">
           <button
@@ -132,7 +158,6 @@ function PendingRequestPanel({
     );
   }
 
-  const payload = request.payload || {};
   const title =
     request.title || String(payload.title || "") || request.subject || "Input requested";
   const description = request.description || String(payload.description || "");

@@ -49,7 +49,7 @@ async def listdir_handler(
     """List files and directories under a workspace directory."""
     try:
         root = Path(ws.resolve_path("."))
-        target = ws.resolve(path)
+        target = ws.resolve(path, external_mode="readonly")
     except PermissionError as exc:
         return f"Error: {exc}"
     except Exception as exc:
@@ -60,7 +60,11 @@ async def listdir_handler(
     if not target.is_dir():
         return f"Error: '{path}' is not a directory"
 
-    lines: list[str] = [f"{target.relative_to(root) if target != root else '.'}/"]
+    try:
+        display_path = str(target.relative_to(root)) if target != root else "."
+    except ValueError:
+        display_path = str(target)
+    lines: list[str] = [f"{display_path}/"]
     count = 0
     truncated = False
 

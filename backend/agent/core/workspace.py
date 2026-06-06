@@ -24,7 +24,7 @@ import os
 import re
 import signal
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from agent.core.config import SessionConfig
@@ -132,13 +132,27 @@ class Workspace:
     # 路径安全
     # ═══════════════════════════════════════════════════════
 
-    def resolve(self, relpath: str) -> Path:
+    def resolve(
+        self,
+        relpath: str,
+        *,
+        external_mode: Literal["readonly", "readwrite"] | None = None,
+    ) -> Path:
         """安全解析，防越界。"""
         resolved = (self.root / relpath).resolve()
         try:
             resolved.relative_to(self.root)
         except ValueError:
-            raise PermissionError(f"Path traversal denied: {relpath} -> {resolved}")
+            if external_mode is not None:
+                from agent.utils import sysguard
+
+                if sysguard.is_path_allowed(resolved, external_mode):
+                    return resolved
+            raise PermissionError(
+                "Path is outside workspace and not allowed by shell sandbox "
+                f"settings: input={relpath!r}, resolved={resolved}, "
+                f"workspace={self.root}"
+            )
         return resolved
 
     def resolve_path(self, relpath: str) -> str:
@@ -223,7 +237,7 @@ class Workspace:
 
     async def read_file(self, path: str) -> str:
         try:
-            safe = self.resolve(path)
+            safe = self.resolve(path, external_mode="readonly")
         except PermissionError as exc:
             return f"Error: {exc}"
         try:
@@ -246,7 +260,7 @@ class Workspace:
 
     async def write_file(self, path: str, content: str) -> str:
         try:
-            safe = self.resolve(path)
+            safe = self.resolve(path, external_mode="readwrite")
         except PermissionError as exc:
             return f"Error: {exc}"
         try:
@@ -264,7 +278,7 @@ class Workspace:
         from agent.tools.edit import _fuzzy_replace, _snippet_around
 
         try:
-            safe = self.resolve(path)
+            safe = self.resolve(path, external_mode="readwrite")
         except PermissionError as exc:
             return f"Error: {exc}"
         try:
