@@ -252,3 +252,56 @@ load_skill_tool = StructuredTool.from_function(
     description="Load the full content of a Skill by name.",
     args_schema=LoadSkillInput,
 )
+
+
+class WriteSkillInput(BaseModel):
+    """WriteSkill 工具输入参数。"""
+
+    name: str = Field(
+        ...,
+        description=("Skill name (lowercase, hyphens allowed). Must match ^[a-z0-9][a-z0-9-]*$"),
+    )
+    content: str = Field(
+        ...,
+        description=(
+            "Full SKILL.md content. First line must be a level-1 heading (# Title). "
+            "The frontmatter (name/description) will be inferred from the body; "
+            "do NOT include YAML frontmatter block. "
+            "See the writing-skills skill for structure guidance."
+        ),
+    )
+
+
+async def write_skill_handler(name: str, content: str, *, ws=None) -> str:
+    """Create or update a custom skill.
+
+    Writes to .byte_agent/skills/<name>/SKILL.md.
+    If a builtin skill with the same name exists, the custom version overrides it.
+    """
+    if not content.strip():
+        return "Error: skill content must not be empty"
+
+    existed = get_skill(name)
+    try:
+        skill = upsert_custom_skill(name, content)
+    except ValueError as exc:
+        return f"Error: {exc}"
+    except Exception as exc:
+        return f"Error: failed to write skill: {exc}"
+
+    if existed is None:
+        return f"Created new skill: {skill.name}"
+    if existed.source == "builtin":
+        return f"Overriding builtin skill: {skill.name}"
+    return f"Updated custom skill: {skill.name}"
+
+
+write_skill_tool = StructuredTool.from_function(
+    coroutine=write_skill_handler,
+    name="WriteSkill",
+    description=(
+        "Create or update a custom skill by writing its SKILL.md content. "
+        "Skills are saved to .byte_agent/skills/<name>/SKILL.md."
+    ),
+    args_schema=WriteSkillInput,
+)

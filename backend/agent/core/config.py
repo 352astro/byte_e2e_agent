@@ -69,6 +69,7 @@ class ToolSetPreset(StrEnum):
                 "Write",
                 "Edit",
                 "LoadSkill",
+                "WriteSkill",
                 "AskUser",
                 "SubAgent",
                 "BrowserInspect",

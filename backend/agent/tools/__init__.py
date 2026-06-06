@@ -19,7 +19,7 @@ from agent.tools.read import read_tool
 from agent.tools.registry import ToolRegistry
 from agent.tools.search import web_fetch_tool, web_search_tool
 from agent.tools.shell import shell_tool
-from agent.tools.skill import load_skill_tool
+from agent.tools.skill import load_skill_tool, write_skill_tool
 from agent.tools.subagent import subagent_tool
 from agent.tools.task import task_list_tool, task_rewrite_tool, task_update_tool
 from agent.tools.toolset import ToolSet
@@ -42,6 +42,7 @@ tool_registry.register(web_search_tool)
 tool_registry.register(web_fetch_tool)
 tool_registry.register(ask_user_tool)
 tool_registry.register(load_skill_tool)
+tool_registry.register(write_skill_tool)
 tool_registry.register(subagent_tool)
 tool_registry.register(browser_open_tool)
 tool_registry.register(browser_act_tool)
