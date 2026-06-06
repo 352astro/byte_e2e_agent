@@ -37,12 +37,6 @@ export interface UseAgentStreamReturn {
   updateQueuedSend: (index: number, value: string) => void;
   interrupt: () => Promise<void>;
   reloadMessages: () => Promise<void>;
-  respondPending: (
-    requestId: string,
-    response: Record<string, unknown>,
-  ) => Promise<void>;
-  respondGuard: (requestId: string, allow: boolean) => Promise<void>;
-
   // ── 命令（同步）──
   truncateMessages: (truncateTid: string, keep?: boolean) => void;
   resetRunning: () => void;
@@ -53,9 +47,6 @@ export interface UseAgentStreamReturn {
   scrollToMessage: (id: string) => void;
   runError: string | null;
   clearRunError: () => void;
-  pendingGuard: GuardRequest | null;
-  notices: Notice[];
-  dismissNotice: (id: string) => void;
 }
 
 // ── helpers ───────────────────────────────────────────
@@ -116,11 +107,11 @@ function applyToolMeta(message: Message, raw: string): Message {
 function hasRenderablePayload(message: Message): boolean {
   return Boolean(
     message.content ||
-      message.reasoning ||
-      message.error ||
-      message.tool_result ||
-      message.tool_name ||
-      (message.tool_calls && message.tool_calls.length > 0),
+    message.reasoning ||
+    message.error ||
+    message.tool_result ||
+    message.tool_name ||
+    (message.tool_calls && message.tool_calls.length > 0),
   );
 }
 
@@ -724,7 +715,11 @@ export default function useAgentStream({
       const q = (prefill ? prefill + "\n" + question : question).trim();
       if (!q) return;
 
-      if (sessionId && runningRef.current && streamSidRef.current === sessionId) {
+      if (
+        sessionId &&
+        runningRef.current &&
+        streamSidRef.current === sessionId
+      ) {
         if (prefill) prefillRef.current = "";
         enqueueSend(sessionId, q);
         return;
@@ -1036,8 +1031,6 @@ export default function useAgentStream({
     updateQueuedSend,
     interrupt,
     reloadMessages,
-    respondPending,
-    respondGuard,
     truncateMessages,
     resetRunning,
     createSession,
@@ -1045,8 +1038,5 @@ export default function useAgentStream({
     scrollToMessage,
     runError,
     clearRunError,
-    pendingGuard,
-    notices,
-    dismissNotice,
   };
 }

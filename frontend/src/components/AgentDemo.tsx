@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { ChangeEvent } from "react";
 import useAgentStream from "../hooks/useAgentStream";
+import { useNotifications } from "../hooks/useNotifications";
 import { FocusProvider } from "../hooks/FocusContext";
 import LockableButton from "./LockableButton";
 import Icon from "./Icon";
@@ -97,6 +98,9 @@ function PendingRequestPanel({
   const [custom, setCustom] = useState("");
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const payload = request.payload || {};
+  const comeFromSid = (request as Record<string, unknown>)._comeFromSid as
+    | string
+    | undefined;
 
   if (request.kind !== "user_input_request") {
     const title =
@@ -114,7 +118,12 @@ function PendingRequestPanel({
         data-overlay-item={`pending-${request.request_id}`}
       >
         <div className="agent-guard-main">
-          <span className="agent-guard-kicker">Permission Required</span>
+          <span className="agent-guard-kicker">
+            Permission Required
+            {comeFromSid && (
+              <span className="agent-guard-from"> from {comeFromSid}</span>
+            )}
+          </span>
           <span className="agent-guard-text">{title}</span>
           {description && (
             <span className="agent-user-request-description">
@@ -165,6 +174,7 @@ function PendingRequestPanel({
     String(payload.title || "") ||
     request.subject ||
     "Input requested";
+  const titleWithFrom = comeFromSid ? `${title} (from ${comeFromSid})` : title;
   const description = request.description || String(payload.description || "");
   const choices =
     request.choices || (payload.choices as GuardRequest["choices"]) || [];
@@ -219,7 +229,7 @@ function PendingRequestPanel({
     >
       <div className="agent-guard-main agent-user-request-main">
         <span className="agent-guard-kicker">Input Requested</span>
-        <span className="agent-guard-text">{title}</span>
+        <span className="agent-guard-text">{titleWithFrom}</span>
         {description && (
           <span className="agent-user-request-description">{description}</span>
         )}
@@ -393,19 +403,18 @@ export default function AgentDemo({
     clearSendQueue,
     updateQueuedSend,
     interrupt,
-    respondPending,
     prefillRef,
     reloadMessages,
     truncateMessages,
     resetRunning,
-    pendingGuard,
-    notices,
-    dismissNotice,
   } = useAgentStream({
     sessionId,
     onSessionCreated,
     scrollContainerRef: scrollRef,
   });
+
+  const { pendingGuard, respondGuard, notices, dismissNotice } =
+    useNotifications(sessionId);
 
   const locked = running || runtimeBusy || interrupting;
   const [sessionConfig, setSessionConfig] = useState<CreateSessionRequest>({
@@ -822,7 +831,7 @@ export default function AgentDemo({
           {pendingGuard && (
             <PendingRequestPanel
               request={pendingGuard}
-              onRespond={respondPending}
+              onRespond={respondGuard}
             />
           )}
         </div>

@@ -124,6 +124,8 @@ function reduceStreamEvent(
         active: null,
         done: true,
       };
+    default:
+      return { messages, active, done: false };
   }
 }
 

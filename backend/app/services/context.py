@@ -13,6 +13,7 @@ from agent.core.workspace import Workspace as CoreWorkspace
 from agent.core.workspace import is_valid_session_id
 from agent.hook.logging_hook import LoggingHook
 from agent.hook.metrics_hook import MetricsHook
+from agent.hook.notification_driver import NotificationDriverHook
 from agent.hook.permission_hook import ToolPermissionHook
 from agent.hook.persistence_hook import PersistenceHook
 from agent.hook.shadow_commit_hook import ShadowCommitHook
@@ -47,6 +48,7 @@ class WorkspaceContext:
         self._settings = get_settings()
         self._sessions: dict[str, Session] = {}
         self._runtime: AgentRuntime | None = None
+        self._notification_driver: NotificationDriverHook | None = None
         self._shadow_repo: ShadowRepo | None = None
         self._memory_store: SQLiteMemoryStore | None = None
         self._scoped_contexts = _shared_contexts if _shared_contexts is not None else {}
@@ -87,6 +89,12 @@ class WorkspaceContext:
             if isinstance(hook, StreamDriverHook):
                 return hook
         raise RuntimeError("StreamDriverHook not found in HookManager")
+
+    @property
+    def notification_driver(self) -> NotificationDriverHook:
+        if self._notification_driver is None:
+            self._notification_driver = NotificationDriverHook()
+        return self._notification_driver
 
     def ensure_storage_ready(self) -> None:
         self.core_workspace.agent_dir().mkdir(parents=True, exist_ok=True)
@@ -197,6 +205,7 @@ class WorkspaceContext:
     def _build_runtime(self) -> AgentRuntime:
         hook_list = [
             StreamDriverHook(),
+            self.notification_driver,
             MetricsHook(
                 self.metrics_store,
                 model_id=self._model_id,

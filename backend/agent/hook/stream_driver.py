@@ -11,7 +11,7 @@ import contextlib
 import json
 import logging
 
-from shared.hooks import BaseHook, GuardCheck
+from shared.hooks import BaseHook
 from shared.types import Message, StreamEvent
 
 logger = logging.getLogger(__name__)
@@ -185,6 +185,8 @@ class StreamDriverHook(BaseHook):
         self.close_subscribers(session_id=session_id)
         self._clear_buffer(session_id)
 
+    # ── SubAgent 生命周期（tool_meta 通道，供前端 applyToolMeta）──
+
     async def on_subagent_start(self, **kwargs) -> None:
         parent_session_id = kwargs.get("parent_session_id", "")
         parent_message_id = kwargs.get("parent_message_id", "")
@@ -230,81 +232,5 @@ class StreamDriverHook(BaseHook):
                 json.dumps(payload, ensure_ascii=False),
                 tool_name="SubAgent",
                 session_id=parent_session_id,
-            )
-        )
-
-    async def on_guard_request(
-        self,
-        *,
-        request_id: str,
-        check: GuardCheck,
-        **kwargs,
-    ) -> None:
-        payload = {
-            "kind": check.payload.get("kind", "guard_request"),
-            "request_id": request_id,
-            "action_type": check.action_type,
-            "subject": check.subject,
-            "payload": check.payload,
-            "title": check.payload.get("title", check.subject),
-            "description": check.payload.get("description", ""),
-            "choices": check.payload.get("choices", []),
-            "questions": check.payload.get("questions", []),
-            "choice_required": bool(check.payload.get("choice_required", True)),
-            "multiple": bool(check.payload.get("multiple", False)),
-            "allow_custom": bool(check.payload.get("allow_custom", False)),
-            "turn_id": check.turn_id,
-            "message_id": check.message_id,
-            "tool_call_id": check.tool_call_id,
-        }
-        if payload["kind"] == "user_input_request":
-            payload.update(
-                {
-                    "title": check.payload.get("title", check.subject),
-                    "description": check.payload.get("description", ""),
-                    "choices": check.payload.get("choices", []),
-                    "questions": check.payload.get("questions", []),
-                    "choice_required": bool(check.payload.get("choice_required", True)),
-                    "multiple": bool(check.payload.get("multiple", False)),
-                    "allow_custom": bool(check.payload.get("allow_custom", False)),
-                }
-            )
-        self._broadcast(
-            StreamEvent.guard_request(
-                request_id,
-                json.dumps(payload, ensure_ascii=False),
-                session_id=check.session_id,
-            )
-        )
-
-    async def on_runtime_notice(
-        self,
-        *,
-        notice_id: str,
-        level: str = "info",
-        title: str = "Runtime notice",
-        detail: str = "",
-        progress: str = "",
-        retry_after_ms: int = 0,
-        retry_at: int = 0,
-        ttl_ms: int = 4500,
-        sticky: bool = False,
-        **kwargs,
-    ) -> None:
-        session_id = kwargs.get("session_id", "")
-        self._broadcast(
-            StreamEvent.runtime_notice(
-                notice_id,
-                level=level,
-                title=title,
-                detail=detail,
-                progress=progress,
-                retry_after_ms=retry_after_ms,
-                retry_at=retry_at,
-                ttl_ms=ttl_ms,
-                sticky=sticky,
-                session_id=session_id,
-                turn_id=kwargs.get("turn_id", ""),
-                message_id=kwargs.get("message_id", ""),
             )
         )
