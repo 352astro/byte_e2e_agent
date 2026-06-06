@@ -1,13 +1,22 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from agent.core.config import ToolSetPreset
 from agent.tools import tool_registry
-from agent.tools.skill import scan_skills
+from agent.tools.skill import (
+    create_custom_skill,
+    delete_custom_skill,
+    read_skill_detail,
+    restore_builtin_skill,
+    scan_skills,
+    upsert_custom_skill,
+)
 from app.dependencies import get_settings_service
 from app.schemas.session import (
     SessionSettings,
+    SkillDetailResponse,
     SkillListResponse,
+    SkillUpsertRequest,
     ToolPermissionSettings,
     ToolPresetListResponse,
 )
@@ -24,10 +33,71 @@ class AddRuleRequest(BaseModel):
 def list_skills() -> dict:
     return {
         "skills": [
-            {"name": skill.name, "description": skill.description}
+            {
+                "name": skill.name,
+                "description": skill.description,
+                "source": skill.source,
+                "has_builtin": skill.has_builtin,
+                "overrides_builtin": skill.overrides_builtin,
+            }
             for skill in scan_skills()
         ]
     }
+
+
+@router.get("/skills/{name}", response_model=SkillDetailResponse)
+def get_skill_detail(name: str) -> dict:
+    detail = read_skill_detail(name)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return detail
+
+
+@router.post("/skills", response_model=SkillDetailResponse)
+def create_skill(req: SkillUpsertRequest) -> dict:
+    if not req.name:
+        raise HTTPException(status_code=400, detail="Skill name is required")
+    try:
+        skill = create_custom_skill(req.name, req.content)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return read_skill_detail(skill.name) or {}
+
+
+@router.put("/skills/{name}", response_model=SkillDetailResponse)
+def update_skill(name: str, req: SkillUpsertRequest) -> dict:
+    try:
+        skill = upsert_custom_skill(name, req.content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return read_skill_detail(skill.name) or {}
+
+
+@router.delete("/skills/{name}")
+def delete_skill(name: str) -> dict:
+    try:
+        delete_custom_skill(name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
+@router.post("/skills/{name}/restore-default", response_model=SkillDetailResponse)
+def restore_skill_default(name: str) -> dict:
+    try:
+        restore_builtin_skill(name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    detail = read_skill_detail(name)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return detail
 
 
 @router.get("/tool-presets", response_model=ToolPresetListResponse)

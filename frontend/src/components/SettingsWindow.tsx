@@ -23,6 +23,30 @@ interface ToolInfo {
   description: string;
 }
 
+interface SessionRule {
+  id: string;
+  content: string;
+}
+
+interface SessionSettings {
+  preamble: string;
+  rules: SessionRule[];
+  default_rule_ids: string[];
+  default_skill_names: string[];
+}
+
+interface SkillInfo {
+  name: string;
+  description: string;
+  source: "builtin" | "custom";
+  has_builtin: boolean;
+  overrides_builtin: boolean;
+}
+
+interface SkillDetail extends SkillInfo {
+  content: string;
+}
+
 type ToolPermissionMode = "allow" | "ask" | "deny";
 
 const memoryKinds = ["fact", "preference", "decision", "todo", "summary"];
@@ -58,6 +82,13 @@ export default function SettingsWindow({
   const [toolPermissions, setToolPermissions] = useState<
     Record<string, ToolPermissionMode>
   >({});
+  const [skills, setSkills] = useState<SkillInfo[]>([]);
+  const [activeSkill, setActiveSkill] = useState("");
+  const [skillDetail, setSkillDetail] = useState<SkillDetail | null>(null);
+  const [skillDraftName, setSkillDraftName] = useState("");
+  const [skillDraftContent, setSkillDraftContent] = useState("");
+  const [sessionSettings, setSessionSettings] =
+    useState<SessionSettings | null>(null);
 
   const loadMemories = useCallback(async () => {
     setLoading(true);
@@ -102,6 +133,68 @@ export default function SettingsWindow({
   useEffect(() => {
     void loadPermissions();
   }, [loadPermissions, workspace]);
+
+  const loadSkills = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [skillsRes, settingsRes] = await Promise.all([
+        fetch("/api/skills"),
+        fetch("/api/settings/session-defaults"),
+      ]);
+      if (!skillsRes.ok) throw new Error(`Skills returned ${skillsRes.status}`);
+      if (!settingsRes.ok) {
+        throw new Error(`Settings returned ${settingsRes.status}`);
+      }
+      const skillsData: { skills?: SkillInfo[] } = await skillsRes.json();
+      const settingsData: SessionSettings = await settingsRes.json();
+      const items = skillsData.skills || [];
+      setSkills(items);
+      setSessionSettings(settingsData);
+      setActiveSkill((current) => {
+        if (current === "__new__") return current;
+        if (current && items.some((skill) => skill.name === current)) {
+          return current;
+        }
+        return items[0]?.name || "";
+      });
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "skills") void loadSkills();
+  }, [activeTab, loadSkills, workspace]);
+
+  useEffect(() => {
+    if (activeTab !== "skills" || !activeSkill || activeSkill === "__new__") {
+      return;
+    }
+    let cancelled = false;
+    const loadDetail = async () => {
+      try {
+        const res = await fetch(`/api/skills/${encodeURIComponent(activeSkill)}`);
+        if (!res.ok) throw new Error(`Skill returned ${res.status}`);
+        const data: SkillDetail = await res.json();
+        if (cancelled) return;
+        setSkillDetail(data);
+        setSkillDraftName(data.name);
+        setSkillDraftContent(data.content);
+        setError(null);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    };
+    void loadDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, activeSkill]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -195,6 +288,248 @@ export default function SettingsWindow({
       setToolPermissions(toolPermissions);
       setError(err instanceof Error ? err.message : String(err));
     }
+  };
+
+  const toggleDefaultSkill = async (name: string) => {
+    if (!sessionSettings) return;
+    const selected = new Set(sessionSettings.default_skill_names || []);
+    if (selected.has(name)) selected.delete(name);
+    else selected.add(name);
+    const next = {
+      ...sessionSettings,
+      default_skill_names: Array.from(selected).sort(),
+    };
+    setSessionSettings(next);
+    try {
+      const res = await fetch("/api/settings/session-defaults", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      const saved: SessionSettings = await res.json();
+      setSessionSettings(saved);
+      setError(null);
+    } catch (err) {
+      setSessionSettings(sessionSettings);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const newSkill = () => {
+    setActiveSkill("__new__");
+    setSkillDetail(null);
+    setSkillDraftName("");
+    setSkillDraftContent("# New Skill\n\nDescribe when and how to use this skill.");
+  };
+
+  const saveSkill = async () => {
+    const name =
+      activeSkill === "__new__" ? skillDraftName.trim() : activeSkill.trim();
+    if (!name || !skillDraftContent.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch(
+        activeSkill === "__new__"
+          ? "/api/skills"
+          : `/api/skills/${encodeURIComponent(name)}`,
+        {
+          method: activeSkill === "__new__" ? "POST" : "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            content: skillDraftContent,
+          }),
+        },
+      );
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Server returned ${res.status}`);
+      }
+      const saved: SkillDetail = await res.json();
+      setActiveSkill(saved.name);
+      setSkillDetail(saved);
+      setSkillDraftName(saved.name);
+      setSkillDraftContent(saved.content);
+      await loadSkills();
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteOrRestoreSkill = async () => {
+    if (!skillDetail || skillDetail.source !== "custom") return;
+    const restore = skillDetail.has_builtin;
+    setSaving(true);
+    try {
+      const res = await fetch(
+        restore
+          ? `/api/skills/${encodeURIComponent(skillDetail.name)}/restore-default`
+          : `/api/skills/${encodeURIComponent(skillDetail.name)}`,
+        { method: restore ? "POST" : "DELETE" },
+      );
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      if (restore) {
+        const restored: SkillDetail = await res.json();
+        setSkillDetail(restored);
+        setSkillDraftContent(restored.content);
+        setActiveSkill(restored.name);
+      } else {
+        setActiveSkill("");
+        setSkillDetail(null);
+        setSkillDraftName("");
+        setSkillDraftContent("");
+      }
+      await loadSkills();
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const renderSkillsLibrary = () => {
+    const selected = new Set(sessionSettings?.default_skill_names || []);
+    const isNew = activeSkill === "__new__";
+    return (
+      <div className="skill-library">
+        <div className="memory-panel-head">
+          <div>
+            <h2>Skills</h2>
+            <div className="memory-workspace">
+              Built-in skills are protected. Custom skills override by name.
+            </div>
+          </div>
+          <button
+            className="settings-refresh-btn"
+            type="button"
+            onClick={() => void loadSkills()}
+            disabled={loading}
+          >
+            {loading ? "Loading" : "Refresh"}
+          </button>
+        </div>
+
+        {error && <div className="memory-error">{error}</div>}
+
+        <div className="skill-library-layout">
+          <aside className="skill-library-sidebar">
+            <button
+              className={`skill-library-new ${isNew ? "active" : ""}`}
+              type="button"
+              onClick={newSkill}
+            >
+              + New Skill
+            </button>
+            {skills.map((skill) => (
+              <div
+                className={`skill-library-item ${activeSkill === skill.name ? "active" : ""}`}
+                key={skill.name}
+                role="button"
+                tabIndex={0}
+                onClick={() => setActiveSkill(skill.name)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setActiveSkill(skill.name);
+                  }
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(skill.name)}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    void toggleDefaultSkill(skill.name);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <span className="skill-library-name">{skill.name}</span>
+                <span className={`skill-source skill-source--${skill.source}`}>
+                  {skill.overrides_builtin
+                    ? "override"
+                    : skill.source}
+                </span>
+              </div>
+            ))}
+          </aside>
+
+          <section className="skill-library-editor">
+            {isNew ? (
+              <label className="skill-field">
+                <span>Name</span>
+                <input
+                  value={skillDraftName}
+                  onChange={(e) => setSkillDraftName(e.target.value)}
+                  placeholder="my-custom-skill"
+                />
+              </label>
+            ) : skillDetail ? (
+              <div className="skill-editor-head">
+                <div>
+                  <h3>{skillDetail.name}</h3>
+                  <p>{skillDetail.description || "No description."}</p>
+                </div>
+                <span className={`skill-source skill-source--${skillDetail.source}`}>
+                  {skillDetail.overrides_builtin
+                    ? "custom override"
+                    : skillDetail.source}
+                </span>
+              </div>
+            ) : (
+              <div className="memory-empty">Select a skill.</div>
+            )}
+
+            {(isNew || skillDetail) && (
+              <>
+                <label className="skill-field skill-field--content">
+                  <span>SKILL.md</span>
+                  <textarea
+                    value={skillDraftContent}
+                    onChange={(e) => setSkillDraftContent(e.target.value)}
+                    spellCheck={false}
+                  />
+                </label>
+                <div className="skill-actions">
+                  <button
+                    className="memory-add-btn"
+                    type="button"
+                    onClick={() => void saveSkill()}
+                    disabled={
+                      saving ||
+                      !skillDraftContent.trim() ||
+                      (isNew && !skillDraftName.trim())
+                    }
+                  >
+                    {saving
+                      ? "Saving"
+                      : isNew
+                        ? "Create Skill"
+                        : skillDetail?.source === "builtin"
+                          ? "Save Custom Override"
+                          : "Save"}
+                  </button>
+                  {skillDetail?.source === "custom" && (
+                    <button
+                      className="memory-delete-btn skill-danger-btn"
+                      type="button"
+                      onClick={() => void deleteOrRestoreSkill()}
+                      disabled={saving}
+                    >
+                      {skillDetail.has_builtin ? "Restore Default" : "Delete"}
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -337,6 +672,8 @@ export default function SettingsWindow({
                 ))}
               </div>
             </>
+          ) : activeTab === "skills" ? (
+            renderSkillsLibrary()
           ) : activeTab === "permissions" ? (
             <div className="permissions-panel">
               <div className="memory-panel-head">
