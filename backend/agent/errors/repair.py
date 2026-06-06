@@ -53,10 +53,7 @@ def _find_unpaired_messages(messages: list[Message]) -> list[Message]:
                         turn_id=m.turn_id,
                         tool_call_id=tc.id,
                         tool_name=tc.function.name,
-                        result=(
-                            "Error: The user interrupted before "
-                            "this tool could execute."
-                        ),
+                        result=("Error: The user interrupted before this tool could execute."),
                         tool_status=ToolExecutionStatus.INTERRUPTED.value,
                         tool_status_source="repair",
                         tool_status_reason="user_interrupted_before_execution",

@@ -21,9 +21,7 @@ def test_empty_assistant_is_synthesized() -> None:
     assert context == [
         {
             "role": "assistant",
-            "content": (
-                "[History repair] Interrupted before producing visible output."
-            ),
+            "content": ("[History repair] Interrupted before producing visible output."),
         }
     ]
 
@@ -38,8 +36,7 @@ def test_reasoning_only_assistant_is_synthesized() -> None:
         {
             "role": "assistant",
             "content": (
-                "[History repair] Interrupted during reasoning before "
-                "producing visible output."
+                "[History repair] Interrupted during reasoning before producing visible output."
             ),
         }
     ]
@@ -55,9 +52,7 @@ def test_partial_content_assistant_is_kept_with_interrupted_marker() -> None:
     assert context == [
         {
             "role": "assistant",
-            "content": (
-                "partial answer\n\n[History repair] Interrupted before completion."
-            ),
+            "content": ("partial answer\n\n[History repair] Interrupted before completion."),
         }
     ]
 
@@ -114,10 +109,7 @@ def test_orphan_tool_result_is_synthesized_as_system_note() -> None:
     assert context == [
         {
             "role": "system",
-            "content": (
-                "[History repair] Omitted orphaned tool result "
-                "for tool_call_id=missing."
-            ),
+            "content": ("[History repair] Omitted orphaned tool result for tool_call_id=missing."),
         }
     ]
 

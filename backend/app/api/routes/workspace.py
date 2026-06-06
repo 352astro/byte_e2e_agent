@@ -38,9 +38,9 @@ def list_workspace_directory(
     try:
         return workspace_service.list_directory(path, show_hidden=show_hidden)
     except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
+        raise HTTPException(status_code=403, detail=str(exc)) from None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
 @router.get("/file")
@@ -51,9 +51,9 @@ def get_workspace_file(
     try:
         resolved = workspace_service.resolve_file(path)
     except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
+        raise HTTPException(status_code=403, detail=str(exc)) from None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     if not resolved.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(resolved, media_type=_guess_media_type(resolved))
@@ -67,9 +67,9 @@ def set_workspace(
     try:
         workspace_service.set_workspace(req.path)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     except AgentBusy as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     return {"workspace": workspace_service.get_workspace()}
 
 

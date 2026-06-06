@@ -9,9 +9,7 @@ from pydantic import BaseModel, Field
 class ReadInput(BaseModel):
     """Read 工具输入参数。"""
 
-    start_line: int = Field(
-        default=1, ge=1, description="First line to read (1-based)."
-    )
+    start_line: int = Field(default=1, ge=1, description="First line to read (1-based).")
     end_line: int = Field(
         default=0,
         ge=0,
@@ -32,8 +30,7 @@ def _truncate(text: str, max_bytes: int) -> str:
         return text
     truncated = raw[:max_bytes].decode("utf-8", errors="replace")
     return (
-        f"{truncated}\n"
-        f"[... truncated at {max_bytes} bytes, {len(raw) - max_bytes} bytes omitted]"
+        f"{truncated}\n[... truncated at {max_bytes} bytes, {len(raw) - max_bytes} bytes omitted]"
     )
 
 

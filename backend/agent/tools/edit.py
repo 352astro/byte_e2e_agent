@@ -42,10 +42,7 @@ def _fuzzy_replace(content: str, old_text: str, new_text: str) -> tuple[str, boo
     if len(old_lines) == 0:
         return content, False
     for i in range(len(content_lines) - len(old_lines) + 1):
-        if all(
-            _lines_match(content_lines[i + j], old_lines[j])
-            for j in range(len(old_lines))
-        ):
+        if all(_lines_match(content_lines[i + j], old_lines[j]) for j in range(len(old_lines))):
             new_lines = new_text.splitlines()
             result = content_lines[:i] + new_lines + content_lines[i + len(old_lines) :]
             return "\n".join(result), True
@@ -64,8 +61,6 @@ def _snippet_around(content: str, old_text: str, radius: int = 12) -> str:
             start = max(0, i - radius // 2)
             end = min(len(content_lines), i + radius // 2 + len(old_text.splitlines()))
             snippet_lines = content_lines[start:end]
-            return "\n".join(
-                f"  {start + j + 1:>4} | {ln}" for j, ln in enumerate(snippet_lines)
-            )
+            return "\n".join(f"  {start + j + 1:>4} | {ln}" for j, ln in enumerate(snippet_lines))
     head = content_lines[:radius]
     return "\n".join(f"  {j + 1:>4} | {ln}" for j, ln in enumerate(head))

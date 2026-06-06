@@ -233,10 +233,7 @@ class SQLiteMemoryStore(MemoryStore):
     def _migrate_existing(self) -> None:
         conn = self._conn
         assert conn is not None
-        columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(memories)").fetchall()
-        }
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(memories)").fetchall()}
         additions = {
             "workspace": "TEXT NOT NULL DEFAULT ''",
             "scope": "TEXT NOT NULL DEFAULT 'workspace'",
@@ -258,9 +255,7 @@ class SQLiteMemoryStore(MemoryStore):
             (self._workspace_uuid,),
         )
         conn.execute("UPDATE memories SET updated_at = ? WHERE updated_at = 0", (now,))
-        rows = conn.execute(
-            "SELECT id, content FROM memories WHERE content_hash = ''"
-        ).fetchall()
+        rows = conn.execute("SELECT id, content FROM memories WHERE content_hash = ''").fetchall()
         for row in rows:
             conn.execute(
                 "UPDATE memories SET content_hash = ? WHERE id = ?",
@@ -388,8 +383,7 @@ class SQLiteMemoryStore(MemoryStore):
             if rows:
                 now = time.time()
                 conn.executemany(
-                    "UPDATE memories SET last_used_at = ?, use_count = use_count + 1 "
-                    "WHERE id = ?",
+                    "UPDATE memories SET last_used_at = ?, use_count = use_count + 1 WHERE id = ?",
                     [(now, row["id"]) for row in rows],
                 )
                 conn.commit()
@@ -484,8 +478,7 @@ class SQLiteMemoryStore(MemoryStore):
         try:
             if session_id:
                 row = conn.execute(
-                    "SELECT COUNT(*) AS n FROM memories "
-                    "WHERE session_id = ? AND archived = 0",
+                    "SELECT COUNT(*) AS n FROM memories WHERE session_id = ? AND archived = 0",
                     (session_id,),
                 ).fetchone()
             else:
@@ -596,10 +589,7 @@ class InMemoryMemoryStore(MemoryStore):
         self._records = [
             rec
             for rec in self._records
-            if not (
-                rec.id == memory_id
-                and (workspace is None or rec.workspace == workspace)
-            )
+            if not (rec.id == memory_id and (workspace is None or rec.workspace == workspace))
         ]
         return len(self._records) != before
 
@@ -615,14 +605,10 @@ class InMemoryMemoryStore(MemoryStore):
 
     async def delete_session(self, session_id: str) -> None:
         self._records = [
-            r
-            for r in self._records
-            if not (r.session_id == session_id and r.scope == "session")
+            r for r in self._records if not (r.session_id == session_id and r.scope == "session")
         ]
 
     async def count(self, session_id: str | None = None) -> int:
         if session_id is None:
             return sum(1 for r in self._records if not r.archived)
-        return sum(
-            1 for r in self._records if r.session_id == session_id and not r.archived
-        )
+        return sum(1 for r in self._records if r.session_id == session_id and not r.archived)

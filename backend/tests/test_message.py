@@ -6,6 +6,7 @@ Covers: Message, ToolCall, ToolCallFunction, StreamEvent, Turn
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from shared.types import (
     Message,
@@ -46,9 +47,7 @@ class TestToolCallFunction:
 
     def test_model_validate(self) -> None:
         """model_validate reconstructs from dict."""
-        tcf = ToolCallFunction.model_validate(
-            {"name": "Shell", "arguments": '{"cmd":"ls"}'}
-        )
+        tcf = ToolCallFunction.model_validate({"name": "Shell", "arguments": '{"cmd":"ls"}'})
         assert tcf.name == "Shell"
         assert tcf.arguments == '{"cmd":"ls"}'
 
@@ -390,9 +389,7 @@ class TestMessageDefaultValues:
         msg = Message.assistant_message(id="msg1", turn_id="t1")
         d = msg.model_dump()
         for key, value in d.items():
-            assert value is not None, (
-                f"Field '{key}' is None, expected empty string/list"
-            )
+            assert value is not None, f"Field '{key}' is None, expected empty string/list"
 
     def test_content_defaults_to_empty_string(self) -> None:
         """content defaults to '' not None."""
@@ -430,12 +427,12 @@ class TestMessageRequiredFields:
 
     def test_id_is_required(self) -> None:
         """Creating a Message without id raises ValidationError."""
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        with pytest.raises(ValidationError):
             Message(turn_id="t1")
 
     def test_turn_id_is_required(self) -> None:
         """Creating a Message without turn_id raises ValidationError."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             Message(id="msg1")
 
 
@@ -703,7 +700,7 @@ class TestTurn:
 
     def test_id_is_required(self) -> None:
         """Turn without id raises ValidationError."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             Turn()
 
     def test_default_values_not_none(self) -> None:
@@ -814,9 +811,7 @@ class TestIntegrationStreamEventMimicsSSEProtocol:
             StreamEvent.chunk_delta(message_id="m1", field="content", delta="Hello"),
             StreamEvent.chunk_delta(message_id="m1", field="content", delta=" "),
             StreamEvent.chunk_delta(message_id="m1", field="content", delta="World"),
-            StreamEvent.chunk_delta(
-                message_id="m1", field="reasoning", delta="I think"
-            ),
+            StreamEvent.chunk_delta(message_id="m1", field="reasoning", delta="I think"),
         ]
 
         for ev in events:

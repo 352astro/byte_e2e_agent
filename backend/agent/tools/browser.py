@@ -10,6 +10,7 @@ BrowserInspect  启动浏览器子智能体（在 execute_one_tool 中分发）�
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from contextvars import ContextVar
 from typing import Literal
 
@@ -53,10 +54,8 @@ class BrowserSession:
 
     async def close(self) -> None:
         if self._playwright is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await self._playwright.__aexit__(None, None, None)
-            except Exception:
-                pass
         self._playwright = None
         self._page = None
 
@@ -128,6 +127,7 @@ _playwright: Playwright | None = None
 
 def _is_headless() -> bool:
     from app.core.config import get_settings
+
     return get_settings().browser_headless
 
 
@@ -158,10 +158,8 @@ async def _ensure_browser(session_id: str = ""):
 async def _shutdown_browser():
     global _page, _playwright
     if _playwright is not None:
-        try:
+        with contextlib.suppress(Exception):
             await _playwright.__aexit__(None, None, None)
-        except Exception:
-            pass
         _playwright = None
         _page = None
 
@@ -235,8 +233,7 @@ def _truncate(text: str, max_bytes: int) -> str:
         return text
     truncated = raw[:max_bytes].decode("utf-8", errors="replace")
     return (
-        f"{truncated}\n"
-        f"[... truncated at {max_bytes} bytes, {len(raw) - max_bytes} bytes omitted]"
+        f"{truncated}\n[... truncated at {max_bytes} bytes, {len(raw) - max_bytes} bytes omitted]"
     )
 
 

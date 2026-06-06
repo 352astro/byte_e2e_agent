@@ -117,7 +117,9 @@ function PendingRequestPanel({
           <span className="agent-guard-kicker">Permission Required</span>
           <span className="agent-guard-text">{title}</span>
           {description && (
-            <span className="agent-user-request-description">{description}</span>
+            <span className="agent-user-request-description">
+              {description}
+            </span>
           )}
           {(permissionPath || permissionMode) && (
             <div className="agent-guard-details">
@@ -159,12 +161,13 @@ function PendingRequestPanel({
   }
 
   const title =
-    request.title || String(payload.title || "") || request.subject || "Input requested";
+    request.title ||
+    String(payload.title || "") ||
+    request.subject ||
+    "Input requested";
   const description = request.description || String(payload.description || "");
   const choices =
-    request.choices ||
-    (payload.choices as GuardRequest["choices"]) ||
-    [];
+    request.choices || (payload.choices as GuardRequest["choices"]) || [];
   const questions =
     request.questions || (payload.questions as GuardRequest["questions"]) || [];
   const allowCustom =
@@ -657,7 +660,9 @@ export default function AgentDemo({
             }),
           });
         }
-      } catch {}
+      } catch {
+        // silently ignore fetch errors on restore/checkout
+      }
 
       if (opts.truncateTid) truncateMessages(opts.truncateTid, !!opts.keepTid);
       if (opts.removeSha) handleRemoveFrom(opts.removeSha);

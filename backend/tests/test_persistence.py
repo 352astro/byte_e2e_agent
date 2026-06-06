@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 import tempfile
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -71,9 +72,7 @@ class TestDatabase:
             database.execute(
                 "CREATE TABLE IF NOT EXISTS test_table (id INTEGER PRIMARY KEY, name TEXT)"
             )
-            database.execute(
-                "INSERT INTO test_table (id, name) VALUES (?, ?)", (1, "alice")
-            )
+            database.execute("INSERT INTO test_table (id, name) VALUES (?, ?)", (1, "alice"))
             rows = database.query("SELECT * FROM test_table")
             assert len(rows) == 1
             assert rows[0]["name"] == "alice"
@@ -83,15 +82,9 @@ class TestDatabase:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "test.db"
             database = Database(db_path)
-            database.execute(
-                "CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)"
-            )
-            database.execute(
-                "INSERT INTO test_table (id, name) VALUES (?, ?)", (1, "bob")
-            )
-            database.execute(
-                "INSERT INTO test_table (id, name) VALUES (?, ?)", (2, "carol")
-            )
+            database.execute("CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)")
+            database.execute("INSERT INTO test_table (id, name) VALUES (?, ?)", (1, "bob"))
+            database.execute("INSERT INTO test_table (id, name) VALUES (?, ?)", (2, "carol"))
             result = database.query("SELECT * FROM test_table ORDER BY id")
             assert isinstance(result, list)
             assert len(result) == 2
@@ -104,15 +97,9 @@ class TestDatabase:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "test.db"
             database = Database(db_path)
-            database.execute(
-                "CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)"
-            )
-            database.execute(
-                "INSERT INTO test_table (id, name) VALUES (?, ?)", (1, "dave")
-            )
-            database.execute(
-                "INSERT INTO test_table (id, name) VALUES (?, ?)", (2, "eve")
-            )
+            database.execute("CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)")
+            database.execute("INSERT INTO test_table (id, name) VALUES (?, ?)", (1, "dave"))
+            database.execute("INSERT INTO test_table (id, name) VALUES (?, ?)", (2, "eve"))
             result = database.query("SELECT * FROM test_table WHERE name = ?", ("eve",))
             assert len(result) == 1
             assert result[0]["name"] == "eve"
@@ -184,8 +171,7 @@ class TestSQLiteLLMMetricsStore:
             store = self._make_store(tmpdir)
             conn = store._connect()
             columns = {
-                row["name"]
-                for row in conn.execute("PRAGMA table_info(llm_calls)").fetchall()
+                row["name"] for row in conn.execute("PRAGMA table_info(llm_calls)").fetchall()
             }
             expected_columns = {
                 "id",
@@ -288,9 +274,7 @@ class TestSQLiteLLMMetricsStore:
             )
 
             expected = (800 * 10 + 200 * 1 + 1_500 * 20 + 500 * 30) / 1_000_000
-            assert store.list_calls()["items"][0]["cost_yuan"] == pytest.approx(
-                expected
-            )
+            assert store.list_calls()["items"][0]["cost_yuan"] == pytest.approx(expected)
             assert store.summary()["cost_yuan"] == pytest.approx(expected)
             assert store.series()["buckets"][0]["cost_yuan"] == pytest.approx(expected)
 
@@ -355,7 +339,7 @@ class TestSQLiteLLMMetricsStore:
         """list_calls() 应将 limit 限制在 1-500 之间。"""
         with tempfile.TemporaryDirectory() as tmpdir:
             store = self._make_store(tmpdir)
-            for i in range(600):
+            for _i in range(600):
                 self._record_sample(store, model="m", latency_ms=1)
             # limit=0 → clamped to 1
             result_zero = store.list_calls(limit=0)
@@ -582,7 +566,7 @@ class TestLLMCallContext:
     def test_is_frozen_dataclass(self):
         """LLMCallContext 应是 frozen dataclass，不可原地修改。"""
         ctx = LLMCallContext()
-        with pytest.raises(Exception):  # FrozenInstanceError 或 AttributeError
+        with pytest.raises(FrozenInstanceError):
             ctx.session_id = "hack"  # type: ignore[misc]
 
     def test_default_values(self):

@@ -36,16 +36,12 @@ def _get_handler(tool_name: str):
     return tool.coroutine
 
 
-def _make_ws(
-    read_file_ret=None, write_file_ret=None, edit_file_ret=None, resolve_path_ret=None
-):
+def _make_ws(read_file_ret=None, write_file_ret=None, edit_file_ret=None, resolve_path_ret=None):
     """Create a mock Workspace."""
     ws = MagicMock()
     ws.read_file = AsyncMock(return_value=read_file_ret or "(empty)")
     ws.write_file = AsyncMock(return_value=write_file_ret or "Successfully wrote file.")
-    ws.edit_file = AsyncMock(
-        return_value=edit_file_ret or "Successfully applied edit(s)."
-    )
+    ws.edit_file = AsyncMock(return_value=edit_file_ret or "Successfully applied edit(s).")
     ws.resolve_path.return_value = resolve_path_ret or "/mock/workspace"
     ws.root = Path("/mock/workspace")
     return ws
@@ -118,7 +114,9 @@ class TestShellExecution:
 
         t0 = time.perf_counter()
         result = await handler(
-            command="sleep 120", timeout_ms=5000, ws=ws,
+            command="sleep 120",
+            timeout_ms=5000,
+            ws=ws,
             interrupt_event=interrupt_event,
         )
         elapsed = time.perf_counter() - t0
@@ -149,7 +147,9 @@ class TestShellExecution:
         task = asyncio.create_task(trigger())
         t0 = time.perf_counter()
         result = await handler(
-            command="sleep 120", timeout_ms=5000, ws=ws,
+            command="sleep 120",
+            timeout_ms=5000,
+            ws=ws,
             interrupt_event=interrupt_event,
         )
         elapsed = time.perf_counter() - t0
@@ -418,9 +418,7 @@ class TestPyReplExecution:
                 interrupt_event.set()
 
             task = asyncio.create_task(trigger())
-            result = await handler(
-                code="while True: pass", interrupt_event=interrupt_event
-            )
+            result = await handler(code="while True: pass", interrupt_event=interrupt_event)
             await task
             # Either interrupted or timed out
             assert "interrupted" in result.lower() or "timed out" in result.lower()
@@ -512,9 +510,7 @@ class TestWebSearchExecution:
         with patch.dict(os.environ, {}, clear=True):
             with patch("agent.tools.search.serpapi.Client") as MockClient:
                 mock_client = MockClient.return_value
-                mock_client.search.side_effect = RuntimeError(
-                    "SERPAPI_KEY is not configured"
-                )
+                mock_client.search.side_effect = RuntimeError("SERPAPI_KEY is not configured")
 
                 result = await handler(query="test")
                 assert "Error" in result
@@ -595,9 +591,7 @@ class TestWebFetchExecution:
         interrupt_event = asyncio.Event()
         interrupt_event.set()
 
-        result = await handler(
-            url="http://example.com", interrupt_event=interrupt_event
-        )
+        result = await handler(url="http://example.com", interrupt_event=interrupt_event)
         assert "interrupted" in result.lower()
 
     @pytest.mark.asyncio
@@ -621,9 +615,7 @@ class TestWebFetchExecution:
         fake_client = _FakeClient(stream_ctx=_FakeStreamCtx(fake_resp))
 
         with patch("agent.tools.search.httpx.AsyncClient", return_value=fake_client):
-            result = await handler(
-                url="http://example.com", interrupt_event=interrupt_event
-            )
+            result = await handler(url="http://example.com", interrupt_event=interrupt_event)
             assert "interrupted" in result.lower()
 
 
@@ -774,9 +766,7 @@ class TestBrowserActExecution:
         interrupt_event = asyncio.Event()
         interrupt_event.set()
 
-        result = await handler(
-            selector="#btn", action="click", interrupt_event=interrupt_event
-        )
+        result = await handler(selector="#btn", action="click", interrupt_event=interrupt_event)
         assert "interrupted" in result.lower()
 
     @pytest.mark.asyncio

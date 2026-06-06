@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import signal
 import sys
@@ -99,9 +100,7 @@ def _build_sandbox_script(code: str) -> str:
         "False",
         "None",
     ]
-    safe_builtins = ",\n        ".join(
-        f'"{n}": __builtins__["{n}"]' for n in safe_names
-    )
+    safe_builtins = ",\n        ".join(f'"{n}": __builtins__["{n}"]' for n in safe_names)
 
     return textwrap.dedent(f"""\
     import builtins as __builtins__
@@ -186,8 +185,7 @@ async def pyrepl_handler(
 
         if len(output) > _MAX_OUTPUT_BYTES:
             output = (
-                output[:_MAX_OUTPUT_BYTES]
-                + f"\n\n[Output truncated at {_MAX_OUTPUT_BYTES} bytes]"
+                output[:_MAX_OUTPUT_BYTES] + f"\n\n[Output truncated at {_MAX_OUTPUT_BYTES} bytes]"
             )
         return ToolResult(output if output.strip() else "(no output)")
 
@@ -211,10 +209,8 @@ def _kill_proc(proc) -> None:
     try:
         os.kill(proc.pid, signal.SIGKILL)
     except Exception:
-        try:
+        with contextlib.suppress(Exception):
             proc.kill()
-        except Exception:
-            pass
 
 
 pyrepl_tool = StructuredTool.from_function(

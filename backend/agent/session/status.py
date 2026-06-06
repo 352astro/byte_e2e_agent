@@ -18,10 +18,10 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class SessionStatus(str, Enum):
+class SessionStatus(StrEnum):
     """单个 Session 的运行时状态。
 
     对标 Rust SessionStatus。
@@ -41,7 +41,7 @@ class SessionStatus(str, Enum):
         return self in (SessionStatus.RUNNING, SessionStatus.PENDING)
 
 
-class RuntimeStatus(str, Enum):
+class RuntimeStatus(StrEnum):
     """AgentRuntime 全局忙碌状态。
 
     对标 Rust RuntimeStatus。

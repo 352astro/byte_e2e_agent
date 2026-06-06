@@ -8,6 +8,7 @@ Architecture (ported from main):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import queue
 import re
 import sys
@@ -23,12 +24,8 @@ from agent.tools.terminal import PersistentTerminal
 from agent.utils import sysguard
 
 _PLATFORM_MAP = {"linux": "Linux", "darwin": "macOS", "win32": "Windows"}
-_PERMISSION_DENIED_PATH_RE = re.compile(
-    r"(?P<path>/[^\s:'\"]+):\s+Permission denied"
-)
-_QUOTED_PERMISSION_DENIED_PATH_RE = re.compile(
-    r"['\"](?P<path>/[^'\"]+)['\"]:\s+Permission denied"
-)
+_PERMISSION_DENIED_PATH_RE = re.compile(r"(?P<path>/[^\s:'\"]+):\s+Permission denied")
+_QUOTED_PERMISSION_DENIED_PATH_RE = re.compile(r"['\"](?P<path>/[^'\"]+)['\"]:\s+Permission denied")
 _WRITE_DENIAL_HINTS = (
     "cannot remove",
     "cannot create",
@@ -66,8 +63,7 @@ class ShellInput(BaseModel):
     cwd: str = Field(
         default=".",
         description=(
-            "Working directory relative to the workspace root. "
-            "Use '.' for the workspace root."
+            "Working directory relative to the workspace root. Use '.' for the workspace root."
         ),
     )
     timeout_ms: int = Field(
@@ -207,10 +203,8 @@ async def shell_handler(
         output = f"Error: {exc}"
     finally:
         if thread.is_alive():
-            try:
+            with contextlib.suppress(Exception):
                 terminal.stop()
-            except Exception:
-                pass
 
     output = output.strip()
     metadata = _sysguard_denial_metadata(output, result_status, result_reason)
@@ -224,8 +218,7 @@ async def shell_handler(
         omitted = len(raw) - max_bytes
         output = raw[:max_bytes].decode("utf-8", errors="ignore").rstrip()
         output = (
-            f"{output}\n[output truncated after {max_bytes} bytes; "
-            f"{omitted} bytes omitted]"
+            f"{output}\n[output truncated after {max_bytes} bytes; {omitted} bytes omitted]"
         ).strip()
 
     return ToolResult(
@@ -286,7 +279,9 @@ def _looks_like_write_denial(output: str) -> bool:
     lowered = output.lower()
     if any(hint in lowered for hint in _WRITE_DENIAL_HINTS):
         return True
-    return bool(re.search(r"\b(rm|mv|cp|mkdir|touch|install|cargo|rustup|npm|pnpm|yarn)\b", lowered))
+    return bool(
+        re.search(r"\b(rm|mv|cp|mkdir|touch|install|cargo|rustup|npm|pnpm|yarn)\b", lowered)
+    )
 
 
 def _external_denial_candidate(path: str, *, readwrite: bool) -> dict | None:

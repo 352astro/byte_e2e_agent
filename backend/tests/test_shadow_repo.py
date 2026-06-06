@@ -82,9 +82,7 @@ class TestConstruction:
             sr = ShadowRepo(workdir=str(Path(d)), repodir=repodir)
             assert os.path.isdir(sr._repodir)
 
-    def test_repodir_under_agent_dir_shadow_vcs(
-        self, shadow: ShadowRepo, workdir: str
-    ):
+    def test_repodir_under_agent_dir_shadow_vcs(self, shadow: ShadowRepo, workdir: str):
         """repo_dir is under .byte_agent/.shadow-vcs."""
         expected = os.path.join(workdir, ".byte_agent", ".shadow-vcs")
         assert shadow._repodir == os.path.abspath(expected)
@@ -110,9 +108,7 @@ class TestSnapshot:
         assert commit_info["message"] == "initial"
         assert "message_id" not in commit_info
 
-    def test_works_with_files_in_workspace(
-        self, shadow: ShadowRepo, workdir: str, branch: str
-    ):
+    def test_works_with_files_in_workspace(self, shadow: ShadowRepo, workdir: str, branch: str):
         """Works when there are files in the workspace."""
         make_file(workdir, "hello.txt", "Hello, world!")
         make_file(workdir, "src/main.py", "print('hi')")
@@ -128,9 +124,7 @@ class TestSnapshot:
         commit_info = shadow.get_commit(sha)
         assert commit_info["files"] == []
 
-    def test_multiple_snapshots_create_chain(
-        self, shadow: ShadowRepo, workdir: str, branch: str
-    ):
+    def test_multiple_snapshots_create_chain(self, shadow: ShadowRepo, workdir: str, branch: str):
         """Multiple snapshots form a parent chain on the same branch."""
         sha1 = shadow.snapshot(branch, "first")
         make_file(workdir, "a.txt", "A")
@@ -228,9 +222,7 @@ class TestRestore:
         assert read_file(workdir, "sub/f2.txt") == "two"
         assert not file_exists(workdir, "f3.txt")
 
-    def test_restore_removes_empty_directories(
-        self, shadow: ShadowRepo, workdir: str, branch: str
-    ):
+    def test_restore_removes_empty_directories(self, shadow: ShadowRepo, workdir: str, branch: str):
         """After restore, empty directories from later commits are cleaned up."""
         make_file(workdir, "keep.txt", "keep")
         sha_keep = shadow.snapshot(branch, "keep")
@@ -246,9 +238,7 @@ class TestRestore:
 
 
 class TestGetCommit:
-    def test_returns_commit_metadata(
-        self, shadow: ShadowRepo, workdir: str, branch: str
-    ):
+    def test_returns_commit_metadata(self, shadow: ShadowRepo, workdir: str, branch: str):
         """Returns commit metadata for a given SHA."""
         make_file(workdir, "data.txt", "payload")
         sha = shadow.snapshot(branch, "save data")
@@ -287,9 +277,7 @@ class TestGetCommit:
 
 
 class TestSetHead:
-    def test_moves_head_to_specific_commit(
-        self, shadow: ShadowRepo, workdir: str, branch: str
-    ):
+    def test_moves_head_to_specific_commit(self, shadow: ShadowRepo, workdir: str, branch: str):
         """Moves HEAD to a specific commit, discarding later commits."""
         make_file(workdir, "first.txt", "first")
         sha1 = shadow.snapshot(branch, "commit 1")
@@ -309,9 +297,7 @@ class TestSetHead:
         assert sha2 not in shas
         assert sha3 not in shas
 
-    def test_set_head_raises_keyerror_for_unknown_sha(
-        self, shadow: ShadowRepo, branch: str
-    ):
+    def test_set_head_raises_keyerror_for_unknown_sha(self, shadow: ShadowRepo, branch: str):
         """Raises KeyError when setting HEAD to unknown SHA."""
         with pytest.raises(KeyError):
             shadow.set_head(branch, "0" * 40)
@@ -321,9 +307,7 @@ class TestSetHead:
 
 
 class TestDeleteBranch:
-    def test_removes_branch_reference(
-        self, shadow: ShadowRepo, workdir: str, branch: str
-    ):
+    def test_removes_branch_reference(self, shadow: ShadowRepo, workdir: str, branch: str):
         """Removes a branch reference."""
         make_file(workdir, "keep.txt", "data")
         shadow.snapshot(branch, "on branch")
@@ -346,9 +330,7 @@ class TestDeleteBranch:
 
 
 class TestIntegration:
-    def test_snapshot_list_restore_verify(
-        self, shadow: ShadowRepo, workdir: str, branch: str
-    ):
+    def test_snapshot_list_restore_verify(self, shadow: ShadowRepo, workdir: str, branch: str):
         """Integration: snapshot → list_commits → restore → verify files."""
         # Step 1: Initial snapshot on empty workspace
         sha_empty = shadow.snapshot(branch, "empty workspace")
@@ -368,7 +350,7 @@ class TestIntegration:
         # Step 3: Modify a file and add another
         make_file(workdir, "src/app.py", "print('updated app')")
         make_file(workdir, "config.json", '{"debug": true}')
-        sha_modified = shadow.snapshot(branch, "update app, add config")
+        shadow.snapshot(branch, "update app, add config")
 
         assert len(shadow.list_commits(branch)) == 3
 

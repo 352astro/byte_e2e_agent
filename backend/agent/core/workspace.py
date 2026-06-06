@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -115,7 +116,7 @@ class Workspace:
             return None
         try:
             return json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             return None
 
     def list_session_ids(self) -> list[str]:
@@ -123,9 +124,7 @@ class Workspace:
         if not d.exists():
             return []
         return sorted(
-            e.name
-            for e in d.iterdir()
-            if e.is_dir() and _SESSION_ID_RE.fullmatch(e.name)
+            e.name for e in d.iterdir() if e.is_dir() and _SESSION_ID_RE.fullmatch(e.name)
         )
 
     # ═══════════════════════════════════════════════════════
@@ -156,7 +155,7 @@ class Workspace:
                 "Path is outside workspace and not allowed by shell sandbox "
                 f"settings: input={relpath!r}, resolved={resolved}, "
                 f"workspace={self.root}"
-            )
+            ) from None
         return resolved
 
     def resolve_path(self, relpath: str) -> str:
@@ -288,9 +287,7 @@ class Workspace:
         try:
             content = safe.read_text(encoding="utf-8")
         except FileNotFoundError:
-            return (
-                f"Error: file not found '{path}'. Use Write to create a new file first."
-            )
+            return f"Error: file not found '{path}'. Use Write to create a new file first."
         except IsADirectoryError:
             return f"Error: '{path}' is a directory, not a file"
         except PermissionError:
@@ -339,10 +336,8 @@ class Workspace:
         try:
             os.kill(proc.pid, signal.SIGKILL)
         except Exception:
-            try:
+            with contextlib.suppress(Exception):
                 proc.kill()
-            except Exception:
-                pass
 
     def __repr__(self) -> str:
         return f"Workspace({self.root}, uuid={self.uuid})"

@@ -78,10 +78,7 @@ def validate_agent_workspace(path: str | Path) -> str:
         return str(resolved)
     try:
         PROJECT_ROOT.relative_to(resolved)
-        raise ValueError(
-            "Workspace cannot contain the application repository: "
-            f"{resolved}"
-        )
+        raise ValueError(f"Workspace cannot contain the application repository: {resolved}")
     except ValueError as exc:
         if "Workspace cannot" in str(exc):
             raise
@@ -148,9 +145,7 @@ def get_settings() -> Settings:
         # ── App ────────────────────────────────
         app_title="Byte E2E Agent Backend",
         agent_workspace=validate_agent_workspace(
-            coerce_agent_workspace(
-                os.environ.get("AGENT_WORKSPACE") or _default_agent_workspace()
-            )
+            coerce_agent_workspace(os.environ.get("AGENT_WORKSPACE") or _default_agent_workspace())
         ),
         cors_allow_origins=("http://localhost:5173",),
         cors_allow_origin_regex=r"http://localhost:\d+",
@@ -165,9 +160,7 @@ def get_settings() -> Settings:
         llm_retry_base_delay_ms=_env_int("LLM_RETRY_BASE_DELAY_MS", default=800),
         llm_retry_max_delay_ms=_env_int("LLM_RETRY_MAX_DELAY_MS", default=8000),
         # ── LLM metrics ────────────────────────
-        llm_metrics_db_path=(
-            os.environ.get("LLM_METRICS_DB_PATH") or DEFAULT_LLM_METRICS_DB_PATH
-        ),
+        llm_metrics_db_path=(os.environ.get("LLM_METRICS_DB_PATH") or DEFAULT_LLM_METRICS_DB_PATH),
         # ── LLM cost pricing defaults ──────────
         llm_input_cost_yuan_per_1m_tokens=_env_float(
             "LLM_INPUT_COST_YUAN_PER_1M_TOKENS", default=3.0

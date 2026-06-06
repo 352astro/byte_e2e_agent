@@ -193,9 +193,7 @@ async def execute_turn(
 
             assistant_id = _uuid.uuid4().hex
             tool_names = entry.config.tool_names()
-            toolset = (
-                ToolSet(tool_registry, *tool_names) if tool_names else default_toolset()
-            )
+            toolset = ToolSet(tool_registry, *tool_names) if tool_names else default_toolset()
 
             streaming_holder: list[Message | None] = [None]
             runtime._streaming_holder = streaming_holder

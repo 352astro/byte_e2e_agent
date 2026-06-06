@@ -59,9 +59,7 @@ async def finish_partial_streaming_message(
 ) -> None:
     if msg is None or not msg.id:
         return
-    if not (
-        msg.content or msg.reasoning or msg.error or msg.tool_result or msg.tool_calls
-    ):
+    if not (msg.content or msg.reasoning or msg.error or msg.tool_result or msg.tool_calls):
         return
     msg.mark_complete()
     await hooks.on_message_finish(

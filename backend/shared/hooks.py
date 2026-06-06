@@ -9,10 +9,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
-from abc import ABC
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from shared.types import Message
@@ -20,7 +20,7 @@ from shared.types import Message
 logger = logging.getLogger(__name__)
 
 
-class GuardDecision(str, Enum):
+class GuardDecision(StrEnum):
     """Decision returned by guard hooks before a guarded action runs."""
 
     ALLOW = "allow"
@@ -46,14 +46,14 @@ class GuardCheck:
 # ═══════════════════════════════════════════════════════════
 
 
-class BaseHook(ABC):
+class BaseHook:
     """所有 Hook 的基类。每个方法默认 no-op，子类按需重写。"""
 
     # ── Message 生命周期 ─────────────────────────────────
 
     async def on_message_start(self, *, msg: Message, **kwargs: Any) -> None:
         """新 Message 开始构建。"""
-        pass
+        ...
 
     async def on_chunk_delta(
         self,
@@ -65,7 +65,7 @@ class BaseHook(ABC):
         **kwargs: Any,
     ) -> None:
         """Message 字段追加增量。field 是 Message 属性名。"""
-        pass
+        ...
 
     async def on_chunk_complete(
         self,
@@ -79,7 +79,7 @@ class BaseHook(ABC):
         **kwargs: Any,
     ) -> None:
         """结构化字段（tool_calls/tool_result）一次性完成。"""
-        pass
+        ...
 
     async def on_message_finish(
         self,
@@ -92,7 +92,7 @@ class BaseHook(ABC):
         **kwargs: Any,
     ) -> None:
         """Message 构建完成。"""
-        pass
+        ...
 
     async def on_message_error(
         self,
@@ -102,7 +102,7 @@ class BaseHook(ABC):
         **kwargs: Any,
     ) -> None:
         """Message 构建出错。"""
-        pass
+        ...
 
     # ── Turn 生命周期 ────────────────────────────────────
 
@@ -115,7 +115,7 @@ class BaseHook(ABC):
         **kwargs: Any,
     ) -> None:
         """Turn 开始。"""
-        pass
+        ...
 
     async def on_turn_end(
         self,
@@ -127,7 +127,7 @@ class BaseHook(ABC):
         **kwargs: Any,
     ) -> None:
         """Turn 结束。"""
-        pass
+        ...
 
     # ── SubAgent 生命周期 ────────────────────────────────
 
@@ -138,11 +138,9 @@ class BaseHook(ABC):
         parent_session_id: str,
         max_steps: int = 0,
         **kwargs: Any,
-    ) -> None:
-        pass
+    ) -> None: ...
 
-    async def on_subagent_end(self, *, result: str, **kwargs: Any) -> None:
-        pass
+    async def on_subagent_end(self, *, result: str, **kwargs: Any) -> None: ...
 
     # ── Guard / approval ────────────────────────────────
 
@@ -163,7 +161,7 @@ class BaseHook(ABC):
         **kwargs: Any,
     ) -> None:
         """Notify listeners that runtime is waiting for user approval."""
-        pass
+        ...
 
     async def on_runtime_notice(
         self,
@@ -180,7 +178,7 @@ class BaseHook(ABC):
         **kwargs: Any,
     ) -> None:
         """Notify listeners about transient runtime state."""
-        pass
+        ...
 
     # ── 上下文注入 ──────────────────────────────────────
 
@@ -223,10 +221,8 @@ class HookManager:
         self._hooks.append(hook)
 
     def remove_hook(self, hook: BaseHook) -> None:
-        try:
+        with contextlib.suppress(ValueError):
             self._hooks.remove(hook)
-        except ValueError:
-            pass
 
     @property
     def hooks(self) -> list[BaseHook]:
@@ -241,9 +237,7 @@ class HookManager:
             try:
                 fn = getattr(hook, method, None)
                 if fn is None:
-                    logger.warning(
-                        "Hook %s has no method %s", type(hook).__name__, method
-                    )
+                    logger.warning("Hook %s has no method %s", type(hook).__name__, method)
                     continue
                 await fn(**kwargs)
             except Exception:
@@ -277,9 +271,7 @@ class HookManager:
                 if items:
                     result.extend(items)
             except Exception:
-                logger.exception(
-                    "Hook %s.on_context_assemble failed", type(hook).__name__
-                )
+                logger.exception("Hook %s.on_context_assemble failed", type(hook).__name__)
         return result
 
     async def guard_check(self, check: GuardCheck, **kwargs: Any) -> GuardDecision:

@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 # ═══════════════════════════════════════════════════════════
 # AgentConfig — LLM 调用配置
@@ -37,7 +37,7 @@ class AgentConfig:
 # ═══════════════════════════════════════════════════════════
 
 
-class ToolSetPreset(str, Enum):
+class ToolSetPreset(StrEnum):
     """可用工具集预设。
 
     对标 Rust ToolSet enum:
@@ -121,7 +121,7 @@ class Owner:
         return hash((self.kind, self.session_id))
 
 
-class Visibility(str, Enum):
+class Visibility(StrEnum):
     """Session 可见性。"""
 
     PRIVATE = "private"
@@ -129,7 +129,7 @@ class Visibility(str, Enum):
     PUBLIC = "public"
 
 
-class InvokePermission(str, Enum):
+class InvokePermission(StrEnum):
     """谁可以 invoke 这个 Session。"""
 
     OWNER_ONLY = "owner_only"
@@ -137,7 +137,7 @@ class InvokePermission(str, Enum):
     ANY_AGENT = "any_agent"
 
 
-class Lifecycle(str, Enum):
+class Lifecycle(StrEnum):
     """Session 生命周期。"""
 
     PERSISTENT = "persistent"

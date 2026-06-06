@@ -41,7 +41,7 @@ def write_subagent_metadata(
     if path.is_file():
         try:
             existing = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             existing = {}
     payload = {
         **existing,

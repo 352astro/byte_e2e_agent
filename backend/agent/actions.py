@@ -91,9 +91,9 @@ async def _next_stream_chunk_async(iterator, *, threaded: bool):
     return await asyncio.to_thread(_next_stream_chunk, iterator)
 
 
-
 def _model_retry_delay_ms(attempt: int) -> int:
     from app.core.config import get_settings
+
     s = get_settings()
     base_ms = max(0, s.llm_retry_base_delay_ms)
     max_ms = max(base_ms, s.llm_retry_max_delay_ms)
@@ -196,19 +196,20 @@ async def model_call(
     if hook_manager is not None:
         await hook_manager.on_message_start(msg=msg, session_id=session_id)
 
-    kwargs: dict = dict(
-        model=model_id,
-        messages=messages,
-        stream=True,
-        stream_options={"include_usage": True},
-        reasoning_effort="high",
-        extra_body={"thinking": {"type": "enabled"}},
-    )
+    kwargs: dict = {
+        "model": model_id,
+        "messages": messages,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+        "reasoning_effort": "high",
+        "extra_body": {"thinking": {"type": "enabled"}},
+    }
     if tools:
         kwargs["tools"] = tools
 
     request_client = _model_request_client(client)
     from app.core.config import get_settings
+
     max_retries = max(0, get_settings().llm_max_retries)
     max_attempts = max_retries + 1
     retry_notice_id = f"model-retry:{session_id}:{turn_id or message_id}"
@@ -315,9 +316,7 @@ async def model_call(
                             "_usage",
                             {
                                 "prompt_tokens": getattr(_usage, "prompt_tokens", 0),
-                                "completion_tokens": getattr(
-                                    _usage, "completion_tokens", 0
-                                ),
+                                "completion_tokens": getattr(_usage, "completion_tokens", 0),
                                 "total_tokens": getattr(_usage, "total_tokens", 0),
                             },
                         )
@@ -339,9 +338,7 @@ async def model_call(
             raise
         except Exception as exc:
             should_retry = (
-                not received_chunk
-                and attempt < max_retries
-                and _is_retriable_model_error(exc)
+                not received_chunk and attempt < max_retries and _is_retriable_model_error(exc)
             )
             if not should_retry:
                 raise
@@ -501,11 +498,9 @@ async def execute_one_tool(
 def _accepts_kwarg(fn, name: str) -> bool:
     try:
         params = inspect.signature(fn).parameters.values()
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
-    return any(
-        p.kind == inspect.Parameter.VAR_KEYWORD or p.name == name for p in params
-    )
+    return any(p.kind == inspect.Parameter.VAR_KEYWORD or p.name == name for p in params)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -539,8 +534,7 @@ async def run_subagent(
         {
             "role": "system",
             "content": (
-                "You are a sub-agent. Complete the assigned task "
-                "and return a final answer."
+                "You are a sub-agent. Complete the assigned task and return a final answer."
             ),
         },
     ]
@@ -589,9 +583,7 @@ async def run_subagent(
         )
 
         content = msg.content
-        tool_calls = (
-            [tc.model_dump() for tc in msg.tool_calls] if msg.tool_calls else []
-        )
+        tool_calls = [tc.model_dump() for tc in msg.tool_calls] if msg.tool_calls else []
 
         if content:
             last_answer = content

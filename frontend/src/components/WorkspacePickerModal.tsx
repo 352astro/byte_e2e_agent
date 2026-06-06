@@ -95,9 +95,10 @@ export default function WorkspacePickerModal({
   const [showHidden, setShowHidden] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [position, setPosition] = useState<{ left: number; top: number } | null>(
-    null,
-  );
+  const [position, setPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -178,7 +179,11 @@ export default function WorkspacePickerModal({
         if (current) {
           return clampDialogPosition(current.left, current.top, rect);
         }
-        return clampDialogPosition((window.innerWidth - rect.width) / 2, MODAL_TOP, rect);
+        return clampDialogPosition(
+          (window.innerWidth - rect.width) / 2,
+          MODAL_TOP,
+          rect,
+        );
       });
     };
 
@@ -293,7 +298,7 @@ export default function WorkspacePickerModal({
     const currentIndex = selectableEntries.findIndex(
       (entry) => entry.path === selectedPath,
     );
-    let nextIndex = 0;
+    let nextIndex: number;
     if (currentIndex === -1) {
       nextIndex = direction > 0 ? 0 : selectableEntries.length - 1;
     } else {
@@ -310,7 +315,9 @@ export default function WorkspacePickerModal({
   };
 
   const enterSelectedDirectory = () => {
-    const selected = selectableEntries.find((entry) => entry.path === selectedPath);
+    const selected = selectableEntries.find(
+      (entry) => entry.path === selectedPath,
+    );
     if (selected) {
       void loadDirectory(selected.path, showHidden, { focusList: true });
     }
@@ -588,11 +595,16 @@ export default function WorkspacePickerModal({
           {!loading && entries.length === 0 && (
             <div className="workspace-picker-empty">No visible entries</div>
           )}
-          {loading && <div className="workspace-picker-loading">Loading...</div>}
+          {loading && (
+            <div className="workspace-picker-loading">Loading...</div>
+          )}
         </div>
 
         <div className="workspace-picker-footer">
-          <div className="workspace-picker-selected" title={selectedPath || path}>
+          <div
+            className="workspace-picker-selected"
+            title={selectedPath || path}
+          >
             {selectedPath || path}
           </div>
           <button type="button" onClick={close} disabled={busy}>

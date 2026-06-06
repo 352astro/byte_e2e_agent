@@ -64,17 +64,7 @@ const MessageCard = React.memo(function MessageCard({
   if (m.role === "tool") {
     const toolName = m.tool_name || "Tool";
     const result = m.tool_result || "";
-    let toolArgs: Record<string, unknown> | undefined;
-    try {
-      if (result) {
-        // tool_result is the execution output; try parsing if it looks like JSON
-      }
-    } catch {
-      /* ignore */
-    }
-    return (
-      <ToolResult toolName={toolName} result={result} toolArgs={toolArgs} />
-    );
+    return <ToolResult toolName={toolName} result={result} />;
   }
 
   // ── Error ────────────────────────────────────────

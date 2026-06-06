@@ -71,9 +71,7 @@ class LoggingHook(BaseHook):
     async def on_message_start(self, *, msg: Message, **kwargs: Any) -> None:
         pass  # driven by chunk_delta
 
-    async def on_chunk_delta(
-        self, *, msg: Message, field: str, delta: str, **kwargs: Any
-    ) -> None:
+    async def on_chunk_delta(self, *, msg: Message, field: str, delta: str, **kwargs: Any) -> None:
         if not self._verbose:
             return
 
@@ -145,9 +143,7 @@ class LoggingHook(BaseHook):
             )
             self._line_empty = True
 
-    async def on_message_error(
-        self, *, msg: Message, error: Exception, **kwargs: Any
-    ) -> None:
+    async def on_message_error(self, *, msg: Message, error: Exception, **kwargs: Any) -> None:
         self._nl()
         print(_s(f"error: {error}", _RED))
         self._line_empty = True
@@ -179,9 +175,7 @@ class LoggingHook(BaseHook):
 
     # ── SubAgent ──────────────────────────────────────────
 
-    async def on_subagent_start(
-        self, *, task: str = "", max_steps: int = 0, **kwargs: Any
-    ) -> None:
+    async def on_subagent_start(self, *, task: str = "", max_steps: int = 0, **kwargs: Any) -> None:
         if not self._verbose:
             return
         t = task[:100]

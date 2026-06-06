@@ -35,9 +35,7 @@ async def glob_handler(pattern: str, max_results: int = 200, *, ws) -> str:
         workspace = Path(".")
 
     try:
-        matches = sorted(
-            str(p.relative_to(workspace)) for p in workspace.rglob(pattern)
-        )
+        matches = sorted(str(p.relative_to(workspace)) for p in workspace.rglob(pattern))
     except Exception as exc:
         return f"Error: invalid glob pattern '{pattern}': {exc}"
 

@@ -34,9 +34,7 @@ def test_start_chat_raises_session_not_found() -> None:
 
 def test_start_chat_raises_agent_busy() -> None:
     ctx = _make_ctx(
-        scheduler_start_side_effect=RuntimeError(
-            "Scheduler already running (state=running)"
-        )
+        scheduler_start_side_effect=RuntimeError("Scheduler already running (state=running)")
     )
     service = ChatService(ctx)
 

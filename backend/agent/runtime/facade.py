@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import uuid as _uuid
 
 from agent.core.config import SessionConfig
@@ -174,9 +175,7 @@ class AgentRuntime:
         shadow_repo=None,
     ) -> str:
         if self._running_session_id is not None:
-            raise RuntimeError(
-                f"Runtime already running session {self._running_session_id}"
-            )
+            raise RuntimeError(f"Runtime already running session {self._running_session_id}")
 
         self._running_session_id = entry.id
         entry.transition_to(SessionStatus.RUNNING)
@@ -338,10 +337,8 @@ class AgentRuntime:
         self._interrupt_event.set()
         task = self._loop_task
         if task is not None:
-            try:
+            with contextlib.suppress(TimeoutError, asyncio.CancelledError, Exception):
                 await asyncio.wait_for(task, timeout=3.0)
-            except (TimeoutError, asyncio.CancelledError, Exception):
-                pass
         return True
 
     # ═══════════════════════════════════════════════════════

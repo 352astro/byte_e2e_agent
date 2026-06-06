@@ -43,18 +43,12 @@ def _message_replay_events(msg: dict, session_id: str = ""):
     content = msg.get("content", "")
     if content:
         yield StreamEvent.chunk_delta(msg_id, "content", content, session_id=session_id)
-        yield StreamEvent.chunk_complete(
-            msg_id, "content", content, session_id=session_id
-        )
+        yield StreamEvent.chunk_complete(msg_id, "content", content, session_id=session_id)
 
     reasoning = msg.get("reasoning", "")
     if reasoning:
-        yield StreamEvent.chunk_delta(
-            msg_id, "reasoning", reasoning, session_id=session_id
-        )
-        yield StreamEvent.chunk_complete(
-            msg_id, "reasoning", reasoning, session_id=session_id
-        )
+        yield StreamEvent.chunk_delta(msg_id, "reasoning", reasoning, session_id=session_id)
+        yield StreamEvent.chunk_complete(msg_id, "reasoning", reasoning, session_id=session_id)
 
     for i, tc in enumerate(msg.get("tool_calls", []) or []):
         fn = tc.get("function", {})
@@ -94,9 +88,7 @@ def _message_replay_events(msg: dict, session_id: str = ""):
         tool_status = msg.get("tool_status", "")
         if not tool_status:
             tool_status = "error" if msg.get("error", "") else "success"
-        yield StreamEvent.chunk_delta(
-            msg_id, "tool_result", tool_result, session_id=session_id
-        )
+        yield StreamEvent.chunk_delta(msg_id, "tool_result", tool_result, session_id=session_id)
         yield StreamEvent.chunk_complete(
             msg_id,
             "tool_result",
@@ -122,11 +114,11 @@ async def chat(
     try:
         stream = chat_service.start_chat(sid, req.question, req.max_steps)
     except SessionNotFound:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found") from None
     except AmbiguousSession as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     except AgentBusy as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
     q = stream.queue
 
@@ -154,9 +146,9 @@ async def stream_events(
     try:
         stream = chat_service.get_stream(sid)
     except SessionNotFound:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found") from None
     except AmbiguousSession as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
     driver = stream.driver
     messages = stream.messages
@@ -193,9 +185,9 @@ async def respond(
     try:
         await chat_service.respond_to_pending(sid, req.message_id, req.response)
     except SessionNotFound:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found") from None
     except AmbiguousSession as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     except PendingRequestNotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from None
     return {"ok": True}

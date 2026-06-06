@@ -59,4 +59,3 @@ def test_create_custom_skill_rejects_existing_effective_name(skill_roots):
 
     with pytest.raises(FileExistsError):
         skill_module.create_custom_skill("debugging", "# Debugging\n\nCustom.")
-

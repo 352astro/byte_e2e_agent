@@ -481,9 +481,7 @@ class TestLoggingHook:
             msg = Message(id="m1", turn_id="t1")
             await hook.on_message_start(msg=msg, model_id="gpt-4")
             await hook.on_chunk_delta(msg=msg, field="content", delta="hello")
-            await hook.on_message_finish(
-                msg=msg, finish_reason="stop", usage={}, latency_ms=0
-            )
+            await hook.on_message_finish(msg=msg, finish_reason="stop", usage={}, latency_ms=0)
             await hook.on_turn_start(user_question="test")
 
         asyncio.run(_run())
@@ -496,9 +494,7 @@ class TestLoggingHook:
 
         async def _run():
             hook = LoggingHook(verbose=True)
-            await hook.on_turn_start(
-                turn_id="t1", session_id="s1", user_question="hello world"
-            )
+            await hook.on_turn_start(turn_id="t1", session_id="s1", user_question="hello world")
 
         asyncio.run(_run())
         captured = capsys.readouterr()

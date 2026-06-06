@@ -8,6 +8,7 @@ of a single tool remains in agent.actions.execute_one_tool().
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import uuid as _uuid
 from collections.abc import Awaitable, Callable
@@ -123,9 +124,7 @@ async def execute_tool_calls(
     - ASK guard decisions force singleton execution.
     """
 
-    infos = [
-        _tool_call_info(tc, idx) for idx, tc in enumerate(assistant_msg.tool_calls)
-    ]
+    infos = [_tool_call_info(tc, idx) for idx, tc in enumerate(assistant_msg.tool_calls)]
     index = 0
     while index < len(infos):
         if interrupt_event.is_set():
@@ -337,8 +336,7 @@ async def _run_tool_job(
         tool_status_source = "permission"
         tool_status_reason = "disabled_by_policy"
         tool_output = (
-            f"Permission denied: tool '{info.name}' is disabled "
-            "by global tool permissions."
+            f"Permission denied: tool '{info.name}' is disabled by global tool permissions."
         )
     elif job.guard_decision == GuardDecision.ASK:
         approved = await ask_guard(guard_check, interrupt_event)
@@ -558,8 +556,7 @@ async def _ask_structured_paths_if_needed(
             rule_path=str(candidate),
             label=f"{info.name} {field}",
             description=(
-                f"Allow {info.name} to access structured `{field}` path "
-                f"as {mode}: {candidate}"
+                f"Allow {info.name} to access structured `{field}` path as {mode}: {candidate}"
             ),
             mode=mode,
             info=info,
@@ -715,7 +712,7 @@ async def _ask_and_add_sysguard_rule(
         return False
     from app.services.settings_service import add_custom_sysguard_rule
 
-    try:
+    with contextlib.suppress(FileExistsError):
         add_custom_sysguard_rule(
             label=label,
             path=rule_path,
@@ -724,8 +721,6 @@ async def _ask_and_add_sysguard_rule(
             enabled=True,
             workspace_uuid=workspace_uuid,
         )
-    except FileExistsError:
-        pass
     return True
 
 

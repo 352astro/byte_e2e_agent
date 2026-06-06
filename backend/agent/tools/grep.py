@@ -35,8 +35,7 @@ def _truncate(text: str, max_bytes: int) -> str:
         return text
     truncated = raw[:max_bytes].decode("utf-8", errors="replace")
     return (
-        f"{truncated}\n"
-        f"[... truncated at {max_bytes} bytes, {len(raw) - max_bytes} bytes omitted]"
+        f"{truncated}\n[... truncated at {max_bytes} bytes, {len(raw) - max_bytes} bytes omitted]"
     )
 
 
@@ -62,9 +61,7 @@ class GrepInput(BaseModel):
         le=500_000,
         description="Maximum UTF-8 bytes to return before truncating.",
     )
-    regex: str = Field(
-        ..., description="Regex pattern to search for (Python re syntax)."
-    )
+    regex: str = Field(..., description="Regex pattern to search for (Python re syntax).")
 
 
 async def grep_handler(

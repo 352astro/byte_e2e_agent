@@ -60,9 +60,7 @@ task_list_tool = StructuredTool.from_function(
 class TaskItem(BaseModel):
     id: str = Field(..., description="Unique task id.")
     name: str = Field(..., description="Short stable task name.")
-    status: TaskStatus = Field(
-        ..., description="Task status: pending, progress, or done."
-    )
+    status: TaskStatus = Field(..., description="Task status: pending, progress, or done.")
     depends_on: list[str] = Field(
         default_factory=list,
         description="Upstream task ids that must be done before this task.",
@@ -83,9 +81,7 @@ class TaskRewriteInput(BaseModel):
     )
 
 
-async def task_rewrite_handler(
-    tasks: list[dict], *, ws=None, session_id: str = ""
-) -> str:
+async def task_rewrite_handler(tasks: list[dict], *, ws=None, session_id: str = "") -> str:
     """Rewrite the full task list."""
     error = _validate_tasks(tasks)
     if error:
@@ -111,9 +107,7 @@ class TaskUpdateInput(BaseModel):
     """TaskUpdate 工具输入参数。"""
 
     id: str = Field(..., description="Task id to update.")
-    status: TaskStatus = Field(
-        ..., description="New task status: pending, progress, or done."
-    )
+    status: TaskStatus = Field(..., description="New task status: pending, progress, or done.")
     summary: str = Field(
         ...,
         description="Task summary. Required when status is done; use empty string for pending.",
@@ -151,9 +145,8 @@ async def task_update_handler(
     if status in ("progress", "done"):
         unfinished = _unfinished_dependencies(tasks, current)
         if unfinished:
-            return (
-                f"Error: cannot mark task {status} before dependencies are done: "
-                + ", ".join(unfinished)
+            return f"Error: cannot mark task {status} before dependencies are done: " + ", ".join(
+                unfinished
             )
 
     await _save_tasks(ws, next_tasks, session_id)
@@ -166,8 +159,7 @@ async def task_update_handler(
     lines = ["Task updated.", f"State: {counts}"]
     if next_up:
         lines.append(
-            f"Next: [{next_up['id']}] "
-            f"{next_up.get('name') or next_up.get('description', '')}"
+            f"Next: [{next_up['id']}] {next_up.get('name') or next_up.get('description', '')}"
         )
     return "\n".join(lines)
 
@@ -239,10 +231,7 @@ def _validate_tasks(tasks: list[dict]) -> str | None:
         if task.get("status") == "done" and not summary.strip():
             return f"task {task_id} is done but summary is empty"
         if task.get("status") in ("pending", "progress") and summary.strip():
-            return (
-                f"task {task_id} is {task.get('status')} but summary "
-                f"is not empty: {summary}"
-            )
+            return f"task {task_id} is {task.get('status')} but summary is not empty: {summary}"
         for dep_id in task.get("depends_on", []):
             if dep_id not in ids and dep_id not in {t.get("id") for t in tasks}:
                 return f"task {task_id} depends on missing task id: {dep_id}"
@@ -342,9 +331,7 @@ def _with_blocked(tasks: list[dict]) -> list[dict]:
 
 def _task_counts(tasks: list[dict]) -> str:
     """Return a compact summary like '3 pending, 1 in progress, 2 done'."""
-    pending = sum(
-        1 for t in tasks if t.get("status") == "pending" and not t.get("blocked")
-    )
+    pending = sum(1 for t in tasks if t.get("status") == "pending" and not t.get("blocked"))
     blocked = sum(1 for t in tasks if t.get("blocked"))
     progress = sum(1 for t in tasks if t.get("status") == "progress")
     done = sum(1 for t in tasks if t.get("status") == "done")

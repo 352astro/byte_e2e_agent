@@ -39,10 +39,7 @@ class SessionLocator:
         candidates = self._candidate_workspaces(workspace_hint)
         matches = [
             scope
-            for scope in (
-                self._scope_if_exists(workspace, session_id)
-                for workspace in candidates
-            )
+            for scope in (self._scope_if_exists(workspace, session_id) for workspace in candidates)
             if scope is not None
         ]
         if not matches:
@@ -97,7 +94,7 @@ def read_session_metadata(scope: SessionScope) -> dict[str, Any]:
         return {}
     try:
         data = json.loads(scope.metadata_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError, OSError:
         return {}
     return data if isinstance(data, dict) else {}
 

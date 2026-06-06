@@ -9,6 +9,7 @@ byte_e2e_agent/
 ├── README.md
 ├── start.sh                   # 一键启动前后端
 ├── start-cli.sh               # CLI 终端对话
+├── lint.sh                    # 一键 Lint
 ├── .gitignore
 ├── docs/                      # 架构文档与变更记录
 ├── backend/
@@ -111,6 +112,18 @@ npm run dev
 ---
 
 ## 开发命令
+
+### 一键 Lint
+
+```bash
+./lint.sh                    # 前后端全量
+./lint.sh --backend          # 仅后端
+./lint.sh --frontend         # 仅前端
+./lint.sh --fix              # 全量 + auto-fix
+./lint.sh --backend --fix    # 后端 + auto-fix
+```
+
+### 分别运行
 
 | 位置 | 命令 | 说明 |
 |------|------|------|

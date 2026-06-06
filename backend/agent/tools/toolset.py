@@ -70,15 +70,13 @@ class ToolSet:
         try:
             args = json.loads(arguments) if arguments else {}
         except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid JSON arguments for {name}: {exc}")
+            raise ValueError(f"Invalid JSON arguments for {name}: {exc}") from exc
         return tool, args
 
     def without(self, *names: str) -> ToolSet:
         """返回排除指定工具的新 ToolSet。"""
         result = ToolSet.__new__(ToolSet)
-        result._tools = {
-            name: tool for name, tool in self._tools.items() if name not in names
-        }
+        result._tools = {name: tool for name, tool in self._tools.items() if name not in names}
         if not result._tools:
             raise ValueError(f"ToolSet would be empty after excluding {names}")
         return result

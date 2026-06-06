@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 # ═══════════════════════════════════════════════════════════
 
 
-class MessageRole(str, Enum):
+class MessageRole(StrEnum):
     """消息角色。USER/TOOL/SYSTEM 天然 COMPLETE，ASSISTANT 从 STREAMING 开始。"""
 
     USER = "user"
@@ -35,14 +35,14 @@ class MessageRole(str, Enum):
     SYSTEM = "system"
 
 
-class MessageStatus(str, Enum):
+class MessageStatus(StrEnum):
     """消息构建状态。"""
 
     STREAMING = "streaming"
     COMPLETE = "complete"
 
 
-class ToolExecutionStatus(str, Enum):
+class ToolExecutionStatus(StrEnum):
     """Semantic status for a completed tool result."""
 
     SUCCESS = "success"
@@ -52,7 +52,7 @@ class ToolExecutionStatus(str, Enum):
     INTERRUPTED = "interrupted"
 
 
-class StreamEventKind(str, Enum):
+class StreamEventKind(StrEnum):
     """SSE 事件种类。"""
 
     MESSAGE_START = "message_start"

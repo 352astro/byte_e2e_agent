@@ -12,6 +12,7 @@ Skip if not configured.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 
@@ -30,9 +31,7 @@ BACKEND = "http://localhost:8000"
 
 def _env_configured() -> bool:
     return bool(
-        os.getenv("LLM_API_KEY")
-        and os.getenv("LLM_BASE_URL")
-        and os.getenv("LLM_MODEL_ID")
+        os.getenv("LLM_API_KEY") and os.getenv("LLM_BASE_URL") and os.getenv("LLM_MODEL_ID")
     )
 
 
@@ -48,10 +47,8 @@ def _read_sse(client: Client, sid: str, question: str) -> list[dict]:
         assert response.status_code == 200, f"Chat failed: {response.status_code}"
         for line in response.iter_lines():
             if line.startswith("data: "):
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     events.append(json.loads(line[6:]))
-                except json.JSONDecodeError:
-                    pass
     return events
 
 
@@ -90,7 +87,9 @@ class TestFullSessionTrace:
         client = Client(base_url=BACKEND)
 
         # ── Create session ──────────────────────────
-        r = client.post("/api/session", json={"name": "", "preamble": "", "rules": [], "preloaded_skills": []})
+        r = client.post(
+            "/api/session", json={"name": "", "preamble": "", "rules": [], "preloaded_skills": []}
+        )
         assert r.status_code == 200
         sid = r.json()["session_id"]
         assert sid

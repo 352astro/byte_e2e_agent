@@ -40,9 +40,7 @@ class CheckpointService:
         except KeyError as exc:
             raise CommitNotFound(sha) from exc
 
-    def restore_workspace(
-        self, session_id: str, commit_sha: str, *, set_head: bool = True
-    ) -> dict:
+    def restore_workspace(self, session_id: str, commit_sha: str, *, set_head: bool = True) -> dict:
         try:
             ctx = self._scoped_context(session_id)
             ctx.get_session(session_id)

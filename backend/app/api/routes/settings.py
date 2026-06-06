@@ -62,9 +62,9 @@ def create_skill(req: SkillUpsertRequest) -> dict:
     try:
         skill = create_custom_skill(req.name, req.content)
     except FileExistsError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     return read_skill_detail(skill.name) or {}
 
 
@@ -73,7 +73,7 @@ def update_skill(name: str, req: SkillUpsertRequest) -> dict:
     try:
         skill = upsert_custom_skill(name, req.content)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     return read_skill_detail(skill.name) or {}
 
 
@@ -82,9 +82,9 @@ def delete_skill(name: str) -> dict:
     try:
         delete_custom_skill(name)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     return {"ok": True}
 
 
@@ -93,9 +93,9 @@ def restore_skill_default(name: str) -> dict:
     try:
         restore_builtin_skill(name)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     detail = read_skill_detail(name)
     if detail is None:
         raise HTTPException(status_code=404, detail="Skill not found")
@@ -165,9 +165,9 @@ def add_sysguard_rule(
             raise HTTPException(status_code=404, detail="Invalid sysguard scope")
         return settings_service.add_sysguard_rule(req, scope=scope)
     except FileExistsError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
 @router.put("/settings/sysguard/{scope}/{rule_id}", response_model=SysguardSettingsResponse)
@@ -182,11 +182,11 @@ def update_sysguard_rule(
             raise HTTPException(status_code=404, detail="Invalid sysguard scope")
         return settings_service.update_sysguard_rule(rule_id, req, scope=scope)
     except KeyError:
-        raise HTTPException(status_code=404, detail="Sysguard rule not found")
+        raise HTTPException(status_code=404, detail="Sysguard rule not found") from None
     except FileExistsError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
 @router.delete("/settings/sysguard/{scope}/{rule_id}", response_model=SysguardSettingsResponse)
@@ -200,7 +200,7 @@ def delete_sysguard_rule(
             raise HTTPException(status_code=404, detail="Invalid sysguard scope")
         return settings_service.delete_sysguard_rule(rule_id, scope=scope)
     except KeyError:
-        raise HTTPException(status_code=404, detail="Sysguard rule not found")
+        raise HTTPException(status_code=404, detail="Sysguard rule not found") from None
 
 
 @router.post("/settings/session-rules", response_model=SessionSettings)

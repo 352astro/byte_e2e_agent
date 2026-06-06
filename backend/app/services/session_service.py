@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shutil
 import uuid
@@ -44,16 +45,12 @@ class SessionService:
         messages_path = self._ctx.messages_path(session_id)
         messages_path.parent.mkdir(parents=True, exist_ok=True)
         messages_path.touch()
-        tool_set_preset, custom_tools = _clean_toolset(
-            req.tool_set_preset, req.custom_tools
-        )
+        tool_set_preset, custom_tools = _clean_toolset(req.tool_set_preset, req.custom_tools)
         config = SessionConfig.user_main(
             name=req.name.strip() or session_id,
             model_id=get_model_id(),
             preamble=req.preamble.strip(),
-            preloaded_skills=[
-                item.strip() for item in req.preloaded_skills if item.strip()
-            ],
+            preloaded_skills=[item.strip() for item in req.preloaded_skills if item.strip()],
             rules=[item.strip() for item in req.rules if item.strip()],
             tool_set_preset=tool_set_preset,
             custom_tools=custom_tools,
@@ -123,12 +120,8 @@ class SessionService:
                         "session_kind": session_kind,
                         "parent_session_id": parent_session_id,
                         "parent_message_id": metadata.get("parent_message_id", ""),
-                        "parent_tool_call_id": metadata.get(
-                            "parent_tool_call_id", ""
-                        ),
-                        "updated_at": datetime.fromtimestamp(
-                            mtime, tz=UTC
-                        ).isoformat(),
+                        "parent_tool_call_id": metadata.get("parent_tool_call_id", ""),
+                        "updated_at": datetime.fromtimestamp(mtime, tz=UTC).isoformat(),
                     },
                 )
             )
@@ -165,14 +158,10 @@ class SessionService:
         agent = ctx.pop_session(session_id)
         if agent is not None:
             await clear(agent)
-        try:
+        with contextlib.suppress(Exception):
             ctx.shadow_repo.delete_branch(session_id)
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             await ctx.memory_store.delete_session(session_id)
-        except Exception:
-            pass
         session_dir = ctx.session_dir(session_id)
         if session_dir.is_dir():
             shutil.rmtree(session_dir)
@@ -225,7 +214,6 @@ class SessionService:
             result.append(scope)
         return result
 
-
     def get_session_status(self, session_id: str) -> dict:
         try:
             scope = self._locator.resolve(session_id)
@@ -259,9 +247,7 @@ class SessionService:
             "messages": messages,
             "session_running": is_running,
             "runtime_busy": runtime_busy,
-            "current_message": current_msg.model_dump(mode="json")
-            if current_msg
-            else None,
+            "current_message": current_msg.model_dump(mode="json") if current_msg else None,
             "pending_request": runtime.pending_request,
         }
 
@@ -283,7 +269,7 @@ def _load_config(scope: SessionScope) -> dict[str, Any]:
         return {}
     try:
         data = json.loads(scope.config_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError, OSError:
         return {}
     return data if isinstance(data, dict) else {}
 

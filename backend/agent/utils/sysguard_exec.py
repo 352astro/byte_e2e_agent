@@ -14,6 +14,8 @@ if sys.platform != "win32":
     import fcntl
     import termios
 
+import contextlib
+
 from agent.utils import sysguard
 
 
@@ -37,10 +39,8 @@ def main() -> None:
 def _claim_controlling_tty() -> None:
     if sys.platform == "win32" or not os.isatty(0):
         return
-    try:
+    with contextlib.suppress(OSError):
         fcntl.ioctl(0, termios.TIOCSCTTY, 0)
-    except OSError:
-        pass
 
 
 if __name__ == "__main__":

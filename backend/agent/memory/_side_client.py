@@ -24,7 +24,7 @@ def create_side_client():
 
     base_url = settings.side_llm_base_url or settings.llm_base_url
 
-    kwargs: dict = dict(api_key=api_key)
+    kwargs: dict = {"api_key": api_key}
     if base_url:
         kwargs["base_url"] = base_url
 

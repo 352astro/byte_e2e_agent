@@ -3,15 +3,33 @@
 # 一键 Lint 前后端。
 #
 # 用法:
-#   ./lint.sh           # lint only
-#   ./lint.sh --fix     # lint + auto-fix
+#   ./lint.sh                 # 全量
+#   ./lint.sh --backend       # 仅后端
+#   ./lint.sh --frontend      # 仅前端
+#   ./lint.sh --fix           # 全量 + auto-fix
+#   ./lint.sh --backend --fix # 后端 + auto-fix
 #
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 FIX=false
-if [[ "${1:-}" == "--fix" ]]; then
-    FIX=true
+RUN_BACKEND=false
+RUN_FRONTEND=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --fix)      FIX=true ;;
+        --backend)  RUN_BACKEND=true ;;
+        --frontend) RUN_FRONTEND=true ;;
+        --all)      RUN_BACKEND=true; RUN_FRONTEND=true ;;
+        *)          echo "Unknown flag: $arg"; exit 1 ;;
+    esac
+done
+
+# Default: run both
+if ! $RUN_BACKEND && ! $RUN_FRONTEND; then
+    RUN_BACKEND=true
+    RUN_FRONTEND=true
 fi
 
 RED='\033[0;31m'
@@ -34,39 +52,49 @@ check() {
     fi
 }
 
-echo -e "${CYAN}=== Backend (ruff) ===${NC}"
-cd "$ROOT/backend"
-if $FIX; then
-    uv run ruff check . --fix && uv run ruff format . 2>&1
-    check "ruff check --fix + format" true
-else
-    if uv run ruff check . 2>&1; then
-        check "ruff check" true
+# ── Backend ──────────────────────────────────────────
+
+if $RUN_BACKEND; then
+    echo -e "${CYAN}=== Backend (ruff) ===${NC}"
+    cd "$ROOT/backend"
+    if $FIX; then
+        uv run ruff check . --fix && uv run ruff format . 2>&1
+        check "ruff check --fix + format" true
     else
-        check "ruff check" false
+        if uv run ruff check . 2>&1; then
+            check "ruff check" true
+        else
+            check "ruff check" false
+        fi
+        if uv run ruff format . --check 2>&1; then
+            check "ruff format --check" true
+        else
+            check "ruff format --check" false
+        fi
     fi
-    if uv run ruff format . --check 2>&1; then
-        check "ruff format --check" true
-    else
-        check "ruff format --check" false
-    fi
+    echo ""
 fi
 
-echo ""
-echo -e "${CYAN}=== Frontend (eslint) ===${NC}"
-cd "$ROOT/frontend"
-if $FIX; then
-    npm run lint -- --fix 2>&1
-    check "eslint --fix" true
-else
-    if npm run lint 2>&1; then
-        check "eslint" true
+# ── Frontend ─────────────────────────────────────────
+
+if $RUN_FRONTEND; then
+    echo -e "${CYAN}=== Frontend (eslint) ===${NC}"
+    cd "$ROOT/frontend"
+    if $FIX; then
+        npm run lint -- --fix 2>&1
+        check "eslint --fix" true
     else
-        check "eslint" false
+        if npm run lint 2>&1; then
+            check "eslint" true
+        else
+            check "eslint" false
+        fi
     fi
+    echo ""
 fi
 
-echo ""
+# ── Summary ──────────────────────────────────────────
+
 echo -e "${CYAN}=== Summary ===${NC}"
 echo -e "  Passed: ${GREEN}$pass_count${NC}  Failed: ${RED}$fail_count${NC}"
 

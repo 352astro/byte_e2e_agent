@@ -14,9 +14,7 @@ def test_recover_running_session_does_not_repair_unpaired_tool_call(tmp_path):
     workspace.mkdir()
     ctx = WorkspaceContext(str(workspace), str(tmp_path / "metrics.sqlite3"))
     service = SessionService(ctx)
-    session_id = service.create_session(CreateSessionRequest(name="main"))[
-        "session_id"
-    ]
+    session_id = service.create_session(CreateSessionRequest(name="main"))["session_id"]
     assistant = Message.assistant_message("assistant-1", "turn-1")
     assistant.tool_calls = [
         ToolCall(
@@ -51,9 +49,7 @@ def test_recover_does_not_repair_when_workspace_runtime_busy_with_other_session(
     workspace.mkdir()
     ctx = WorkspaceContext(str(workspace), str(tmp_path / "metrics.sqlite3"))
     service = SessionService(ctx)
-    parent_id = service.create_session(CreateSessionRequest(name="parent"))[
-        "session_id"
-    ]
+    parent_id = service.create_session(CreateSessionRequest(name="parent"))["session_id"]
     child_id = service.create_session(CreateSessionRequest(name="child"))["session_id"]
     assistant = Message.assistant_message("assistant-1", "turn-1")
     assistant.tool_calls = [
@@ -88,9 +84,7 @@ def test_stream_replay_does_not_repair_when_workspace_runtime_busy(tmp_path):
     workspace.mkdir()
     ctx = WorkspaceContext(str(workspace), str(tmp_path / "metrics.sqlite3"))
     service = SessionService(ctx)
-    session_id = service.create_session(CreateSessionRequest(name="main"))[
-        "session_id"
-    ]
+    session_id = service.create_session(CreateSessionRequest(name="main"))["session_id"]
     assistant = Message.assistant_message("assistant-1", "turn-1")
     assistant.tool_calls = [
         ToolCall(

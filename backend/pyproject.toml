@@ -50,6 +50,13 @@ ignore = [
     "E501",   # line too long (handled by formatter)
     "B008",   # do not perform function calls in argument defaults
     "B023",   # loop-bound closure (safe: called before next iteration)
+    "B024",   # ABC without abstract method (intentional no-op base)
+    "SIM102", # nested if (style preference)
+    "SIM105", # try/pass vs contextlib.suppress (style preference)
+    "SIM113", # manual counter vs enumerate (style preference)
+    "SIM117", # nested with vs single with (style preference)
+    "C408",   # dict() vs {} (style preference)
+    "UP042",  # (str, Enum) vs StrEnum (Pydantic compat)
 ]
 
 [tool.ruff.lint.isort]

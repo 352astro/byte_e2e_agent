@@ -33,7 +33,7 @@ def create_client(
     if not api_key:
         raise ValueError("LLM_API_KEY must be set in environment or passed explicitly")
 
-    kwargs: dict = dict(api_key=api_key)
+    kwargs: dict = {"api_key": api_key}
     base_url = base_url or settings.llm_base_url
     if base_url:
         kwargs["base_url"] = base_url

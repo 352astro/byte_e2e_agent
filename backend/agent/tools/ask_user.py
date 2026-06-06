@@ -12,17 +12,13 @@ from pydantic import BaseModel, Field, model_validator
 class AskOption(BaseModel):
     id: str = Field(..., description="Stable option id.")
     label: str = Field(..., description="Short option label shown to the user.")
-    description: str = Field(
-        default="", description="Optional explanation of this option."
-    )
+    description: str = Field(default="", description="Optional explanation of this option.")
 
 
 class AskQuestion(BaseModel):
     id: str = Field(..., description="Stable answer field id.")
     label: str = Field(..., description="Question label shown to the user.")
-    type: Literal["text", "textarea"] = Field(
-        default="text", description="Input control type."
-    )
+    type: Literal["text", "textarea"] = Field(default="text", description="Input control type.")
     required: bool = Field(default=True, description="Whether an answer is required.")
     placeholder: str = Field(default="", description="Optional input placeholder.")
 

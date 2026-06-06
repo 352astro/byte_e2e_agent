@@ -29,9 +29,7 @@ class ChatService:
         self._ctx = ctx
         self._locator = SessionLocator(ctx)
 
-    def start_chat(
-        self, session_id: str, question: str, max_steps: int
-    ) -> ActiveStream:
+    def start_chat(self, session_id: str, question: str, max_steps: int) -> ActiveStream:
         try:
             scope = self._locator.resolve(session_id)
             ctx = self._ctx.scoped(scope.workspace)
@@ -67,9 +65,7 @@ class ChatService:
             driver=ctx.stream_driver,
         )
 
-    async def respond_to_pending(
-        self, session_id: str, message_id: str, response: dict
-    ) -> None:
+    async def respond_to_pending(self, session_id: str, message_id: str, response: dict) -> None:
         try:
             scope = self._locator.resolve(session_id)
             ctx = self._ctx.scoped(scope.workspace)

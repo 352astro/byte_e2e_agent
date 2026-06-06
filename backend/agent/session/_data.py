@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import uuid as _uuid
 from pathlib import Path
@@ -166,10 +167,8 @@ def _load_messages(messages_path: Path) -> list[Message]:
                 continue
 
             if "id" in record and "role" in record:
-                try:
+                with contextlib.suppress(Exception):
                     msgs.append(Message.model_validate(record))
-                except Exception:
-                    pass
     return msgs
 
 
@@ -369,9 +368,7 @@ def _build_llm_context(messages: list[Message]) -> list[dict]:
                 )
             )
         else:
-            result.append(
-                _assistant_synthesis("Interrupted before producing visible output.")
-            )
+            result.append(_assistant_synthesis("Interrupted before producing visible output."))
 
     if open_ids:
         close_open_tool_calls()
@@ -442,9 +439,7 @@ def write_session_prefix(ws: Workspace, session_id: str, config: SessionConfig) 
                 f"Do NOT read, edit, create, or delete files under `{AGENT_DATA_DIR}`."
             ),
         ),
-        Message.system_message(
-            _uuid.uuid4().hex, turn_id, skill_context_message()["content"]
-        ),
+        Message.system_message(_uuid.uuid4().hex, turn_id, skill_context_message()["content"]),
     ]
 
     if config.preloaded_skills:
@@ -465,9 +460,7 @@ def write_session_prefix(ws: Workspace, session_id: str, config: SessionConfig) 
             )
 
     if config.preamble:
-        prefix_messages.append(
-            Message.system_message(_uuid.uuid4().hex, turn_id, config.preamble)
-        )
+        prefix_messages.append(Message.system_message(_uuid.uuid4().hex, turn_id, config.preamble))
 
     if config.rules:
         prefix_messages.append(

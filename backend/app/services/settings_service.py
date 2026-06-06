@@ -50,9 +50,7 @@ class SettingsService:
     def delete_session_rule(self, rule_id: str) -> dict[str, Any]:
         settings = _load_settings(self._ctx)
         settings.rules = [rule for rule in settings.rules if rule.id != rule_id]
-        settings.default_rule_ids = [
-            item for item in settings.default_rule_ids if item != rule_id
-        ]
+        settings.default_rule_ids = [item for item in settings.default_rule_ids if item != rule_id]
         cleaned = _clean_settings(settings)
         _write_settings(self._ctx, cleaned)
         return cleaned.model_dump()
@@ -60,9 +58,7 @@ class SettingsService:
     def get_tool_permissions(self) -> dict[str, Any]:
         return _load_tool_permissions(self._ctx).model_dump()
 
-    def update_tool_permissions(
-        self, settings: ToolPermissionSettings
-    ) -> dict[str, Any]:
+    def update_tool_permissions(self, settings: ToolPermissionSettings) -> dict[str, Any]:
         cleaned = _clean_tool_permissions(settings)
         _write_tool_permissions(self._ctx, cleaned)
         return cleaned.model_dump()
@@ -138,9 +134,7 @@ def load_sysguard_rules(workspace_uuid: str | None = None) -> dict[str, Any]:
     return {
         "builtin": [rule.__dict__ for rule in list_builtin_rules()],
         "global": _load_global_sysguard_rules(),
-        "workspace": (
-            _load_workspace_sysguard_rules(workspace_uuid) if workspace_uuid else []
-        ),
+        "workspace": (_load_workspace_sysguard_rules(workspace_uuid) if workspace_uuid else []),
     }
 
 
@@ -177,7 +171,7 @@ def _load_settings(ctx: WorkspaceContext) -> SessionSettings:
         return SessionSettings()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError, OSError:
         return SessionSettings()
     if not isinstance(data, dict):
         return SessionSettings()
@@ -208,13 +202,9 @@ def _clean_settings(settings: SessionSettings) -> SessionSettings:
         preamble=settings.preamble.strip(),
         rules=rules,
         default_rule_ids=[
-            item.strip()
-            for item in settings.default_rule_ids
-            if item.strip() in seen_rule_ids
+            item.strip() for item in settings.default_rule_ids if item.strip() in seen_rule_ids
         ],
-        default_skill_names=[
-            item.strip() for item in settings.default_skill_names if item.strip()
-        ],
+        default_skill_names=[item.strip() for item in settings.default_skill_names if item.strip()],
     )
 
 
@@ -224,16 +214,14 @@ def _load_tool_permissions(ctx: WorkspaceContext) -> ToolPermissionSettings:
         return ToolPermissionSettings()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError, OSError:
         return ToolPermissionSettings()
     if not isinstance(data, dict):
         return ToolPermissionSettings()
     return _clean_tool_permissions(ToolPermissionSettings(**data))
 
 
-def _write_tool_permissions(
-    ctx: WorkspaceContext, settings: ToolPermissionSettings
-) -> None:
+def _write_tool_permissions(ctx: WorkspaceContext, settings: ToolPermissionSettings) -> None:
     path = _config_path(TOOL_PERMISSIONS_FILE)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -270,9 +258,7 @@ def _load_workspace_sysguard_rules(workspace_uuid: str | None) -> list[dict[str,
     )
 
 
-def _load_scoped_sysguard_rules(
-    workspace_uuid: str | None, scope: str
-) -> list[dict[str, Any]]:
+def _load_scoped_sysguard_rules(workspace_uuid: str | None, scope: str) -> list[dict[str, Any]]:
     if scope == "global":
         return _load_global_sysguard_rules()
     if scope == "workspace":
@@ -311,7 +297,7 @@ def _read_sysguard_rules_file(path: Path, *, source: str) -> list[dict[str, Any]
         return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError, OSError:
         return []
     if not isinstance(data, dict):
         return []
@@ -345,9 +331,7 @@ def _write_sysguard_rules(
     source: str,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        source: [_clean_sysguard_rule({**rule, "source": source}) for rule in rules]
-    }
+    payload = {source: [_clean_sysguard_rule({**rule, "source": source}) for rule in rules]}
     path.write_text(
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -79,10 +80,7 @@ class TestWorkspaceDirectoryPaths:
         """sessions_dir() returns root/.byte_agent/sessions/."""
         with tempfile.TemporaryDirectory() as tmpdir:
             ws = Workspace(root=tmpdir)
-            assert (
-                ws.sessions_dir()
-                == Path(tmpdir).resolve() / BYTE_AGENT_DIR / "sessions"
-            )
+            assert ws.sessions_dir() == Path(tmpdir).resolve() / BYTE_AGENT_DIR / "sessions"
 
     def test_session_dir(self):
         """session_dir(sid) returns root/.byte_agent/sessions/{sid}/."""
@@ -544,7 +542,7 @@ class TestSessionConfigToolNames:
 
     def test_review_only_preset(self):
         """REVIEW_ONLY preset returns read-only tools."""
-        config = SessionConfig(tool_set_preset=ToolSetPreset.REVIEW_ONLY)
+        SessionConfig(tool_set_preset=ToolSetPreset.REVIEW_ONLY)
         expected = ToolSetPreset.REVIEW_ONLY.tool_names()
         # Should not include write/edit/shell
         assert "Write" not in expected
@@ -559,7 +557,7 @@ class TestSessionConfigFrozen:
     def test_cannot_set_attributes(self):
         """Setting an attribute on a SessionConfig instance raises FrozenInstanceError."""
         config = SessionConfig(name="test")
-        with pytest.raises(Exception):  # dataclasses.FrozenInstanceError
+        with pytest.raises(FrozenInstanceError):
             config.name = "changed"  # type: ignore[misc]
 
 
@@ -600,7 +598,7 @@ class TestAgentConfig:
     def test_frozen_dataclass(self):
         """AgentConfig is a frozen dataclass."""
         config = AgentConfig(model_id="test")
-        with pytest.raises(Exception):  # dataclasses.FrozenInstanceError
+        with pytest.raises(FrozenInstanceError):
             config.model_id = "altered"  # type: ignore[misc]
 
 
@@ -1141,7 +1139,7 @@ class TestSessionWorkspaceChain:
                 name="Parent",
                 model_id="gpt-4",
             )
-            parent_entry = SessionEntry(id="parent001", config=parent_config)
+            SessionEntry(id="parent001", config=parent_config)
             ws.save_session_config("parent001", parent_config)
 
             # Create subagent from parent
@@ -1152,7 +1150,7 @@ class TestSessionWorkspaceChain:
                 model_id="gpt-4",
                 tool_set_preset=ToolSetPreset.MINIMAL,
             )
-            sub_entry = SessionEntry(id="sub001", config=sub_config)
+            SessionEntry(id="sub001", config=sub_config)
             ws.save_session_config("sub001", sub_config)
 
             # Verify access control

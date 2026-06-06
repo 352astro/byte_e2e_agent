@@ -28,16 +28,12 @@ def _assistant_msg(id: str, turn_id: str, *tc_ids: str) -> Message:
     """Create an assistant Message with given tool_call ids."""
     msg = Message.assistant_message(id, turn_id)
     for tcid in tc_ids:
-        msg.tool_calls.append(
-            ToolCall(id=tcid, function=ToolCallFunction(name="TestTool"))
-        )
+        msg.tool_calls.append(ToolCall(id=tcid, function=ToolCallFunction(name="TestTool")))
     msg.mark_complete()
     return msg
 
 
-def _tool_msg(
-    id: str, turn_id: str, tool_call_id: str, tool_name: str = "TestTool"
-) -> Message:
+def _tool_msg(id: str, turn_id: str, tool_call_id: str, tool_name: str = "TestTool") -> Message:
     """Create a tool_result Message."""
     return Message.tool_message(
         id=id,
@@ -367,9 +363,7 @@ class TestRepairInterruptScenario:
         assert repair_tcids == {"tc2", "tc3"}
         # tc1's tool_result is the real one
         real_results = [
-            m
-            for m in repaired
-            if m.role == MessageRole.TOOL and m.tool_call_id == "tc1"
+            m for m in repaired if m.role == MessageRole.TOOL and m.tool_call_id == "tc1"
         ]
         assert len(real_results) == 1
         assert real_results[0].tool_result == "ok"

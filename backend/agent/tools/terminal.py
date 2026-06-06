@@ -18,6 +18,8 @@ from pathlib import Path
 if sys.platform != "win32":
     import termios
 
+import contextlib
+
 from agent.utils import sysguard
 
 
@@ -114,14 +116,13 @@ class PersistentTerminal:
                     self._sandbox_root,
                     workspace_uuid=env.get("AGENT_WORKSPACE_UUID"),
                 )
-                tmpf = tempfile.NamedTemporaryFile(
+                with tempfile.NamedTemporaryFile(
                     mode="w",
                     suffix=".sb",
                     delete=False,
                     encoding="utf-8",
-                )
-                tmpf.write(profile)
-                tmpf.close()
+                ) as tmpf:
+                    tmpf.write(profile)
                 self._seatbelt_profile_path = tmpf.name
                 shell_cmd = ["sandbox-exec", "-f", tmpf.name, "--", *shell_cmd]
         elif sys.platform == "linux":
@@ -189,10 +190,8 @@ class PersistentTerminal:
             pass
         self._proc = None
         if self._seatbelt_profile_path:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(self._seatbelt_profile_path)
-            except OSError:
-                pass
             self._seatbelt_profile_path = None
 
     @property
@@ -213,9 +212,7 @@ class PersistentTerminal:
         self._last_exit_code = -1
         return marker, time.monotonic()
 
-    def read_stream(
-        self, marker: str, start_time: float, timeout_ms: int = 30000
-    ) -> Iterator[str]:
+    def read_stream(self, marker: str, start_time: float, timeout_ms: int = 30000) -> Iterator[str]:
         deadline = start_time + timeout_ms / 1000.0
 
         if sys.platform == "win32":
@@ -268,10 +265,8 @@ class PersistentTerminal:
                 assert self._proc.stdout is not None
                 fd = self._proc.stdout.fileno()
                 os.set_blocking(fd, False)
-                try:
+                with contextlib.suppress(Exception):
                     self._proc.stdout.read(4096)
-                except Exception:
-                    pass
                 os.set_blocking(fd, True)
             else:
                 fd = self._master_fd

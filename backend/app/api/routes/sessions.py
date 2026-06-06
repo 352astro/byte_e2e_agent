@@ -80,9 +80,9 @@ async def delete_session(
     try:
         await session_service.delete_session(sid)
     except SessionNotFound:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found") from None
     except AmbiguousSession as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     return {"ok": True}
 
 
@@ -95,9 +95,9 @@ def get_history(
         info = session_service.get_info(sid)
         history = session_service.get_history(sid)
     except SessionNotFound:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found") from None
     except AmbiguousSession as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     return {"session": info, "history": history}
 
 
@@ -110,9 +110,9 @@ async def session_status(
     try:
         return session_service.get_session_status(sid)
     except SessionNotFound:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found") from None
     except AmbiguousSession as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 @router.get("/status", response_model=RuntimeStatusResponse)
@@ -132,9 +132,9 @@ async def recover_session(
     try:
         return session_service.get_recovery_state(sid)
     except SessionNotFound:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found") from None
     except AmbiguousSession as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 @router.get("/session/{sid}/commits", response_model=CommitsResponse)
@@ -146,9 +146,9 @@ async def list_commits(
     try:
         return {"commits": checkpoint_service.list_commits(sid)}
     except SessionNotFound:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found") from None
     except AmbiguousSession as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 @router.get("/session/{sid}/commits/{sha}", response_model=CommitDetail)
@@ -161,11 +161,11 @@ async def get_commit(
     try:
         return checkpoint_service.get_commit(sid, sha)
     except SessionNotFound:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found") from None
     except CommitNotFound:
-        raise HTTPException(status_code=404, detail=f"Commit not found: {sha}")
+        raise HTTPException(status_code=404, detail=f"Commit not found: {sha}") from None
     except AmbiguousSession as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 @router.post(
@@ -185,13 +185,11 @@ async def restore_commit(
             set_head=req.set_head,
         )
     except SessionNotFound:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found") from None
     except CommitNotFound:
-        raise HTTPException(
-            status_code=404, detail=f"Commit not found: {req.commit_sha}"
-        )
+        raise HTTPException(status_code=404, detail=f"Commit not found: {req.commit_sha}") from None
     except AmbiguousSession as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 @router.post(
@@ -211,9 +209,9 @@ async def truncate_messages(
             keep=req.keep,
         )
     except SessionNotFound:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found") from None
     except AmbiguousSession as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 @router.post("/session/{sid}/interrupt", response_model=InterruptResponse)
@@ -225,9 +223,9 @@ async def interrupt_session(
     try:
         ok = await session_service.interrupt_session(sid)
     except SessionNotFound:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found") from None
     except AmbiguousSession as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     return {"ok": ok}
 
 

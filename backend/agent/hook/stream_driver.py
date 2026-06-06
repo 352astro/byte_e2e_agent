@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 
@@ -69,14 +70,10 @@ class StreamDriverHook(BaseHook):
             if session_id is not None and sid is not None and sid != session_id:
                 kept.append(q)
                 continue
-            try:
+            with contextlib.suppress(asyncio.QueueFull):
                 q.put_nowait(None)
-            except asyncio.QueueFull:
-                pass
         self._subscribers = kept
-        self._subscriber_sessions = {
-            id(q): self._subscriber_sessions.get(id(q)) for q in kept
-        }
+        self._subscriber_sessions = {id(q): self._subscriber_sessions.get(id(q)) for q in kept}
 
     # ── 内部广播 ─────────────────────────────────────────
 
@@ -158,12 +155,8 @@ class StreamDriverHook(BaseHook):
                 tool_args=tool_args,
                 is_error=is_error,
                 tool_status=kwargs.get("tool_status", msg.tool_status),
-                tool_status_source=kwargs.get(
-                    "tool_status_source", msg.tool_status_source
-                ),
-                tool_status_reason=kwargs.get(
-                    "tool_status_reason", msg.tool_status_reason
-                ),
+                tool_status_source=kwargs.get("tool_status_source", msg.tool_status_source),
+                tool_status_reason=kwargs.get("tool_status_reason", msg.tool_status_reason),
                 session_id=session_id,
             )
         )
@@ -171,9 +164,7 @@ class StreamDriverHook(BaseHook):
     async def on_message_finish(self, *, msg: Message, **kwargs) -> None:
         session_id = kwargs.get("session_id", "")
         usage = kwargs.get("usage") or {}
-        self._broadcast(
-            StreamEvent.message_finish(msg.id, session_id=session_id, usage=usage)
-        )
+        self._broadcast(StreamEvent.message_finish(msg.id, session_id=session_id, usage=usage))
 
     async def on_turn_end(
         self, *, turn_id: str, input_tokens: int = 0, output_tokens: int = 0, **kwargs
@@ -188,9 +179,7 @@ class StreamDriverHook(BaseHook):
             self.close_subscribers(session_id=session_id)
             self._clear_buffer(session_id)
 
-    async def on_message_error(
-        self, *, msg: Message, error: Exception, **kwargs
-    ) -> None:
+    async def on_message_error(self, *, msg: Message, error: Exception, **kwargs) -> None:
         session_id = kwargs.get("session_id", "")
         self._broadcast(StreamEvent.interrupted(str(error), session_id=session_id))
         self.close_subscribers(session_id=session_id)
@@ -275,9 +264,7 @@ class StreamDriverHook(BaseHook):
                     "description": check.payload.get("description", ""),
                     "choices": check.payload.get("choices", []),
                     "questions": check.payload.get("questions", []),
-                    "choice_required": bool(
-                        check.payload.get("choice_required", True)
-                    ),
+                    "choice_required": bool(check.payload.get("choice_required", True)),
                     "multiple": bool(check.payload.get("multiple", False)),
                     "allow_custom": bool(check.payload.get("allow_custom", False)),
                 }

@@ -20,6 +20,8 @@ _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(_BACKEND_DIR, ".env"))
 load_dotenv()
 
+import contextlib  # noqa: E402
+
 from agent.core.config import SessionConfig  # noqa: E402
 from agent.core.workspace import Workspace  # noqa: E402
 from agent.hook.logging_hook import LoggingHook  # noqa: E402
@@ -87,10 +89,8 @@ async def _run_once(ws: Workspace, question: str) -> None:
 
     await runtime.invoke_user(session, question)
     if runtime._loop_task is not None:
-        try:
+        with contextlib.suppress(Exception):
             await runtime._loop_task
-        except Exception:
-            pass
 
 
 async def _run_repl(ws: Workspace) -> None:
@@ -106,7 +106,7 @@ async def _run_repl(ws: Workspace) -> None:
     while True:
         try:
             q = input().strip()
-        except (KeyboardInterrupt, EOFError):
+        except KeyboardInterrupt, EOFError:
             print()
             break
 

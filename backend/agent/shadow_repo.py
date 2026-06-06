@@ -9,6 +9,7 @@ Pattern adapted from Dulwich-test/demo.py.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import time
 from io import BytesIO
@@ -32,9 +33,7 @@ def _ensure_dir(p: str) -> None:
     Path(p).mkdir(parents=True, exist_ok=True)
 
 
-def _walk_tree(
-    store, tree_id: bytes, prefix: bytes = b""
-) -> list[tuple[bytes, int, bytes]]:
+def _walk_tree(store, tree_id: bytes, prefix: bytes = b"") -> list[tuple[bytes, int, bytes]]:
     """Recursively collect all file entries from a tree, skipping directories."""
     import stat
 
@@ -80,10 +79,8 @@ class ShadowRepo:
             os.path.join(self._workdir, ".git", "info", "exclude"),
             get_xdg_config_home_path("git", "ignore"),
         ]:
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 global_filters.append(IgnoreFilter.from_path(p))
-            except FileNotFoundError:
-                pass
         # also ignore the shadow repo itself and .git
         self._ignores: set[str] = {
             ".git",
@@ -123,7 +120,8 @@ class ShadowRepo:
                     continue
                 live.add(rel)
 
-                content = open(full, "rb").read()
+                with open(full, "rb") as fh:
+                    content = fh.read()
 
                 # skip unchanged files
                 try:
@@ -134,9 +132,7 @@ class ShadowRepo:
 
                 blob = Blob.from_string(content)
                 self._repo.object_store.add_object(blob)
-                self._idx[rel] = IndexEntry(
-                    0, 0, 0, 0, 0o100644, 0, 0, len(content), blob.id
-                )
+                self._idx[rel] = IndexEntry(0, 0, 0, 0, 0o100644, 0, 0, len(content), blob.id)
 
         # remove deleted files from index
         deleted = [p for p in self._idx if p not in live]
@@ -172,7 +168,7 @@ class ShadowRepo:
         """Checkout a commit's tree into the workspace, overwriting files."""
 
         c = self._get_commit(commit_sha)
-        tree = self._repo.object_store[c.tree]
+        self._repo.object_store[c.tree]
 
         # Recursively collect all file entries
         entries = _walk_tree(self._repo.object_store, c.tree)
@@ -190,7 +186,7 @@ class ShadowRepo:
         tracked: set[bytes] = {name for name, _, _ in entries}
 
         # Write all files
-        for name, mode, sha in entries:
+        for name, _mode, sha in entries:
             target = os.path.join(self._workdir, name.decode())
             _ensure_dir(os.path.dirname(target))
             blob = self._repo.object_store[sha]
@@ -214,10 +210,8 @@ class ShadowRepo:
                 if self._ignore_mgr.is_ignored(rel.decode()):
                     continue
                 if rel not in tracked:
-                    try:
+                    with contextlib.suppress(OSError):
                         os.remove(full)
-                    except OSError:
-                        pass
 
         # Remove empty directories (bottom-up)
         for root, dirs, _ in os.walk(self._workdir, topdown=False):
@@ -328,10 +322,8 @@ class ShadowRepo:
             return
         if head is None:
             return
-        try:
+        with contextlib.suppress(KeyError):
             del self._repo.refs[branch]
-        except KeyError:
-            pass
 
     # ── internal ─────────────────────────────────────────
 

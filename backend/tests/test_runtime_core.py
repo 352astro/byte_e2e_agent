@@ -497,9 +497,7 @@ class TestInvokeAgent:
         assert entry is not None
         # Patch the access to allow any agent
         with patch.object(entry.config.access, "can_invoke", return_value=True):
-            with patch.object(
-                runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn
-            ):
+            with patch.object(runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn):
                 result = await runtime.invoke_agent("caller-id", "abc", "do something")
             # Should resolve to abcdef123456 and not return an error
             assert "error" not in result.lower()
@@ -524,12 +522,8 @@ class TestInvokeAgent:
         entry = runtime.get_session("target-id")
         assert entry is not None
         with patch.object(entry.config.access, "can_invoke", return_value=True):
-            with patch.object(
-                runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn
-            ):
-                await runtime.invoke_agent(
-                    "caller-id", "target-id", "do task", max_turns=5
-                )
+            with patch.object(runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn):
+                await runtime.invoke_agent("caller-id", "target-id", "do task", max_turns=5)
 
         hm.on_subagent_start.assert_called_once()
         call_kwargs = hm.on_subagent_start.call_args.kwargs
@@ -550,9 +544,7 @@ class TestInvokeAgent:
 
         # Allow invoke
         with patch.object(target.config.access, "can_invoke", return_value=True):
-            with patch.object(
-                runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn
-            ):
+            with patch.object(runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn):
                 await runtime.invoke_agent("caller-id", "target-id", "do task")
 
         # After invoke_agent completes, caller should be back to RUNNING
@@ -580,9 +572,7 @@ class TestInvokeAgent:
         hm.on_subagent_start = slow_hook
 
         with patch.object(target.config.access, "can_invoke", return_value=True):
-            with patch.object(
-                runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn
-            ):
+            with patch.object(runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn):
                 task = asyncio.create_task(
                     runtime.invoke_agent("caller-id", "target-id", "do task")
                 )

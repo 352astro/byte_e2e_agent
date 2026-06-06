@@ -43,7 +43,7 @@ class TestWorkspaceConstruction:
     def test_creates_directory_if_missing(self):
         with tempfile.TemporaryDirectory() as td:
             new_dir = Path(td) / "new_workspace"
-            w = Workspace(root=new_dir, workspace_uuid="test-workspace")
+            Workspace(root=new_dir, workspace_uuid="test-workspace")
             assert new_dir.exists()
 
 
@@ -121,9 +121,7 @@ class TestWorkspaceShell:
 
         start = time.perf_counter()
         trigger_task = asyncio.create_task(trigger_interrupt())
-        result = await ws.run_shell(
-            "sleep 5", timeout_ms=5000, interrupt_event=interrupt_event
-        )
+        result = await ws.run_shell("sleep 5", timeout_ms=5000, interrupt_event=interrupt_event)
         await trigger_task
 
         assert "interrupted" in result.lower()

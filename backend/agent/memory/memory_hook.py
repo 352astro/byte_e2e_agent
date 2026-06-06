@@ -113,9 +113,7 @@ class MemoryHook(BaseHook):
             logger.exception("MemoryHook: list failed")
             return []
         candidates = [
-            rec
-            for rec in candidates
-            if rec.scope != "session" or rec.session_id == session_id
+            rec for rec in candidates if rec.scope != "session" or rec.session_id == session_id
         ]
         print(
             "[MemoryHook] recall "
@@ -125,8 +123,7 @@ class MemoryHook(BaseHook):
         )
         for i, rec in enumerate(candidates, 1):
             print(
-                f"[MemoryHook]   candidate [{i}] "
-                f"[{rec.kind}/{rec.scope}] {_memory_feature(rec)}",
+                f"[MemoryHook]   candidate [{i}] [{rec.kind}/{rec.scope}] {_memory_feature(rec)}",
                 flush=True,
             )
         if not candidates:
@@ -193,9 +190,7 @@ class MemoryHook(BaseHook):
         text = (msg.content or "").strip()
         if not text or _looks_sensitive(text):
             return
-        self._turn_buffer.setdefault(session_id, []).append(
-            f"[{msg.role.value}]: {text}"
-        )
+        self._turn_buffer.setdefault(session_id, []).append(f"[{msg.role.value}]: {text}")
 
     async def on_turn_end(
         self,
@@ -210,9 +205,7 @@ class MemoryHook(BaseHook):
         if not buf:
             return
         conversation = "\n".join(buf)
-        task = asyncio.create_task(
-            self._extract_and_store(session_id, turn_id, conversation)
-        )
+        task = asyncio.create_task(self._extract_and_store(session_id, turn_id, conversation))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
@@ -221,13 +214,10 @@ class MemoryHook(BaseHook):
             return
         await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
-    async def _extract_and_store(
-        self, session_id: str, turn_id: str, conversation: str
-    ) -> None:
+    async def _extract_and_store(self, session_id: str, turn_id: str, conversation: str) -> None:
         memories = await self._extract(conversation)
         print(
-            "[MemoryHook] extract "
-            f"session={session_id} turn={turn_id} candidates={len(memories)}",
+            f"[MemoryHook] extract session={session_id} turn={turn_id} candidates={len(memories)}",
             flush=True,
         )
         now = time.time()
@@ -295,9 +285,7 @@ class MemoryHook(BaseHook):
             return []
         return [item for item in memories if isinstance(item, dict)]
 
-    async def _rerank(
-        self, question: str, candidates: list[MemoryRecord]
-    ) -> list[MemoryRecord]:
+    async def _rerank(self, question: str, candidates: list[MemoryRecord]) -> list[MemoryRecord]:
         lines = [
             f"{i}. [{rec.kind}/{rec.scope}] {_memory_feature(rec)}"
             for i, rec in enumerate(candidates, 1)
@@ -323,9 +311,7 @@ class MemoryHook(BaseHook):
                 indices.append(idx - 1)
         return [candidates[i] for i in indices]
 
-    async def _llm_call(
-        self, prompt: str, max_tokens: int = 120, call_type: str = "memory"
-    ) -> str:
+    async def _llm_call(self, prompt: str, max_tokens: int = 120, call_type: str = "memory") -> str:
         t0 = time.time()
         usage = None
 
@@ -351,11 +337,7 @@ class MemoryHook(BaseHook):
             content = resp.choices[0].message.content or ""
             usage = None
             if hasattr(resp, "usage") and resp.usage:
-                usage = (
-                    resp.usage.model_dump()
-                    if hasattr(resp.usage, "model_dump")
-                    else resp.usage
-                )
+                usage = resp.usage.model_dump() if hasattr(resp.usage, "model_dump") else resp.usage
             return content, usage, model
 
         try:
@@ -364,9 +346,7 @@ class MemoryHook(BaseHook):
                 timeout=self._llm_timeout,
             )
         except TimeoutError:
-            logger.warning(
-                "MemoryHook: LLM call timed out after %.1fs", self._llm_timeout
-            )
+            logger.warning("MemoryHook: LLM call timed out after %.1fs", self._llm_timeout)
             content, model = "", self._extract_model
         except Exception as exc:
             logger.warning(
@@ -418,7 +398,7 @@ def _looks_sensitive(text: str) -> bool:
 def _as_float(value: object, *, default: float) -> float:
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
 
 

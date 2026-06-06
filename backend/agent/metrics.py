@@ -128,18 +128,14 @@ class SQLiteLLMMetricsStore:
         where, params = _where(session_id, message_id, workspace_root)
         sql = f"SELECT {self._CALL_COLUMNS} FROM llm_calls {where}"
         with self._connect() as conn:
-            total = conn.execute(
-                f"SELECT COUNT(*) FROM llm_calls {where}", params
-            ).fetchone()[0]
+            total = conn.execute(f"SELECT COUNT(*) FROM llm_calls {where}", params).fetchone()[0]
             rows = conn.execute(
                 f"{sql} ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
                 (*params, limit, offset),
             ).fetchall()
             pricing = self._pricing_map(conn)
         return {
-            "items": [
-                self._call_row_with_current_cost(dict(row), pricing) for row in rows
-            ],
+            "items": [self._call_row_with_current_cost(dict(row), pricing) for row in rows],
             "pagination": {"limit": limit, "offset": offset, "total": total},
         }
 
@@ -215,10 +211,7 @@ class SQLiteLLMMetricsStore:
                     "cached_tokens": cached_tokens,
                     "output_tokens": output_tokens,
                     "reasoning_tokens": reasoning_tokens,
-                    "total_tokens": input_tokens
-                    + cached_tokens
-                    + output_tokens
-                    + reasoning_tokens,
+                    "total_tokens": input_tokens + cached_tokens + output_tokens + reasoning_tokens,
                     "cost_yuan": _round(cost_yuan, 8) or 0,
                 }
             )
@@ -295,12 +288,8 @@ class SQLiteLLMMetricsStore:
         workspace_root: str | None = None,
     ) -> dict[str, Any]:
         return {
-            "summary": self.summary(
-                session_id=session_id, workspace_root=workspace_root
-            ),
-            "by_model": self.by_model(
-                session_id=session_id, workspace_root=workspace_root
-            ),
+            "summary": self.summary(session_id=session_id, workspace_root=workspace_root),
+            "by_model": self.by_model(session_id=session_id, workspace_root=workspace_root),
             "recent_calls": self.list_calls(
                 limit=limit,
                 session_id=session_id,
@@ -398,6 +387,7 @@ class SQLiteLLMMetricsStore:
 
     def delete_pricing(self, model_id: str) -> None:
         from app.core.config import get_settings
+
         s = get_settings()
         input_price = s.llm_input_cost_yuan_per_1m_tokens
         output_price = s.llm_output_cost_yuan_per_1m_tokens
@@ -485,8 +475,7 @@ class SQLiteLLMMetricsStore:
             )
             # 兼容存量 DB 迁移
             columns = {
-                row["name"]
-                for row in conn.execute("PRAGMA table_info(llm_calls)").fetchall()
+                row["name"] for row in conn.execute("PRAGMA table_info(llm_calls)").fetchall()
             }
             migrations = [
                 ("cost_yuan", "ALTER TABLE llm_calls ADD COLUMN cost_yuan REAL"),
@@ -515,14 +504,10 @@ class SQLiteLLMMetricsStore:
                 if col not in columns:
                     conn.execute(sql)
             pricing_columns = {
-                row["name"]
-                for row in conn.execute("PRAGMA table_info(model_pricing)").fetchall()
+                row["name"] for row in conn.execute("PRAGMA table_info(model_pricing)").fetchall()
             }
             if "cached_input_price_per_1m" not in pricing_columns:
-                conn.execute(
-                    "ALTER TABLE model_pricing "
-                    "ADD COLUMN cached_input_price_per_1m REAL"
-                )
+                conn.execute("ALTER TABLE model_pricing ADD COLUMN cached_input_price_per_1m REAL")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
@@ -538,6 +523,7 @@ class SQLiteLLMMetricsStore:
             if exists:
                 return
         from app.core.config import get_settings
+
         s = get_settings()
         input_price = s.llm_input_cost_yuan_per_1m_tokens
         output_price = s.llm_output_cost_yuan_per_1m_tokens
@@ -606,10 +592,12 @@ class SQLiteLLMMetricsStore:
         input_price = price.get("input_price_per_1m")
         if input_price is None:
             from app.core.config import get_settings
+
             input_price = get_settings().llm_input_cost_yuan_per_1m_tokens
         output_price = price.get("output_price_per_1m")
         if output_price is None:
             from app.core.config import get_settings
+
             output_price = get_settings().llm_output_cost_yuan_per_1m_tokens
         reasoning_price = price.get("reasoning_price_per_1m")
         if reasoning_price is None:
@@ -624,9 +612,7 @@ class SQLiteLLMMetricsStore:
             + reasoning_tokens * reasoning_price
         ) / 1_000_000
 
-    def _aggregate_cost(
-        self, row: sqlite3.Row, pricing: dict[str, dict[str, Any]]
-    ) -> float:
+    def _aggregate_cost(self, row: sqlite3.Row, pricing: dict[str, dict[str, Any]]) -> float:
         prompt_tokens = row["prompt_tokens"] or 0
         completion_tokens = row["completion_tokens"] or 0
         reasoning_tokens = row["reasoning_tokens"] or 0
@@ -704,7 +690,7 @@ def _where(
 def _int(value: Any) -> int | None:
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

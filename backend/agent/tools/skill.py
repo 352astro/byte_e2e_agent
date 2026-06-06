@@ -170,9 +170,7 @@ def _scan_skill_root(
 
 def _validate_skill_name(name: str) -> None:
     if not _SKILL_NAME_RE.fullmatch(name):
-        raise ValueError(
-            "Skill name must match ^[a-z0-9][a-z0-9-]*$"
-        )
+        raise ValueError("Skill name must match ^[a-z0-9][a-z0-9-]*$")
 
 
 def _custom_skill_dir(name: str) -> Path:

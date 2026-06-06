@@ -149,9 +149,7 @@ class TestChunkDelta:
         q = driver.subscribe()
 
         msg = Message.assistant_message("m1", "t1")
-        await driver.on_chunk_delta(
-            msg=msg, field="content", delta="call", tool_name="Shell"
-        )
+        await driver.on_chunk_delta(msg=msg, field="content", delta="call", tool_name="Shell")
 
         ev = q.get_nowait()
         assert ev is not None

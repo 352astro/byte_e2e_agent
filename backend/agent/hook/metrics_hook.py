@@ -133,5 +133,5 @@ class MetricsHook(BaseHook):
 def _int(value: Any) -> int | None:
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
