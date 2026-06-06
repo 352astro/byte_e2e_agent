@@ -13,7 +13,10 @@ import time
 from typing import Any
 
 from shared.hooks import BaseHook, GuardCheck
-from shared.types import StreamEvent
+from shared.types import (
+    GuardRequestPayload,
+    StreamEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,22 +104,36 @@ class NotificationDriverHook(BaseHook):
         check: GuardCheck,
         **kwargs: Any,
     ) -> None:
-        payload = {
-            "kind": "guard_request",
-            "request_id": request_id,
-            "action_type": check.action_type,
-            "subject": check.subject,
-            "payload": check.payload,
-            "session_id": check.session_id,
-            "turn_id": check.turn_id,
-            "message_id": check.message_id,
-            "tool_call_id": check.tool_call_id,
-        }
-        self._pending_guard = payload
+        model = GuardRequestPayload(
+            kind=check.payload.get("kind", "guard_request"),
+            request_id=request_id,
+            action_type=check.action_type,
+            subject=check.subject,
+            payload=check.payload,
+            session_id=check.session_id,
+            turn_id=check.turn_id,
+            message_id=check.message_id,
+            tool_call_id=check.tool_call_id,
+            title=check.payload.get("title") or f"{check.action_type}: {check.subject}",
+            description=check.payload.get("description", ""),
+            choices=[
+                {"id": c.get("id", ""), "label": c.get("label", "")}
+                for c in check.payload.get("choices", [])
+            ],
+            questions=[
+                {"id": q.get("id", ""), "label": q.get("label", "")}
+                for q in check.payload.get("questions", [])
+            ],
+            choice_required=bool(check.payload.get("choice_required", True)),
+            multiple=bool(check.payload.get("multiple", False)),
+            allow_custom=bool(check.payload.get("allow_custom", False)),
+        )
+        payload_dict = model.model_dump(mode="json")
+        self._pending_guard = payload_dict
 
         event = StreamEvent.guard_request(
             request_id,
-            json.dumps(payload, ensure_ascii=False),
+            json.dumps(payload_dict, ensure_ascii=False),
             session_id=check.session_id,
         )
         self._broadcast(event, kind="guard_request")
@@ -252,3 +269,5 @@ class NotificationDriverHook(BaseHook):
         """Clear pending guard after resolution."""
         if self._pending_guard and self._pending_guard.get("request_id") == request_id:
             self._pending_guard = None
+        # Clear event buffer so reconnecting clients don't replay stale guards
+        self._event_buffers.pop("guard_request", None)

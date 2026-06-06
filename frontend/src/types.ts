@@ -114,6 +114,7 @@ export interface GuardRequest {
   turn_id?: string;
   message_id?: string;
   tool_call_id?: string;
+  session_id?: string;
 }
 
 export interface GuardPendingRequest {

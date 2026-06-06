@@ -39,6 +39,10 @@ export function useNotifications(
   const controllerRef = useRef<AbortController | null>(null);
   const retryCountRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionIdRef = useRef(sessionId);
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
 
   const connect = useCallback(() => {
     if (controllerRef.current) {
@@ -56,7 +60,17 @@ export function useNotifications(
         if (recoverRes.ok) {
           const data = await recoverRes.json();
           if (data.pending_guard) {
-            setPendingGuard(data.pending_guard as GuardRequest);
+            const guard = data.pending_guard as GuardRequest;
+            const currentSid = sessionIdRef.current;
+            if (
+              currentSid &&
+              guard.session_id &&
+              guard.session_id !== currentSid
+            ) {
+              (guard as Record<string, unknown>)._comeFromSid =
+                guard.session_id;
+            }
+            setPendingGuard(guard);
           }
           if (data.notices) {
             const now = Date.now();
@@ -100,10 +114,11 @@ export function useNotifications(
               const ev = JSON.parse(raw);
               if (ev.kind === "guard_request") {
                 const guard = JSON.parse(ev.full_content) as GuardRequest;
+                const currentSid = sessionIdRef.current;
                 if (
-                  sessionId &&
+                  currentSid &&
                   guard.session_id &&
-                  guard.session_id !== sessionId
+                  guard.session_id !== currentSid
                 ) {
                   (guard as Record<string, unknown>)._comeFromSid =
                     guard.session_id;

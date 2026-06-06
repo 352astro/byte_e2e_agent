@@ -407,14 +407,32 @@ export default function AgentDemo({
     reloadMessages,
     truncateMessages,
     resetRunning,
+    notices: localNotices,
+    dismissNotice: dismissLocalNotice,
   } = useAgentStream({
     sessionId,
     onSessionCreated,
     scrollContainerRef: scrollRef,
   });
 
-  const { pendingGuard, respondGuard, notices, dismissNotice } =
-    useNotifications(sessionId);
+  const {
+    pendingGuard,
+    respondGuard,
+    notices: globalNotices,
+    dismissNotice: dismissGlobalNotice,
+  } = useNotifications(sessionId);
+
+  const notices = useMemo(
+    () => [...localNotices, ...globalNotices],
+    [localNotices, globalNotices],
+  );
+  const dismissNotice = useCallback(
+    (id: string) => {
+      dismissLocalNotice(id);
+      dismissGlobalNotice(id);
+    },
+    [dismissLocalNotice, dismissGlobalNotice],
+  );
 
   const locked = running || runtimeBusy || interrupting;
   const [sessionConfig, setSessionConfig] = useState<CreateSessionRequest>({

@@ -47,6 +47,8 @@ export interface UseAgentStreamReturn {
   scrollToMessage: (id: string) => void;
   runError: string | null;
   clearRunError: () => void;
+  notices: Notice[];
+  dismissNotice: (id: string) => void;
 }
 
 // ── helpers ───────────────────────────────────────────
@@ -1038,5 +1040,7 @@ export default function useAgentStream({
     scrollToMessage,
     runError,
     clearRunError,
+    notices,
+    dismissNotice,
   };
 }

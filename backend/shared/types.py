@@ -413,6 +413,55 @@ class StreamEvent(BaseModel):
 
 
 # ═══════════════════════════════════════════════════════════
+# GuardRequestPayload — SSE guard_request 事件的 payload
+# ═══════════════════════════════════════════════════════════
+
+
+class GuardChoice(BaseModel):
+    """AskUser 的选择项。"""
+
+    id: str = ""
+    label: str = ""
+    description: str = ""
+
+
+class GuardQuestion(BaseModel):
+    """AskUser 的问题项。"""
+
+    id: str = ""
+    label: str = ""
+    type: str = ""  # "text" | "textarea" | ...
+    required: bool = False
+    placeholder: str = ""
+
+
+class GuardRequestPayload(BaseModel):
+    """前后端透传的 guard_request 事件 payload。
+
+    由 NotificationDriverHook 广播到全局 SSE 通道，
+    前端 useNotifications 接收后反序列化为 GuardRequest。
+    """
+
+    kind: str = "guard_request"
+    request_id: str = ""
+    action_type: str = ""
+    subject: str = ""
+    payload: dict = Field(default_factory=dict)
+    session_id: str = ""
+    turn_id: str = ""
+    message_id: str = ""
+    tool_call_id: str = ""
+    # ── user_input_request 专用 ──
+    title: str = ""
+    description: str = ""
+    choices: list[GuardChoice] = Field(default_factory=list)
+    questions: list[GuardQuestion] = Field(default_factory=list)
+    choice_required: bool = True
+    multiple: bool = False
+    allow_custom: bool = False
+
+
+# ═══════════════════════════════════════════════════════════
 # Turn — 一次用户交互的元数据
 # ═══════════════════════════════════════════════════════════
 
