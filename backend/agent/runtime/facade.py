@@ -130,8 +130,7 @@ class AgentRuntime:
             id=sid,
             config=config,
             llm_client=llm_client,
-            ws=ws
-            or self._workspace,
+            ws=ws or self._workspace,
         )
         self._sessions[sid] = entry
         return entry
@@ -279,9 +278,7 @@ class AgentRuntime:
         """解决待处理的权限请求。"""
         await resolve(self, message_id, response)
 
-    async def _ask_guard(
-        self, check, interrupt_event: asyncio.Event
-    ) -> bool:
+    async def _ask_guard(self, check, interrupt_event: asyncio.Event) -> bool:
         return await ask_guard(self, check, interrupt_event)
 
     async def _ask_user_input(
@@ -337,8 +334,8 @@ class AgentRuntime:
         task = self._loop_task
         if task is not None:
             try:
-                await asyncio.wait_for(task, timeout=5.0)
-            except (asyncio.TimeoutError, Exception):
+                await asyncio.wait_for(task, timeout=3.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
                 pass
         return True
 
