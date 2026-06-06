@@ -15,6 +15,7 @@ from app.schemas.session import (
     ToolPermissionSettings,
 )
 from app.services.context import WorkspaceContext
+from app.services.workspace_registry import workspaces_storage_dir
 
 SESSION_DEFAULTS_FILE = "session_defaults.json"
 TOOL_PERMISSIONS_FILE = "tool_permissions.json"
@@ -67,11 +68,10 @@ class SettingsService:
         return cleaned.model_dump()
 
     def get_sysguard_rules(self) -> dict[str, Any]:
-        return load_sysguard_rules()
+        return load_sysguard_rules(self._ctx.core_workspace.uuid)
 
-    def add_sysguard_rule(self, req: SysguardRuleRequest) -> dict[str, Any]:
-        data = load_sysguard_rules()
-        custom = data["custom"]
+    def add_sysguard_rule(self, req: SysguardRuleRequest, *, scope: str) -> dict[str, Any]:
+        rules = _load_scoped_sysguard_rules(self._ctx.core_workspace.uuid, scope)
         rule = _clean_sysguard_rule(
             {
                 "id": uuid.uuid4().hex[:12],
@@ -79,20 +79,19 @@ class SettingsService:
                 "path": req.path,
                 "enabled": req.enabled,
                 "description": req.description,
-                "source": "custom",
+                "source": scope,
                 "mode": req.mode,
             }
         )
-        _ensure_unique_custom_rule(custom, rule["path"])
-        custom.append(rule)
-        _write_sysguard_rules(custom)
-        return load_sysguard_rules()
+        _ensure_unique_sysguard_rule(rules, rule["path"])
+        rules.append(rule)
+        _write_scoped_sysguard_rules(self._ctx.core_workspace.uuid, scope, rules)
+        return load_sysguard_rules(self._ctx.core_workspace.uuid)
 
     def update_sysguard_rule(
-        self, rule_id: str, req: SysguardRuleRequest
+        self, rule_id: str, req: SysguardRuleRequest, *, scope: str
     ) -> dict[str, Any]:
-        data = load_sysguard_rules()
-        custom = data["custom"]
+        rules = _load_scoped_sysguard_rules(self._ctx.core_workspace.uuid, scope)
         updated = _clean_sysguard_rule(
             {
                 "id": rule_id,
@@ -100,31 +99,31 @@ class SettingsService:
                 "path": req.path,
                 "enabled": req.enabled,
                 "description": req.description,
-                "source": "custom",
+                "source": scope,
                 "mode": req.mode,
             }
         )
         found = False
-        next_custom: list[dict[str, Any]] = []
-        for rule in custom:
+        next_rules: list[dict[str, Any]] = []
+        for rule in rules:
             if rule["id"] == rule_id:
                 found = True
-                next_custom.append(updated)
+                next_rules.append(updated)
             else:
-                next_custom.append(rule)
+                next_rules.append(rule)
         if not found:
             raise KeyError(rule_id)
-        _ensure_unique_custom_rule(next_custom, updated["path"], ignore_id=rule_id)
-        _write_sysguard_rules(next_custom)
-        return load_sysguard_rules()
+        _ensure_unique_sysguard_rule(next_rules, updated["path"], ignore_id=rule_id)
+        _write_scoped_sysguard_rules(self._ctx.core_workspace.uuid, scope, next_rules)
+        return load_sysguard_rules(self._ctx.core_workspace.uuid)
 
-    def delete_sysguard_rule(self, rule_id: str) -> dict[str, Any]:
-        data = load_sysguard_rules()
-        custom = [rule for rule in data["custom"] if rule["id"] != rule_id]
-        if len(custom) == len(data["custom"]):
+    def delete_sysguard_rule(self, rule_id: str, *, scope: str) -> dict[str, Any]:
+        rules = _load_scoped_sysguard_rules(self._ctx.core_workspace.uuid, scope)
+        next_rules = [rule for rule in rules if rule["id"] != rule_id]
+        if len(next_rules) == len(rules):
             raise KeyError(rule_id)
-        _write_sysguard_rules(custom)
-        return load_sysguard_rules()
+        _write_scoped_sysguard_rules(self._ctx.core_workspace.uuid, scope, next_rules)
+        return load_sysguard_rules(self._ctx.core_workspace.uuid)
 
 
 def _config_path(filename: str) -> Path:
@@ -133,13 +132,15 @@ def _config_path(filename: str) -> Path:
     return PROJECT_ROOT / AGENT_DATA_DIR / filename
 
 
-def load_sysguard_rules() -> dict[str, Any]:
+def load_sysguard_rules(workspace_uuid: str | None = None) -> dict[str, Any]:
     from agent.utils.sysguard import list_builtin_rules
 
-    custom = _load_custom_sysguard_rules()
     return {
         "builtin": [rule.__dict__ for rule in list_builtin_rules()],
-        "custom": custom,
+        "global": _load_global_sysguard_rules(),
+        "workspace": (
+            _load_workspace_sysguard_rules(workspace_uuid) if workspace_uuid else []
+        ),
     }
 
 
@@ -150,8 +151,10 @@ def add_custom_sysguard_rule(
     mode: str = "readonly_exec",
     description: str = "",
     enabled: bool = True,
+    workspace_uuid: str | None = None,
 ) -> dict[str, Any]:
-    custom = _load_custom_sysguard_rules()
+    scope = "workspace" if workspace_uuid else "global"
+    rules = _load_scoped_sysguard_rules(workspace_uuid, scope)
     rule = _clean_sysguard_rule(
         {
             "id": uuid.uuid4().hex[:12],
@@ -159,12 +162,12 @@ def add_custom_sysguard_rule(
             "path": path,
             "enabled": enabled,
             "description": description,
-            "source": "custom",
+            "source": scope,
             "mode": mode,
         }
     )
-    custom = _merge_or_add_sysguard_rule(custom, rule)
-    _write_sysguard_rules(custom)
+    rules = _merge_or_add_sysguard_rule(rules, rule)
+    _write_scoped_sysguard_rules(workspace_uuid, scope, rules)
     return rule
 
 
@@ -253,8 +256,57 @@ def _clean_tool_permissions(
     return ToolPermissionSettings(tools=tools)
 
 
-def _load_custom_sysguard_rules() -> list[dict[str, Any]]:
+def _load_global_sysguard_rules() -> list[dict[str, Any]]:
     path = _config_path(SYSGUARD_ALLOWLIST_FILE)
+    return _read_sysguard_rules_file(path, source="global")
+
+
+def _load_workspace_sysguard_rules(workspace_uuid: str | None) -> list[dict[str, Any]]:
+    if not workspace_uuid:
+        return []
+    return _read_sysguard_rules_file(
+        _workspace_config_path(workspace_uuid, SYSGUARD_ALLOWLIST_FILE),
+        source="workspace",
+    )
+
+
+def _load_scoped_sysguard_rules(
+    workspace_uuid: str | None, scope: str
+) -> list[dict[str, Any]]:
+    if scope == "global":
+        return _load_global_sysguard_rules()
+    if scope == "workspace":
+        return _load_workspace_sysguard_rules(workspace_uuid)
+    raise ValueError(f"invalid sysguard scope: {scope}")
+
+
+def _write_scoped_sysguard_rules(
+    workspace_uuid: str | None,
+    scope: str,
+    rules: list[dict[str, Any]],
+) -> None:
+    if scope == "global":
+        _write_sysguard_rules(
+            _config_path(SYSGUARD_ALLOWLIST_FILE),
+            rules,
+            source="global",
+        )
+        return
+    if scope == "workspace" and workspace_uuid:
+        _write_sysguard_rules(
+            _workspace_config_path(workspace_uuid, SYSGUARD_ALLOWLIST_FILE),
+            rules,
+            source="workspace",
+        )
+        return
+    raise ValueError(f"invalid sysguard scope: {scope}")
+
+
+def _workspace_config_path(workspace_uuid: str, filename: str) -> Path:
+    return workspaces_storage_dir() / workspace_uuid / filename
+
+
+def _read_sysguard_rules_file(path: Path, *, source: str) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     try:
@@ -263,16 +315,20 @@ def _load_custom_sysguard_rules() -> list[dict[str, Any]]:
         return []
     if not isinstance(data, dict):
         return []
-    raw_custom = data.get("custom", [])
-    if not isinstance(raw_custom, list):
+    raw_rules = data.get(source)
+    if raw_rules is None and source == "global":
+        raw_rules = data.get("custom", [])
+    if raw_rules is None and source == "workspace":
+        raw_rules = data.get("custom", [])
+    if not isinstance(raw_rules, list):
         return []
     rules: list[dict[str, Any]] = []
     seen_paths: set[str] = set()
-    for item in raw_custom:
+    for item in raw_rules:
         if not isinstance(item, dict):
             continue
         try:
-            rule = _clean_sysguard_rule(item)
+            rule = _clean_sysguard_rule({**item, "source": source})
         except ValueError:
             continue
         if rule["path"] in seen_paths:
@@ -282,10 +338,16 @@ def _load_custom_sysguard_rules() -> list[dict[str, Any]]:
     return rules
 
 
-def _write_sysguard_rules(custom: list[dict[str, Any]]) -> None:
-    path = _config_path(SYSGUARD_ALLOWLIST_FILE)
+def _write_sysguard_rules(
+    path: Path,
+    rules: list[dict[str, Any]],
+    *,
+    source: str,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"custom": [_clean_sysguard_rule(rule) for rule in custom]}
+    payload = {
+        source: [_clean_sysguard_rule({**rule, "source": source}) for rule in rules]
+    }
     path.write_text(
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
@@ -297,6 +359,7 @@ def _clean_sysguard_rule(rule: dict[str, Any]) -> dict[str, Any]:
     label = str(rule.get("label", "")).strip()
     raw_path = str(rule.get("path", "")).strip()
     mode = str(rule.get("mode", "readonly_exec")).strip()
+    source = str(rule.get("source") or "global").strip()
     description = str(rule.get("description", "")).strip()
     if not rule_id:
         raise ValueError("rule id is required")
@@ -306,6 +369,8 @@ def _clean_sysguard_rule(rule: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("rule path is required")
     if mode not in _SYSGUARD_RULE_MODES:
         raise ValueError(f"invalid sysguard rule mode: {mode}")
+    if source not in {"global", "workspace"}:
+        raise ValueError(f"invalid sysguard rule source: {source}")
     resolved = Path(raw_path).expanduser().resolve()
     if not resolved.exists():
         raise ValueError(f"path does not exist: {raw_path}")
@@ -319,13 +384,13 @@ def _clean_sysguard_rule(rule: dict[str, Any]) -> dict[str, Any]:
         "label": label,
         "path": str(resolved),
         "mode": mode,
-        "source": "custom",
+        "source": source,
         "enabled": bool(rule.get("enabled", True)),
         "description": description,
     }
 
 
-def _ensure_unique_custom_rule(
+def _ensure_unique_sysguard_rule(
     rules: list[dict[str, Any]], path: str, *, ignore_id: str = ""
 ) -> None:
     for rule in rules:

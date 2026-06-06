@@ -29,6 +29,20 @@ _PERMISSION_DENIED_PATH_RE = re.compile(
 _QUOTED_PERMISSION_DENIED_PATH_RE = re.compile(
     r"['\"](?P<path>/[^'\"]+)['\"]:\s+Permission denied"
 )
+_WRITE_DENIAL_HINTS = (
+    "cannot remove",
+    "cannot create",
+    "cannot write",
+    "cannot set",
+    "cannot update",
+    "failed to create",
+    "failed to remove",
+    "failed to rename",
+    "failed to write",
+    "error opening file for download",
+    "cleaning up cached downloads",
+    "permission denied (os error",
+)
 
 
 def get_platform_hint() -> str:
@@ -114,7 +128,7 @@ async def shell_handler(
         )
 
     terminal = PersistentTerminal()
-    terminal.start(workdir, sandbox_root=str(ws.root))
+    terminal.start(workdir, sandbox_root=str(ws.root), workspace_uuid=ws.uuid)
 
     result_queue: queue.Queue[object] = queue.Queue(maxsize=1)
     result_status = "success"
@@ -239,10 +253,12 @@ def _sysguard_denial_metadata(
         return None
     if "Permission denied" not in output:
         return None
+    write_denial = _looks_like_write_denial(output)
+
     match = _QUOTED_PERMISSION_DENIED_PATH_RE.search(output)
     if match:
         path = match.group("path")
-        candidate = _external_read_denial_candidate(path)
+        candidate = _external_denial_candidate(path, readwrite=write_denial)
         if candidate:
             return candidate
 
@@ -250,7 +266,7 @@ def _sysguard_denial_metadata(
     if not match:
         return None
     path = match.group("path")
-    candidate = _external_read_denial_candidate(path)
+    candidate = _external_denial_candidate(path, readwrite=write_denial)
     if candidate:
         return candidate
     if reason != "exit_code=126":
@@ -266,24 +282,49 @@ def _sysguard_denial_metadata(
     }
 
 
-def _external_read_denial_candidate(path: str) -> dict | None:
+def _looks_like_write_denial(output: str) -> bool:
+    lowered = output.lower()
+    if any(hint in lowered for hint in _WRITE_DENIAL_HINTS):
+        return True
+    return bool(re.search(r"\b(rm|mv|cp|mkdir|touch|install|cargo|rustup|npm|pnpm|yarn)\b", lowered))
+
+
+def _external_denial_candidate(path: str, *, readwrite: bool) -> dict | None:
     try:
         resolved = Path(path).expanduser().resolve()
     except OSError:
-        return None
-    if not resolved.exists():
+        resolved = Path(path).expanduser().absolute()
+    mode = "readwrite" if readwrite else "readonly"
+    rule_path = _nearest_rule_path(resolved, readwrite=readwrite)
+    if rule_path is None:
         return None
     if sysguard._overlaps_project_root(resolved):
         return None
-    if sysguard.is_path_allowed(str(resolved), "readonly"):
+    if sysguard._overlaps_project_root(rule_path):
+        return None
+    if sysguard.is_path_allowed(str(resolved), mode):
         return None
     return {
         "label": "Shell external path",
-        "path": str(resolved),
-        "mode": "readonly",
-        "description": f"Detected denied read access from shell output: {resolved}",
+        "path": str(rule_path),
+        "denied_path": str(resolved),
+        "mode": mode,
+        "description": f"Detected denied {mode} access from shell output: {resolved}",
         "confidence": "suspected",
     }
+
+
+def _nearest_rule_path(path: Path, *, readwrite: bool) -> Path | None:
+    if path.exists():
+        return path
+    if not readwrite:
+        return None
+    current = path
+    while current != current.parent:
+        current = current.parent
+        if current.exists():
+            return current
+    return None
 
 
 shell_tool = StructuredTool.from_function(

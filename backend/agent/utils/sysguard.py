@@ -57,7 +57,7 @@ class SysguardRule:
     label: str
     path: str
     mode: Literal["readonly", "readonly_exec", "readwrite"] = "readonly_exec"
-    source: Literal["builtin", "custom"] = "builtin"
+    source: Literal["builtin", "global", "workspace"] = "builtin"
     enabled: bool = True
     description: str = ""
 
@@ -154,12 +154,12 @@ def _apply_landlock(workspace: str) -> None:
         _fail(f"Landlock failed: {exc}")
 
 
-def build_seatbelt_profile(workspace: str) -> str:
+def build_seatbelt_profile(workspace: str, workspace_uuid: str | None = None) -> str:
     """Build an Apple Seatbelt profile that allows writes only in workspace."""
     ws = os.path.abspath(workspace)
     read_only_lines = "\n".join(
         f'    (allow file-read* (subpath "{path}"))'
-        for path in _rule_paths_from_environment("readonly")
+        for path in _rule_paths_from_environment("readonly", workspace_uuid)
     )
     read_only_exec_lines = "\n".join(
         "\n".join(
@@ -168,11 +168,11 @@ def build_seatbelt_profile(workspace: str) -> str:
                 f'    (allow process-exec (subpath "{path}"))',
             ]
         )
-        for path in _rule_paths_from_environment("readonly_exec")
+        for path in _rule_paths_from_environment("readonly_exec", workspace_uuid)
     )
     readwrite_lines = "\n".join(
         f'    (allow file-read* file-write* (subpath "{path}"))'
-        for path in _rule_paths_from_environment("readwrite")
+        for path in _rule_paths_from_environment("readwrite", workspace_uuid)
     )
     readwrite_device_lines = "\n".join(
         f'    (allow file-read* file-write* (literal "{path}"))'
@@ -272,6 +272,7 @@ _MODE_LEVEL = {
 def is_path_allowed(
     path: str,
     required_mode: Literal["readonly", "readonly_exec", "readwrite"] = "readonly_exec",
+    workspace_uuid: str | None = None,
 ) -> bool:
     try:
         target = Path(path).expanduser().resolve()
@@ -281,7 +282,7 @@ def is_path_allowed(
     for mode in ("readonly", "readonly_exec", "readwrite"):
         if _MODE_LEVEL[mode] < required_level:
             continue
-        for allowed in _rule_paths_from_environment(mode):
+        for allowed in _rule_paths_from_environment(mode, workspace_uuid):
             try:
                 target.relative_to(Path(allowed))
                 return True
@@ -292,6 +293,7 @@ def is_path_allowed(
 
 def external_path_mode_for_rule(
     path: str,
+    workspace_uuid: str | None = None,
 ) -> Literal["readonly", "readonly_exec", "readwrite"] | None:
     try:
         target = Path(path).expanduser().resolve()
@@ -299,7 +301,7 @@ def external_path_mode_for_rule(
         return None
     best: Literal["readonly", "readonly_exec", "readwrite"] | None = None
     for mode in ("readonly", "readonly_exec", "readwrite"):
-        for allowed in _rule_paths_from_environment(mode):
+        for allowed in _rule_paths_from_environment(mode, workspace_uuid):
             try:
                 target.relative_to(Path(allowed))
             except ValueError:
@@ -319,6 +321,7 @@ def _fail(message: str) -> None:
 
 def _rule_paths_from_environment(
     mode: Literal["readonly", "readonly_exec", "readwrite"],
+    workspace_uuid: str | None = None,
 ) -> list[str]:
     paths: list[str] = []
     seen: set[str] = set()
@@ -349,28 +352,30 @@ def _rule_paths_from_environment(
             part = Path(raw_part).expanduser()
             _add_home_toolchain_root(part, add)
 
-    for rule in _load_custom_rules():
+    for rule in _load_custom_rules(workspace_uuid):
         if rule.enabled and rule.mode == mode:
             add(rule.path)
 
     return paths
 
 
-def _load_custom_rules() -> list[SysguardRule]:
+def _load_custom_rules(workspace_uuid: str | None = None) -> list[SysguardRule]:
     try:
         from app.services.settings_service import load_sysguard_rules
 
+        data = load_sysguard_rules(workspace_uuid or os.environ.get("AGENT_WORKSPACE_UUID"))
+        rules = [*data.get("global", []), *data.get("workspace", [])]
         return [
             SysguardRule(
                 id=rule["id"],
                 label=rule["label"],
                 path=rule["path"],
                 mode=rule.get("mode", "readonly_exec"),
-                source="custom",
+                source=rule.get("source", "global"),
                 enabled=bool(rule.get("enabled", True)),
                 description=rule.get("description", ""),
             )
-            for rule in load_sysguard_rules().get("custom", [])
+            for rule in rules
             if isinstance(rule, dict)
         ]
     except Exception:

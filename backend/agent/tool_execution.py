@@ -67,6 +67,24 @@ class ToolJob:
     guard_decision: GuardDecision | None
 
 
+PathMode = Literal["readonly", "readonly_exec", "readwrite"]
+
+
+@dataclass
+class SysguardAskTracker:
+    asked: dict[str, set[PathMode]]
+
+    def can_ask(self, path: str, mode: PathMode) -> bool:
+        key = _canonical_rule_path(path)
+        modes = self.asked.setdefault(key, set())
+        if mode in modes:
+            return False
+        if mode != "readwrite" and modes:
+            return False
+        modes.add(mode)
+        return True
+
+
 def _is_parallel_candidate(info: ToolCallInfo) -> bool:
     return info.name in _PARALLEL_READ_TOOLS
 
@@ -298,6 +316,7 @@ async def _run_tool_job(
     tool_status = "success"
     tool_status_source = "tool"
     tool_status_reason = ""
+    sysguard_asks = SysguardAskTracker(asked={})
 
     guard_check = GuardCheck(
         action_type="tool.execute",
@@ -360,6 +379,8 @@ async def _run_tool_job(
                 turn_id=turn_id,
                 interrupt_event=interrupt_event,
                 ask_guard=ask_guard,
+                sysguard_asks=sysguard_asks,
+                workspace_uuid=ws.uuid,
             )
             if path_approved is False:
                 tool_status = "denied"
@@ -374,6 +395,8 @@ async def _run_tool_job(
                     turn_id=turn_id,
                     interrupt_event=interrupt_event,
                     ask_guard=ask_guard,
+                    sysguard_asks=sysguard_asks,
+                    workspace_uuid=ws.uuid,
                 )
                 if preapproved is False:
                     tool_status = "denied"
@@ -398,7 +421,9 @@ async def _run_tool_job(
             tool_status = tool_exec.status
             tool_status_source = tool_exec.source
             tool_status_reason = tool_exec.reason
-            if _is_sysguard_denial(tool_exec):
+            attempts = 0
+            while _is_sysguard_denial(tool_exec) and attempts < 2:
+                attempts += 1
                 approved = await _ask_shell_sysguard_from_result(
                     info,
                     tool_exec,
@@ -407,24 +432,27 @@ async def _run_tool_job(
                     turn_id=turn_id,
                     interrupt_event=interrupt_event,
                     ask_guard=ask_guard,
+                    sysguard_asks=sysguard_asks,
+                    workspace_uuid=ws.uuid,
                 )
-                if approved:
-                    retry_exec = await execute_one_tool(
-                        info.tc_dict,
-                        ws,
-                        toolset,
-                        interrupt_event=interrupt_event,
-                        openai_client=openai_client,
-                        model_id=model_id,
-                        session_id=session_id,
-                        hook_manager=hook_manager,
-                        agent_invoker=job_invoke_subagent,
-                        human_input_requester=job_request_human_input,
-                    )
-                    tool_output = retry_exec.output
-                    tool_status = retry_exec.status
-                    tool_status_source = retry_exec.source
-                    tool_status_reason = retry_exec.reason
+                if not approved:
+                    break
+                tool_exec = await execute_one_tool(
+                    info.tc_dict,
+                    ws,
+                    toolset,
+                    interrupt_event=interrupt_event,
+                    openai_client=openai_client,
+                    model_id=model_id,
+                    session_id=session_id,
+                    hook_manager=hook_manager,
+                    agent_invoker=job_invoke_subagent,
+                    human_input_requester=job_request_human_input,
+                )
+                tool_output = tool_exec.output
+                tool_status = tool_exec.status
+                tool_status_source = tool_exec.source
+                tool_status_reason = tool_exec.reason
         except _ToolOutputReady:
             pass
         except InterruptedError:
@@ -505,6 +533,8 @@ async def _ask_structured_paths_if_needed(
     turn_id: str,
     interrupt_event: asyncio.Event,
     ask_guard: AskGuardFn,
+    sysguard_asks: SysguardAskTracker,
+    workspace_uuid: str,
 ) -> bool | None:
     access_by_field = _STRUCTURED_PATH_ACCESS.get(info.name)
     if not access_by_field:
@@ -537,6 +567,8 @@ async def _ask_structured_paths_if_needed(
             turn_id=turn_id,
             interrupt_event=interrupt_event,
             ask_guard=ask_guard,
+            sysguard_asks=sysguard_asks,
+            workspace_uuid=workspace_uuid,
         )
         if not approved:
             return False
@@ -557,7 +589,7 @@ def _external_candidate_path(
         return None
     except ValueError:
         pass
-    if sysguard.is_path_allowed(str(resolved), mode):
+    if sysguard.is_path_allowed(str(resolved), mode, workspace_uuid=ws.uuid):
         return None
     if sysguard._overlaps_project_root(resolved):
         return None
@@ -572,6 +604,8 @@ async def _ask_shell_sysguard_if_needed(
     turn_id: str,
     interrupt_event: asyncio.Event,
     ask_guard: AskGuardFn,
+    sysguard_asks: SysguardAskTracker,
+    workspace_uuid: str,
 ) -> bool | None:
     from agent.utils import sysguard
 
@@ -579,7 +613,10 @@ async def _ask_shell_sysguard_if_needed(
     if not command:
         return None
     rule = sysguard.detect_command_rule(command)
-    if rule is None or sysguard.is_path_allowed(rule.path):
+    if rule is None or sysguard.is_path_allowed(
+        rule.path,
+        workspace_uuid=workspace_uuid,
+    ):
         return None
     return await _ask_and_add_sysguard_rule(
         rule_path=rule.path,
@@ -592,6 +629,8 @@ async def _ask_shell_sysguard_if_needed(
         turn_id=turn_id,
         interrupt_event=interrupt_event,
         ask_guard=ask_guard,
+        sysguard_asks=sysguard_asks,
+        workspace_uuid=workspace_uuid,
     )
 
 
@@ -604,6 +643,8 @@ async def _ask_shell_sysguard_from_result(
     turn_id: str,
     interrupt_event: asyncio.Event,
     ask_guard: AskGuardFn,
+    sysguard_asks: SysguardAskTracker,
+    workspace_uuid: str,
 ) -> bool:
     metadata = tool_exec.metadata or {}
     path = str(metadata.get("path") or "")
@@ -623,6 +664,8 @@ async def _ask_shell_sysguard_from_result(
         turn_id=turn_id,
         interrupt_event=interrupt_event,
         ask_guard=ask_guard,
+        sysguard_asks=sysguard_asks,
+        workspace_uuid=workspace_uuid,
     )
 
 
@@ -638,7 +681,11 @@ async def _ask_and_add_sysguard_rule(
     turn_id: str,
     interrupt_event: asyncio.Event,
     ask_guard: AskGuardFn,
+    sysguard_asks: SysguardAskTracker,
+    workspace_uuid: str,
 ) -> bool:
+    if not sysguard_asks.can_ask(rule_path, mode):
+        return False
     check = GuardCheck(
         action_type="sandbox.allow_path",
         subject=info.name,
@@ -674,10 +721,18 @@ async def _ask_and_add_sysguard_rule(
             mode=mode,
             description=description,
             enabled=True,
+            workspace_uuid=workspace_uuid,
         )
     except FileExistsError:
         pass
     return True
+
+
+def _canonical_rule_path(path: str) -> str:
+    try:
+        return str(Path(path).expanduser().resolve())
+    except OSError:
+        return str(Path(path).expanduser().absolute())
 
 
 def _shell_command_from_args(args: str) -> str:

@@ -60,13 +60,21 @@ class PersistentTerminal:
         self._seatbelt_profile_path: str | None = None
         self._last_exit_code = -1
 
-    def start(self, cwd: str = ".", *, sandbox_root: str | None = None) -> None:
+    def start(
+        self,
+        cwd: str = ".",
+        *,
+        sandbox_root: str | None = None,
+        workspace_uuid: str | None = None,
+    ) -> None:
         if self._proc is not None:
             self.stop()
 
         self._cwd = os.path.abspath(cwd)
         self._sandbox_root = os.path.abspath(sandbox_root or self._cwd)
         env = os.environ.copy()
+        if workspace_uuid:
+            env["AGENT_WORKSPACE_UUID"] = workspace_uuid
         backend_root = str(Path(__file__).resolve().parents[2])
         env["PYTHONPATH"] = (
             f"{backend_root}{os.pathsep}{env['PYTHONPATH']}"
@@ -102,7 +110,10 @@ class PersistentTerminal:
         shell_cmd = list(self._shell)
         if sys.platform == "darwin":
             if sysguard.seatbelt_available():
-                profile = sysguard.build_seatbelt_profile(self._sandbox_root)
+                profile = sysguard.build_seatbelt_profile(
+                    self._sandbox_root,
+                    workspace_uuid=env.get("AGENT_WORKSPACE_UUID"),
+                )
                 tmpf = tempfile.NamedTemporaryFile(
                     mode="w",
                     suffix=".sb",

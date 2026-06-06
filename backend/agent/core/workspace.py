@@ -146,7 +146,11 @@ class Workspace:
             if external_mode is not None:
                 from agent.utils import sysguard
 
-                if sysguard.is_path_allowed(resolved, external_mode):
+                if sysguard.is_path_allowed(
+                    str(resolved),
+                    external_mode,
+                    workspace_uuid=self.uuid,
+                ):
                     return resolved
             raise PermissionError(
                 "Path is outside workspace and not allowed by shell sandbox "

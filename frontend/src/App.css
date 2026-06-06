@@ -1149,6 +1149,18 @@
     min-height: 92px;
 }
 
+.sysguard-scope-badge {
+    align-self: flex-start;
+    border: 1px solid #d8d8d8;
+    border-radius: 6px;
+    padding: 5px 8px;
+    color: #626262;
+    background: #fff;
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
 .sysguard-toggle {
     display: inline-flex;
     align-items: center;

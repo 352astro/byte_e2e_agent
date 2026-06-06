@@ -154,27 +154,33 @@ def get_sysguard_settings(
     return settings_service.get_sysguard_rules()
 
 
-@router.post("/settings/sysguard/custom", response_model=SysguardSettingsResponse)
+@router.post("/settings/sysguard/{scope}", response_model=SysguardSettingsResponse)
 def add_sysguard_rule(
+    scope: str,
     req: SysguardRuleRequest,
     settings_service: SettingsService = Depends(get_settings_service),
 ) -> dict:
     try:
-        return settings_service.add_sysguard_rule(req)
+        if scope not in {"global", "workspace"}:
+            raise HTTPException(status_code=404, detail="Invalid sysguard scope")
+        return settings_service.add_sysguard_rule(req, scope=scope)
     except FileExistsError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.put("/settings/sysguard/custom/{rule_id}", response_model=SysguardSettingsResponse)
+@router.put("/settings/sysguard/{scope}/{rule_id}", response_model=SysguardSettingsResponse)
 def update_sysguard_rule(
+    scope: str,
     rule_id: str,
     req: SysguardRuleRequest,
     settings_service: SettingsService = Depends(get_settings_service),
 ) -> dict:
     try:
-        return settings_service.update_sysguard_rule(rule_id, req)
+        if scope not in {"global", "workspace"}:
+            raise HTTPException(status_code=404, detail="Invalid sysguard scope")
+        return settings_service.update_sysguard_rule(rule_id, req, scope=scope)
     except KeyError:
         raise HTTPException(status_code=404, detail="Sysguard rule not found")
     except FileExistsError as exc:
@@ -183,13 +189,16 @@ def update_sysguard_rule(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.delete("/settings/sysguard/custom/{rule_id}", response_model=SysguardSettingsResponse)
+@router.delete("/settings/sysguard/{scope}/{rule_id}", response_model=SysguardSettingsResponse)
 def delete_sysguard_rule(
+    scope: str,
     rule_id: str,
     settings_service: SettingsService = Depends(get_settings_service),
 ) -> dict:
     try:
-        return settings_service.delete_sysguard_rule(rule_id)
+        if scope not in {"global", "workspace"}:
+            raise HTTPException(status_code=404, detail="Invalid sysguard scope")
+        return settings_service.delete_sysguard_rule(rule_id, scope=scope)
     except KeyError:
         raise HTTPException(status_code=404, detail="Sysguard rule not found")
 

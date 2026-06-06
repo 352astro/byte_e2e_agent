@@ -52,9 +52,15 @@ interface SysguardRule {
   label: string;
   path: string;
   mode: "readonly" | "readonly_exec" | "readwrite";
-  source: "builtin" | "custom";
+  source: "builtin" | "global" | "workspace";
   enabled: boolean;
   description: string;
+}
+
+interface SysguardSettingsPayload {
+  builtin?: SysguardRule[];
+  global?: SysguardRule[];
+  workspace?: SysguardRule[];
 }
 
 type ToolPermissionMode = "allow" | "ask" | "deny";
@@ -100,8 +106,11 @@ export default function SettingsWindow({
   const [sessionSettings, setSessionSettings] =
     useState<SessionSettings | null>(null);
   const [sysguardBuiltin, setSysguardBuiltin] = useState<SysguardRule[]>([]);
-  const [sysguardCustom, setSysguardCustom] = useState<SysguardRule[]>([]);
+  const [sysguardGlobal, setSysguardGlobal] = useState<SysguardRule[]>([]);
+  const [sysguardWorkspace, setSysguardWorkspace] = useState<SysguardRule[]>([]);
   const [activeSysguardRule, setActiveSysguardRule] = useState("");
+  const [sysguardNewScope, setSysguardNewScope] =
+    useState<"global" | "workspace">("workspace");
   const [sysguardDraft, setSysguardDraft] = useState({
     label: "",
     path: "",
@@ -159,16 +168,19 @@ export default function SettingsWindow({
     try {
       const res = await fetch("/api/settings/sysguard");
       if (!res.ok) throw new Error(`Sysguard returned ${res.status}`);
-      const data: { builtin?: SysguardRule[]; custom?: SysguardRule[] } =
-        await res.json();
+      const data: SysguardSettingsPayload = await res.json();
       const builtin = data.builtin || [];
-      const custom = data.custom || [];
+      const globalRules = data.global || [];
+      const workspaceRules = data.workspace || [];
       setSysguardBuiltin(builtin);
-      setSysguardCustom(custom);
+      setSysguardGlobal(globalRules);
+      setSysguardWorkspace(workspaceRules);
       setActiveSysguardRule((current) => {
         if (current === "__new__") return current;
-        if (current && custom.some((rule) => rule.id === current)) return current;
-        return custom[0]?.id || builtin[0]?.id || "";
+        const editable = [...workspaceRules, ...globalRules];
+        if (current && editable.some((rule) => rule.id === current)) return current;
+        if (current && builtin.some((rule) => rule.id === current)) return current;
+        return workspaceRules[0]?.id || globalRules[0]?.id || builtin[0]?.id || "";
       });
       setError(null);
     } catch (err) {
@@ -453,6 +465,7 @@ export default function SettingsWindow({
 
   const newSysguardRule = () => {
     setActiveSysguardRule("__new__");
+    setSysguardNewScope("workspace");
     setSysguardDraft({
       label: "",
       path: "",
@@ -462,15 +475,29 @@ export default function SettingsWindow({
     });
   };
 
+  const findSysguardRule = (ruleId: string) =>
+    [...sysguardWorkspace, ...sysguardGlobal, ...sysguardBuiltin].find(
+      (rule) => rule.id === ruleId,
+    ) || null;
+
+  const applySysguardPayload = (data: SysguardSettingsPayload) => {
+    setSysguardBuiltin(data.builtin || []);
+    setSysguardGlobal(data.global || []);
+    setSysguardWorkspace(data.workspace || []);
+  };
+
   const saveSysguardRule = async () => {
     const isNew = activeSysguardRule === "__new__";
+    const activeRule = findSysguardRule(activeSysguardRule);
+    const scope = isNew ? sysguardNewScope : activeRule?.source;
+    if (scope !== "global" && scope !== "workspace") return;
     if (!sysguardDraft.label.trim() || !sysguardDraft.path.trim()) return;
     setSaving(true);
     try {
       const res = await fetch(
         isNew
-          ? "/api/settings/sysguard/custom"
-          : `/api/settings/sysguard/custom/${encodeURIComponent(activeSysguardRule)}`,
+          ? `/api/settings/sysguard/${scope}`
+          : `/api/settings/sysguard/${scope}/${encodeURIComponent(activeSysguardRule)}`,
         {
           method: isNew ? "POST" : "PUT",
           headers: { "Content-Type": "application/json" },
@@ -481,12 +508,12 @@ export default function SettingsWindow({
         const text = await res.text();
         throw new Error(text || `Server returned ${res.status}`);
       }
-      const data: { builtin?: SysguardRule[]; custom?: SysguardRule[] } =
-        await res.json();
-      const custom = data.custom || [];
-      setSysguardBuiltin(data.builtin || []);
-      setSysguardCustom(custom);
-      setActiveSysguardRule(custom[custom.length - 1]?.id || "");
+      const data: SysguardSettingsPayload = await res.json();
+      applySysguardPayload(data);
+      const list = scope === "workspace" ? data.workspace || [] : data.global || [];
+      setActiveSysguardRule(
+        isNew ? list[list.length - 1]?.id || "" : activeSysguardRule,
+      );
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -497,19 +524,20 @@ export default function SettingsWindow({
 
   const deleteSysguardRule = async () => {
     if (!activeSysguardRule || activeSysguardRule === "__new__") return;
+    const activeRule = findSysguardRule(activeSysguardRule);
+    const scope = activeRule?.source;
+    if (scope !== "global" && scope !== "workspace") return;
     setSaving(true);
     try {
       const res = await fetch(
-        `/api/settings/sysguard/custom/${encodeURIComponent(activeSysguardRule)}`,
+        `/api/settings/sysguard/${scope}/${encodeURIComponent(activeSysguardRule)}`,
         { method: "DELETE" },
       );
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      const data: { builtin?: SysguardRule[]; custom?: SysguardRule[] } =
-        await res.json();
-      const custom = data.custom || [];
-      setSysguardBuiltin(data.builtin || []);
-      setSysguardCustom(custom);
-      const next = custom[0] || data.builtin?.[0];
+      const data: SysguardSettingsPayload = await res.json();
+      applySysguardPayload(data);
+      const next =
+        data.workspace?.[0] || data.global?.[0] || data.builtin?.[0] || null;
       if (next) selectSysguardRule(next);
       else newSysguardRule();
       setError(null);
@@ -524,12 +552,56 @@ export default function SettingsWindow({
     const builtinActive = sysguardBuiltin.find(
       (rule) => rule.id === activeSysguardRule,
     );
-    const customActive = sysguardCustom.find(
+    const globalActive = sysguardGlobal.find(
       (rule) => rule.id === activeSysguardRule,
     );
-    const activeRule = customActive || builtinActive || null;
+    const workspaceActive = sysguardWorkspace.find(
+      (rule) => rule.id === activeSysguardRule,
+    );
+    const activeRule = workspaceActive || globalActive || builtinActive || null;
     const isNew = activeSysguardRule === "__new__";
-    const editable = isNew || activeRule?.source === "custom";
+    const editable =
+      isNew || activeRule?.source === "global" || activeRule?.source === "workspace";
+    const renderEditableRule = (rule: SysguardRule) => (
+      <div
+        className={`skill-library-item ${activeSysguardRule === rule.id ? "active" : ""}`}
+        key={rule.id}
+        role="button"
+        tabIndex={0}
+        onClick={() => selectSysguardRule(rule)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            selectSysguardRule(rule);
+          }
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={rule.enabled}
+          onChange={(e) => {
+            e.stopPropagation();
+            void fetch(
+              `/api/settings/sysguard/${rule.source}/${encodeURIComponent(rule.id)}`,
+              {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  label: rule.label,
+                  path: rule.path,
+                  mode: rule.mode,
+                  enabled: e.target.checked,
+                  description: rule.description,
+                }),
+              },
+            ).then(() => loadSysguard());
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+        <span className="skill-library-name">{rule.label}</span>
+        <span className="skill-source skill-source--custom">{rule.mode}</span>
+      </div>
+    );
     return (
       <div className="sysguard-panel">
         <div className="memory-panel-head">
@@ -558,6 +630,14 @@ export default function SettingsWindow({
             >
               + New Rule
             </button>
+            {sysguardWorkspace.length > 0 && (
+              <div className="sysguard-section-label">Workspace</div>
+            )}
+            {sysguardWorkspace.map(renderEditableRule)}
+            {sysguardGlobal.length > 0 && (
+              <div className="sysguard-section-label">Global</div>
+            )}
+            {sysguardGlobal.map(renderEditableRule)}
             {sysguardBuiltin.length > 0 && (
               <div className="sysguard-section-label">Built-in</div>
             )}
@@ -581,57 +661,33 @@ export default function SettingsWindow({
                 </span>
               </div>
             ))}
-            {sysguardCustom.length > 0 && (
-              <div className="sysguard-section-label">Custom</div>
-            )}
-            {sysguardCustom.map((rule) => (
-              <div
-                className={`skill-library-item ${activeSysguardRule === rule.id ? "active" : ""}`}
-                key={rule.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => selectSysguardRule(rule)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    selectSysguardRule(rule);
-                  }
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={rule.enabled}
-                  onChange={(e) => {
-                    e.stopPropagation();
-                    void fetch(
-                      `/api/settings/sysguard/custom/${encodeURIComponent(rule.id)}`,
-                      {
-                        method: "PUT",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          label: rule.label,
-                          path: rule.path,
-                          mode: rule.mode,
-                          enabled: e.target.checked,
-                          description: rule.description,
-                        }),
-                      },
-                    ).then(() => loadSysguard());
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                />
-                <span className="skill-library-name">{rule.label}</span>
-                <span className="skill-source skill-source--custom">
-                  {rule.mode}
-                </span>
-              </div>
-            ))}
           </aside>
           <section className="skill-library-editor">
             {!isNew && !activeRule ? (
               <div className="memory-empty">Select a rule.</div>
             ) : (
               <>
+                {isNew && (
+                  <label className="skill-field">
+                    <span>Scope</span>
+                    <select
+                      value={sysguardNewScope}
+                      onChange={(e) =>
+                        setSysguardNewScope(
+                          e.target.value as "global" | "workspace",
+                        )
+                      }
+                    >
+                      <option value="workspace">Current workspace</option>
+                      <option value="global">Global</option>
+                    </select>
+                  </label>
+                )}
+                {!isNew && activeRule && (
+                  <div className="sysguard-scope-badge">
+                    Scope: {activeRule.source}
+                  </div>
+                )}
                 <label className="skill-field">
                   <span>Label</span>
                   <input
@@ -726,7 +782,8 @@ export default function SettingsWindow({
                       {saving ? "Saving" : isNew ? "Create Rule" : "Save"}
                     </button>
                   )}
-                  {activeRule?.source === "custom" && (
+                  {(activeRule?.source === "global" ||
+                    activeRule?.source === "workspace") && (
                     <button
                       className="memory-delete-btn skill-danger-btn"
                       type="button"
