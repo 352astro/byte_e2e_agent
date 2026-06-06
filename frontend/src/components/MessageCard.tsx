@@ -45,6 +45,11 @@ const MessageCard = React.memo(function MessageCard({
 
   const isStreaming = m.status === "streaming";
 
+  // ── System ──────────────────────────────────────
+  if (m.role === "system") {
+    return null;
+  }
+
   // ── User ────────────────────────────────────────
   if (m.role === "user") {
     return (
