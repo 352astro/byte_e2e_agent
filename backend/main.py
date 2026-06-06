@@ -2,11 +2,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from agent.tools.browser import close_all_browser_sessions
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.cors import setup_cors
 from app.services.workspace_registry import register_workspace
-from agent.tools.browser import close_all_browser_sessions
 
 
 @asynccontextmanager

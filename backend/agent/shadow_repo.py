@@ -19,7 +19,7 @@ from dulwich.diff import write_object_diff
 from dulwich.diff_tree import tree_changes
 from dulwich.ignore import IgnoreFilter, IgnoreFilterManager, get_xdg_config_home_path
 from dulwich.index import Index, IndexEntry
-from dulwich.objects import Blob, Commit, Tree
+from dulwich.objects import Blob, Commit
 from dulwich.repo import Repo
 from dulwich.walk import Walker
 
@@ -170,7 +170,6 @@ class ShadowRepo:
 
     def restore(self, commit_sha: str) -> None:
         """Checkout a commit's tree into the workspace, overwriting files."""
-        import stat
 
         c = self._get_commit(commit_sha)
         tree = self._repo.object_store[c.tree]

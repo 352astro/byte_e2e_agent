@@ -9,7 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agent.core.workspace import Workspace as CoreWorkspace, is_valid_session_id
+from agent.core.workspace import Workspace as CoreWorkspace
+from agent.core.workspace import is_valid_session_id
 from agent.hook.logging_hook import LoggingHook
 from agent.hook.metrics_hook import MetricsHook
 from agent.hook.permission_hook import ToolPermissionHook
@@ -36,7 +37,7 @@ class WorkspaceContext:
         workspace: str,
         metrics_db_path: str,
         *,
-        _shared_contexts: dict[str, "WorkspaceContext"] | None = None,
+        _shared_contexts: dict[str, WorkspaceContext] | None = None,
     ) -> None:
         self._workspace = self._normalize(workspace)
         _, self._workspace_uuid = register_workspace(workspace)
@@ -118,7 +119,7 @@ class WorkspaceContext:
             return self._workspace
         return self._normalize(path)
 
-    def scoped(self, workspace: str) -> "WorkspaceContext":
+    def scoped(self, workspace: str) -> WorkspaceContext:
         resolved = self._normalize(workspace)
         existing = self._scoped_contexts.get(resolved)
         if existing is not None:

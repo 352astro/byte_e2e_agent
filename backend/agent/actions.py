@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import os
 import time
 import uuid as _uuid
 from dataclasses import dataclass
@@ -17,13 +16,13 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError
 
 from agent.core.workspace import Workspace
 from agent.errors import InterruptedError
+from agent.tools import tool_registry
 from agent.tools.browser import (
     BrowserSession,
     open_url,
     reset_active_browser_session,
     set_active_browser_session,
 )
-from agent.tools import tool_registry
 from agent.tools.result import ToolResult
 from agent.tools.toolset import ToolSet
 from shared.hooks import HookManager
@@ -145,7 +144,7 @@ def _model_error_detail(exc: Exception) -> str:
 async def _sleep_or_interrupt(delay: float, interrupt_event: asyncio.Event) -> None:
     try:
         await asyncio.wait_for(interrupt_event.wait(), timeout=delay)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return
     raise InterruptedError("Interrupted during model retry backoff")
 

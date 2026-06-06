@@ -92,7 +92,7 @@ class Workspace:
         d.mkdir(parents=True, exist_ok=True)
         return d
 
-    def save_session_config(self, session_id: str, config: "SessionConfig") -> None:
+    def save_session_config(self, session_id: str, config: SessionConfig) -> None:
         from dataclasses import asdict
 
         self.ensure_dirs(session_id)
@@ -224,7 +224,7 @@ class Workspace:
             if proc.returncode and proc.returncode != 0:
                 parts.append(f"[exit code: {proc.returncode}]")
             return "\n".join(parts) if parts else "(no output)"
-        except asyncio.TimeoutError:
+        except TimeoutError:
             try:
                 if proc is not None:
                     self._kill_process_group(proc)

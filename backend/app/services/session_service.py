@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import uuid
-import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from agent.core.config import SessionConfig
-from agent.core.config import ToolSetPreset
-from agent.tools import tool_registry
+from agent.core.config import SessionConfig, ToolSetPreset
 from agent.core.workspace import Workspace as CoreWorkspace
 from agent.llm import get_model_id
 from agent.session import clear
+from agent.tools import tool_registry
 from agent.tools.browser import close_browser_session
 from app.schemas.session import CreateSessionRequest
 from app.services.context import WorkspaceContext
@@ -128,7 +127,7 @@ class SessionService:
                             "parent_tool_call_id", ""
                         ),
                         "updated_at": datetime.fromtimestamp(
-                            mtime, tz=timezone.utc
+                            mtime, tz=UTC
                         ).isoformat(),
                     },
                 )

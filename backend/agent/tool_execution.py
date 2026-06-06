@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 import uuid as _uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Literal
+from pathlib import Path
+from typing import Literal
 
 from agent.actions import execute_one_tool
 from agent.core.workspace import Workspace

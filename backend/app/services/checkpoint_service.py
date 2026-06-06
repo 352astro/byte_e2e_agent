@@ -9,7 +9,6 @@ from app.services.errors import CommitNotFound, SessionNotFound
 from app.services.session_scope import SessionLocator
 from app.services.session_service import SessionService
 
-
 _SUBAGENT_RESULT_RE = re.compile(r"SubAgent session ([A-Za-z0-9_-]+) completed")
 
 

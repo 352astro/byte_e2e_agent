@@ -7,8 +7,8 @@ Linux uses Landlock in the child process before exec. macOS uses
 from __future__ import annotations
 
 import os
-import shutil
 import shlex
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -313,7 +313,7 @@ def external_path_mode_for_rule(
 
 def _fail(message: str) -> None:
     try:
-        os.write(2, f"[sysguard] {message}\n".encode("utf-8"))
+        os.write(2, f"[sysguard] {message}\n".encode())
     except Exception:
         pass
     os._exit(126)

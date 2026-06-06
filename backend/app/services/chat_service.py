@@ -6,7 +6,6 @@ import asyncio
 from dataclasses import dataclass
 
 from agent.hook.stream_driver import StreamDriverHook
-from agent.session import Session
 from app.services.context import WorkspaceContext
 from app.services.errors import AgentBusy, PendingRequestNotFound, SessionNotFound
 from app.services.session_scope import SessionLocator
@@ -16,7 +15,7 @@ from shared.types import StreamEvent
 @dataclass
 class ActiveStream:
     driver: StreamDriverHook
-    queue: "asyncio.Queue[StreamEvent | None]"
+    queue: asyncio.Queue[StreamEvent | None]
 
 
 @dataclass

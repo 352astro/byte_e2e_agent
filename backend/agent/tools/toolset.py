@@ -73,7 +73,7 @@ class ToolSet:
             raise ValueError(f"Invalid JSON arguments for {name}: {exc}")
         return tool, args
 
-    def without(self, *names: str) -> "ToolSet":
+    def without(self, *names: str) -> ToolSet:
         """返回排除指定工具的新 ToolSet。"""
         result = ToolSet.__new__(ToolSet)
         result._tools = {

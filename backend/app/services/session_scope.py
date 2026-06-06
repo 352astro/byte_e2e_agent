@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -103,7 +103,7 @@ def read_session_metadata(scope: SessionScope) -> dict[str, Any]:
 
 
 def write_session_metadata(scope: SessionScope) -> None:
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     existing = read_session_metadata(scope)
     payload = {
         **existing,

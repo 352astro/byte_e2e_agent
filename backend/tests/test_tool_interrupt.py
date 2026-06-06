@@ -108,6 +108,7 @@ class TestShellExecution:
         not timeout (would take 5s).
         """
         import time
+
         from agent.core.workspace import Workspace
 
         handler = _get_handler("Shell")
@@ -134,6 +135,7 @@ class TestShellExecution:
         was the interrupt (fast return) not timeout (5s).
         """
         import time
+
         from agent.core.workspace import Workspace
 
         handler = _get_handler("Shell")

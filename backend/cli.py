@@ -25,9 +25,9 @@ from agent.core.workspace import Workspace  # noqa: E402
 from agent.hook.logging_hook import LoggingHook  # noqa: E402
 from agent.llm import get_model_id  # noqa: E402
 from agent.runtime import AgentRuntime  # noqa: E402
-from shared.hooks import HookManager  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.services.workspace_registry import register_workspace  # noqa: E402
+from shared.hooks import HookManager  # noqa: E402
 
 # ── ANSI ──────────────────────────────────────────────────
 

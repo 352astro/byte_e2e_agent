@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import uuid as _uuid
-from typing import Callable
+from collections.abc import Callable
 
 from shared.types import Message, MessageRole, ToolExecutionStatus
 

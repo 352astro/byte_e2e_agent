@@ -28,7 +28,7 @@ class MetricsHook(BaseHook):
 
     def __init__(
         self,
-        store: "SQLiteLLMMetricsStore",
+        store: SQLiteLLMMetricsStore,
         model_id: str = "",
         workspace_root: str = "",
     ) -> None:

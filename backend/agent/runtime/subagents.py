@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid as _uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from agent.core.config import SessionConfig, ToolSetPreset
 from agent.core.workspace import Workspace
@@ -36,7 +36,7 @@ def write_subagent_metadata(
     task: str,
 ) -> None:
     path = workspace.session_dir(session_id) / "session.json"
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     existing = {}
     if path.is_file():
         try:

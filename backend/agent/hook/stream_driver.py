@@ -11,7 +11,7 @@ import json
 import logging
 
 from shared.hooks import BaseHook, GuardCheck
-from shared.types import Message, StreamEvent, StreamEventKind
+from shared.types import Message, StreamEvent
 
 logger = logging.getLogger(__name__)
 

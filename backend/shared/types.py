@@ -128,7 +128,7 @@ class Message(BaseModel):
         self.status = MessageStatus.COMPLETE
 
     @classmethod
-    def user_message(cls, id: str, turn_id: str, content: str) -> "Message":
+    def user_message(cls, id: str, turn_id: str, content: str) -> Message:
         """工厂：用户消息。"""
         return cls(
             id=id,
@@ -139,7 +139,7 @@ class Message(BaseModel):
         )
 
     @classmethod
-    def assistant_message(cls, id: str, turn_id: str) -> "Message":
+    def assistant_message(cls, id: str, turn_id: str) -> Message:
         """工厂：assistant 消息（流式开始）。"""
         return cls(
             id=id,
@@ -159,7 +159,7 @@ class Message(BaseModel):
         tool_status: str = ToolExecutionStatus.SUCCESS.value,
         tool_status_source: str = "tool",
         tool_status_reason: str = "",
-    ) -> "Message":
+    ) -> Message:
         """工厂：工具执行结果消息。"""
         return cls(
             id=id,
@@ -180,7 +180,7 @@ class Message(BaseModel):
         id: str,
         turn_id: str,
         error: str,
-    ) -> "Message":
+    ) -> Message:
         """工厂：错误消息。"""
         return cls(
             id=id,
@@ -196,7 +196,7 @@ class Message(BaseModel):
         id: str,
         turn_id: str,
         content: str,
-    ) -> "Message":
+    ) -> Message:
         """工厂：系统消息（append-only 上下文注入）。"""
         return cls(
             id=id,
@@ -267,7 +267,7 @@ class StreamEvent(BaseModel):
         message_id: str,
         role: str = "assistant",
         session_id: str = "",
-    ) -> "StreamEvent":
+    ) -> StreamEvent:
         return cls(
             kind=StreamEventKind.MESSAGE_START,
             session_id=session_id,
@@ -286,7 +286,7 @@ class StreamEvent(BaseModel):
         tool_index: int = -1,
         sub_field: str = "",
         session_id: str = "",
-    ) -> "StreamEvent":
+    ) -> StreamEvent:
         return cls(
             kind=StreamEventKind.CHUNK_DELTA,
             session_id=session_id,
@@ -311,7 +311,7 @@ class StreamEvent(BaseModel):
         tool_status_source: str = "",
         tool_status_reason: str = "",
         session_id: str = "",
-    ) -> "StreamEvent":
+    ) -> StreamEvent:
         return cls(
             kind=StreamEventKind.CHUNK_COMPLETE,
             session_id=session_id,
@@ -329,7 +329,7 @@ class StreamEvent(BaseModel):
     @classmethod
     def message_finish(
         cls, message_id: str, session_id: str = "", usage: dict | None = None
-    ) -> "StreamEvent":
+    ) -> StreamEvent:
         return cls(
             kind=StreamEventKind.MESSAGE_FINISH,
             session_id=session_id,
@@ -346,7 +346,7 @@ class StreamEvent(BaseModel):
         input_tokens: int = 0,
         output_tokens: int = 0,
         session_id: str = "",
-    ) -> "StreamEvent":
+    ) -> StreamEvent:
         return cls(
             kind=StreamEventKind.TURN_COMPLETE,
             session_id=session_id,
@@ -356,7 +356,7 @@ class StreamEvent(BaseModel):
         )
 
     @classmethod
-    def interrupted(cls, reason: str, session_id: str = "") -> "StreamEvent":
+    def interrupted(cls, reason: str, session_id: str = "") -> StreamEvent:
         return cls(
             kind=StreamEventKind.INTERRUPTED,
             session_id=session_id,
@@ -369,7 +369,7 @@ class StreamEvent(BaseModel):
         request_id: str,
         full_content: str,
         session_id: str = "",
-    ) -> "StreamEvent":
+    ) -> StreamEvent:
         return cls(
             kind=StreamEventKind.GUARD_REQUEST,
             session_id=session_id,
@@ -394,7 +394,7 @@ class StreamEvent(BaseModel):
         session_id: str = "",
         turn_id: str = "",
         message_id: str = "",
-    ) -> "StreamEvent":
+    ) -> StreamEvent:
         return cls(
             kind=StreamEventKind.RUNTIME_NOTICE,
             session_id=session_id,

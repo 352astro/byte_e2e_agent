@@ -34,7 +34,7 @@ edit_tool = StructuredTool.from_function(
 # ── Helpers (used by Workspace.edit_file) ──────────────
 
 
-def _fuzzy_replace(content: str, old_text: str, new_text: str) -> "tuple[str, bool]":
+def _fuzzy_replace(content: str, old_text: str, new_text: str) -> tuple[str, bool]:
     if old_text in content:
         return content.replace(old_text, new_text, 1), True
     old_lines = old_text.splitlines()

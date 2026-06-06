@@ -54,7 +54,7 @@ class AskUserInput(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_shape(self) -> "AskUserInput":
+    def validate_shape(self) -> AskUserInput:
         if not self.choices and not self.questions:
             raise ValueError("AskUser requires at least one choice or question")
         return self

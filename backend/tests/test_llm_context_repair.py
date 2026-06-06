@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from shared.types import Message, MessageStatus, ToolCall, ToolCallFunction
 from agent.session._data import _build_llm_context
+from shared.types import Message, MessageStatus, ToolCall, ToolCallFunction
 
 
 def _assistant(mid: str = "a1") -> Message:

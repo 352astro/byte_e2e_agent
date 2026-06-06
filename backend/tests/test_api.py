@@ -11,16 +11,12 @@ Tests cover:
 
 from __future__ import annotations
 
-import json
-import time
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.dependencies import get_chat_service
 from main import app
-from shared.types import Message, MessageRole, MessageStatus, ToolCall, ToolCallFunction
 
 client = TestClient(app)
 

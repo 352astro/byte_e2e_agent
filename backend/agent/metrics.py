@@ -7,12 +7,11 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
 import threading
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -668,7 +667,7 @@ class SQLiteLLMMetricsStore:
 
 
 def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def usage_to_dict(value: Any) -> dict[str, Any] | None:

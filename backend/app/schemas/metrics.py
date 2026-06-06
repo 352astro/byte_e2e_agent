@@ -55,7 +55,7 @@ class LLMSummaryResponse(BaseModel):
 
 class LLMDashboardResponse(BaseModel):
     summary: LLMSummaryResponse
-    by_model: list["LLMModelBreakdown"]
+    by_model: list[LLMModelBreakdown]
     recent_calls: list[LLMCallItem]
 
 

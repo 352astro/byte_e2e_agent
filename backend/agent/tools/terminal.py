@@ -11,9 +11,9 @@ import sys
 import tempfile
 import time
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
 
 if sys.platform != "win32":
     import termios

@@ -1,8 +1,7 @@
 [project]
-name = "backend"
+name = "byte-e2e-agent"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
+description = "ReAct agent with FastAPI backend — streaming LLM, tool execution, shadow git, long-term memory"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.115.0",
@@ -23,12 +22,43 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "ruff>=0.15.16",
 ]
 
-[tool.uv.workspace]
-members = [
-    "double_pendulum_simulation",
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+exclude = [
+    "tmp",
+    "__pycache__",
+    ".venv",
+    ".pytest_cache",
 ]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "SIM",    # flake8-simplify
+    "UP",     # pyupgrade
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # do not perform function calls in argument defaults
+    "B023",   # loop-bound closure (safe: called before next iteration)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent", "app", "shared"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

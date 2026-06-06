@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
 # ═══════════════════════════════════════════════════════════
 # AgentConfig — LLM 调用配置
@@ -24,7 +23,7 @@ class AgentConfig:
     temperature: float = 0.0
     max_tokens: int | None = None
 
-    def with_model(self, model_id: str) -> "AgentConfig":
+    def with_model(self, model_id: str) -> AgentConfig:
         """返回使用指定模型的新配置。"""
         return AgentConfig(
             model_id=model_id,
@@ -106,11 +105,11 @@ class Owner:
         self.session_id = session_id
 
     @classmethod
-    def user(cls) -> "Owner":
+    def user(cls) -> Owner:
         return cls(kind="user")
 
     @classmethod
-    def session(cls, session_id: str) -> "Owner":
+    def session(cls, session_id: str) -> Owner:
         return cls(kind="session", session_id=session_id)
 
     def __eq__(self, other: object) -> bool:
@@ -191,7 +190,7 @@ class AccessPolicy:
         return False
 
     @classmethod
-    def user_default(cls) -> "AccessPolicy":
+    def user_default(cls) -> AccessPolicy:
         """用户主 Session 的默认访问策略。"""
         return cls(
             owner=Owner.user(),
@@ -201,7 +200,7 @@ class AccessPolicy:
         )
 
     @classmethod
-    def subagent(cls, parent_id: str) -> "AccessPolicy":
+    def subagent(cls, parent_id: str) -> AccessPolicy:
         """子 Agent 的默认访问策略。"""
         return cls(
             owner=Owner.session(parent_id),
@@ -249,7 +248,7 @@ class SessionConfig:
         rules: list[str] | None = None,
         tool_set_preset: ToolSetPreset = ToolSetPreset.ALL,
         custom_tools: list[str] | None = None,
-    ) -> "SessionConfig":
+    ) -> SessionConfig:
         """用户主 Session 的工厂方法。"""
         return cls(
             name=name,
@@ -271,7 +270,7 @@ class SessionConfig:
         model_id: str,
         preamble: str = "",
         tool_set_preset: ToolSetPreset = ToolSetPreset.ALL,
-    ) -> "SessionConfig":
+    ) -> SessionConfig:
         """子 Agent Session 的工厂方法。"""
         return cls(
             name=name,

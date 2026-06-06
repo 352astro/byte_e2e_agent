@@ -363,7 +363,7 @@ class MemoryHook(BaseHook):
                 asyncio.to_thread(_sync_call),
                 timeout=self._llm_timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "MemoryHook: LLM call timed out after %.1fs", self._llm_timeout
             )

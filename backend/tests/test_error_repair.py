@@ -8,8 +8,6 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
-
 from agent.errors.repair import (
     _find_unpaired_messages,
     repair_messages,

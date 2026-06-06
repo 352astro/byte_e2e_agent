@@ -10,7 +10,6 @@ Covers:
 from __future__ import annotations
 
 import json
-import os
 import tempfile
 from pathlib import Path
 
@@ -27,7 +26,6 @@ from agent.core.config import (
     Visibility,
 )
 from agent.core.workspace import BYTE_AGENT_DIR, Workspace
-from agent.core.workspace import Workspace as Workspace
 from agent.session.entry import SessionEntry
 from agent.session.status import RuntimeStatus, SessionStatus
 

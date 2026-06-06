@@ -4,12 +4,12 @@
 ToolSet 从 registry 构建子集。
 """
 
+from agent.tools.ask_user import ask_user_tool
 from agent.tools.browser import (
     browser_act_tool,
     browser_inspect_tool,
     browser_open_tool,
 )
-from agent.tools.ask_user import ask_user_tool
 from agent.tools.edit import edit_tool
 from agent.tools.glob import glob_tool
 from agent.tools.grep import grep_tool

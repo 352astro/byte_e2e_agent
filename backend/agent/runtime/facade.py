@@ -340,7 +340,7 @@ class AgentRuntime:
         if task is not None:
             try:
                 await asyncio.wait_for(task, timeout=3.0)
-            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+            except (TimeoutError, asyncio.CancelledError, Exception):
                 pass
         return True
 
