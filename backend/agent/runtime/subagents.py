@@ -184,3 +184,131 @@ async def invoke_subagent(
         parent_tool_call_id=parent_tool_call_id,
     )
     return f"SubAgent session {child_id} completed.\n\n{result}"
+
+
+# ═══════════════════════════════════════════════════════════
+# run_subagent — standalone subagent loop (moved from actions.py)
+# ═══════════════════════════════════════════════════════════
+
+
+async def run_subagent(
+    ws,
+    toolset,
+    prompt: str,
+    max_steps: int,
+    *,
+    openai_client=None,
+    model_id: str = "",
+    session_id: str,
+    interrupt_event,
+    with_skills: list[str] | None = None,
+    system_extra: str | None = None,
+    hook_manager=None,
+    human_input_requester=None,
+) -> str:
+    """Run a sub-agent within the same session from a blank context."""
+    import uuid as _uuid
+
+    from agent.llm_call import model_call
+    from agent.tool_execution import execute_one_tool
+    from agent.tools.skill import get_skill
+
+    subagent_tools = toolset.without(
+        "SubAgent", "BrowserInspect", "TaskList", "TaskRewrite"
+    ).openai_tools
+
+    subagent_messages: list[dict] = [
+        {
+            "role": "system",
+            "content": (
+                "You are a sub-agent. Complete the assigned task and return a final answer."
+            ),
+        },
+    ]
+
+    if with_skills:
+        for skill_name in with_skills:
+            skill = get_skill(skill_name)
+            if skill is not None:
+                subagent_messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            f"[SKILL: {skill_name}]\n\n"
+                            f"The following skill methodology is pre-loaded "
+                            f"into your context. Follow it exactly.\n\n"
+                            f"{skill.read()}"
+                        ),
+                    }
+                )
+
+    if system_extra:
+        subagent_messages.append({"role": "system", "content": system_extra})
+
+    subagent_messages.append({"role": "user", "content": prompt})
+
+    last_answer = ""
+
+    for _ in range(max_steps):
+        if interrupt_event.is_set():
+            break
+
+        stream_id = _uuid.uuid4().hex
+
+        msg, finish_reason = await model_call(
+            openai_client,
+            model_id,
+            session_id,
+            subagent_messages,
+            subagent_tools,
+            message_id=stream_id,
+            turn_id=stream_id,
+            interrupt_event=interrupt_event,
+            hook_manager=hook_manager,
+        )
+
+        content = msg.content
+        tool_calls = [tc.model_dump() for tc in msg.tool_calls] if msg.tool_calls else []
+
+        if content:
+            last_answer = content
+
+        if finish_reason == "stop" or not tool_calls:
+            break
+
+        subagent_messages.append(
+            {
+                "role": "assistant",
+                "content": content or None,
+                "tool_calls": tool_calls,
+                **({"reasoning_content": msg.reasoning} if msg.reasoning else {}),
+            }
+        )
+
+        for tc in tool_calls:
+            if interrupt_event.is_set():
+                break
+            result = await execute_one_tool(
+                tc,
+                ws,
+                toolset,
+                interrupt_event=interrupt_event,
+                openai_client=openai_client,
+                model_id=model_id,
+                session_id=session_id,
+                hook_manager=hook_manager,
+                human_input_requester=human_input_requester,
+            )
+            subagent_messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": result.output,
+                }
+            )
+
+    return (
+        f"SubAgent completed. Result: {last_answer}"
+        if last_answer
+        else "SubAgent completed (no output)."
+    )

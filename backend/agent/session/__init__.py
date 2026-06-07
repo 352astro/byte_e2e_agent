@@ -4,14 +4,14 @@
 """
 
 from agent.core.config import SessionConfig
-from agent.session._data import (
+from agent.session.session import (
     Session,
     clear,
     get_history,
     load_session,
     write_session_prefix,
 )
-from agent.session.entry import SessionEntry
+from agent.session.session_entry import SessionEntry
 from agent.session.status import RuntimeStatus, SessionStatus
 
 __all__ = [

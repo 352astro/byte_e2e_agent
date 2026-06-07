@@ -1,24 +1,32 @@
 """Tool call execution orchestration.
 
-This module owns guard checks, effect-based batching, tool-result message
-construction, and interrupt-aware parallel execution. The low-level execution
-of a single tool remains in agent.actions.execute_one_tool().
+Owns guard checks, effect-based batching, tool-result message
+construction, interrupt-aware parallel execution, and single-tool dispatch
+(SubAgent / BrowserInspect inlined).
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 import uuid as _uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from agent.actions import execute_one_tool
 from agent.core.workspace import Workspace
 from agent.errors import InterruptedError
+from agent.tools import tool_registry
+from agent.tools.browser import (
+    BrowserSession,
+    open_url,
+    reset_active_browser_session,
+    set_active_browser_session,
+)
+from agent.tools.result import ToolResult
 from agent.tools.toolset import ToolSet
 from shared.hooks import GuardCheck, GuardDecision, HookManager
 from shared.types import Message, ToolCall
@@ -578,7 +586,7 @@ def _external_candidate_path(
     value: str,
     mode: Literal["readonly", "readwrite"],
 ) -> Path | None:
-    from agent.utils import sysguard
+    from agent.utils import sandbox
 
     raw = Path(value).expanduser()
     resolved = raw.resolve() if raw.is_absolute() else (ws.root / raw).resolve()
@@ -587,9 +595,9 @@ def _external_candidate_path(
         return None
     except ValueError:
         pass
-    if sysguard.is_path_allowed(str(resolved), mode, workspace_uuid=ws.uuid):
+    if sandbox.is_path_allowed(str(resolved), mode, workspace_uuid=ws.uuid):
         return None
-    if sysguard._overlaps_project_root(resolved):
+    if sandbox._overlaps_project_root(resolved):
         return None
     return resolved
 
@@ -605,13 +613,13 @@ async def _ask_shell_sysguard_if_needed(
     sysguard_asks: SysguardAskTracker,
     workspace_uuid: str,
 ) -> bool | None:
-    from agent.utils import sysguard
+    from agent.utils import sandbox
 
     command = _shell_command_from_args(info.args)
     if not command:
         return None
-    rule = sysguard.detect_command_rule(command)
-    if rule is None or sysguard.is_path_allowed(
+    rule = sandbox.detect_command_rule(command)
+    if rule is None or sandbox.is_path_allowed(
         rule.path,
         workspace_uuid=workspace_uuid,
     ):
@@ -740,3 +748,166 @@ def _shell_command_from_args(args: str) -> str:
         return ""
     command = data.get("command")
     return command if isinstance(command, str) else ""
+
+
+# ═══════════════════════════════════════════════════════════
+# execute_one_tool — single tool dispatch (moved from actions.py)
+# ═══════════════════════════════════════════════════════════
+
+
+@dataclass
+class ToolExecutionResult:
+    output: str
+    status: str = "success"
+    source: str = "tool"
+    reason: str = ""
+    metadata: dict[str, Any] | None = None
+
+    def __str__(self) -> str:
+        return self.output
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, str):
+            return self.output == other
+        return super().__eq__(other)
+
+    def __contains__(self, item: object) -> bool:
+        return str(item) in self.output
+
+
+def _coerce_tool_result(result: object) -> ToolExecutionResult:
+    if isinstance(result, ToolExecutionResult):
+        return result
+    if isinstance(result, ToolResult):
+        return ToolExecutionResult(
+            output=result.output,
+            status=result.status,
+            source=result.source,
+            reason=result.reason,
+            metadata=result.metadata,
+        )
+    return ToolExecutionResult(output=str(result))
+
+
+async def execute_one_tool(
+    tc: dict,
+    ws: Workspace,
+    toolset: ToolSet,
+    *,
+    interrupt_event: asyncio.Event,
+    openai_client=None,
+    model_id: str = "",
+    session_id: str = "",
+    hook_manager: HookManager | None = None,
+    agent_invoker=None,
+    human_input_requester=None,
+) -> ToolExecutionResult:
+    """Execute a single tool_call. SubAgent / BrowserInspect dispatched inline."""
+    func_name: str = tc["function"]["name"]
+    func_args: str = tc["function"]["arguments"]
+
+    if interrupt_event.is_set():
+        raise InterruptedError("Interrupted before tool execution")
+
+    try:
+        tool, args = toolset.parse(func_name, func_args)
+    except Exception as exc:
+        return ToolExecutionResult(
+            output=f"Error parsing {func_name}: {exc}",
+            status="error",
+            source="runtime",
+            reason="parse_failed",
+        )
+
+    # ── SubAgent / BrowserInspect: dispatched inline ──
+    if tool.name == "SubAgent":
+        if agent_invoker is not None:
+            result_str = await agent_invoker(
+                prompt=args.get("prompt", ""),
+                max_steps=args.get("max_steps", 5),
+                with_skills=args.get("with_skills", []),
+                tool_call_id=tc.get("id", ""),
+            )
+        else:
+            from agent.runtime.subagents import run_subagent
+
+            result_str = await run_subagent(
+                ws,
+                toolset,
+                prompt=args.get("prompt", ""),
+                max_steps=args.get("max_steps", 5),
+                openai_client=openai_client,
+                model_id=model_id,
+                session_id=session_id,
+                interrupt_event=interrupt_event,
+                with_skills=args.get("with_skills", []),
+                hook_manager=hook_manager,
+                human_input_requester=human_input_requester,
+            )
+    elif tool.name == "BrowserInspect":
+        browser_toolset = ToolSet(tool_registry, "BrowserOpen", "BrowserAct")
+        inspect_url = args.get("url", "")
+        browser_session = BrowserSession()
+        token = set_active_browser_session(browser_session)
+        try:
+            open_result = await open_url(inspect_url, max_bytes=20_000)
+
+            from agent.runtime.subagents import run_subagent
+
+            result_str = await run_subagent(
+                ws,
+                browser_toolset,
+                prompt=args.get("prompt", ""),
+                max_steps=args.get("max_steps", 8),
+                openai_client=openai_client,
+                model_id=model_id,
+                session_id=session_id,
+                interrupt_event=interrupt_event,
+                hook_manager=hook_manager,
+                system_extra=(
+                    "You are a browser inspection sub-agent. Your toolset "
+                    "contains ONLY browser tools (BrowserOpen, BrowserAct). "
+                    f"The page has already been opened at: {inspect_url}\n"
+                    "Do not call BrowserOpen unless you must navigate to a "
+                    "different page. Inspect the current page and report what "
+                    "you see. Keep your reasoning extremely brief — one short "
+                    "sentence at most."
+                    "\n\nInitial page state:\n"
+                    f"{open_result}"
+                ),
+                human_input_requester=human_input_requester,
+            )
+        finally:
+            reset_active_browser_session(token)
+            await browser_session.close()
+    else:
+        try:
+            call_args = dict(args)
+            for meta_name, meta_value in (
+                ("ws", ws),
+                ("session_id", session_id),
+                ("interrupt_event", interrupt_event),
+                ("human_input_requester", human_input_requester),
+            ):
+                if _accepts_kwarg(tool.coroutine, meta_name):
+                    call_args[meta_name] = meta_value
+            result_str = await tool.coroutine(**call_args)
+        except InterruptedError:
+            raise
+        except Exception as exc:
+            return ToolExecutionResult(
+                output=f"Error: {exc}",
+                status="error",
+                source="tool",
+                reason=str(exc),
+            )
+
+    return _coerce_tool_result(result_str)
+
+
+def _accepts_kwarg(fn, name: str) -> bool:
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except TypeError, ValueError:
+        return False
+    return any(p.kind == inspect.Parameter.VAR_KEYWORD or p.name == name for p in params)

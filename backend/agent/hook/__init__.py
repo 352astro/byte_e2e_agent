@@ -15,7 +15,7 @@ from agent.hook.logging_hook import LoggingHook
 from agent.hook.metrics_hook import MetricsHook
 from agent.hook.persistence_hook import PersistenceHook
 from agent.hook.shadow_commit_hook import ShadowCommitHook
-from agent.hook.stream_driver import StreamDriverHook
+from agent.hook.stream_hook import StreamDriverHook
 from agent.memory import MemoryHook
 
 __all__ = [

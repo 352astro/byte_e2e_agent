@@ -20,8 +20,8 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from agent.tools.result import ToolResult
-from agent.tools.terminal import PersistentTerminal
-from agent.utils import sysguard
+from agent.utils.terminal import PersistentTerminal
+from agent.utils import sandbox
 
 _PLATFORM_MAP = {"linux": "Linux", "darwin": "macOS", "win32": "Windows"}
 _PERMISSION_DENIED_PATH_RE = re.compile(r"(?P<path>/[^\s:'\"]+):\s+Permission denied")
@@ -315,11 +315,11 @@ def _external_denial_candidate(path: str, *, readwrite: bool) -> dict | None:
     rule_path = _nearest_rule_path(resolved, readwrite=readwrite)
     if rule_path is None:
         return None
-    if sysguard._overlaps_project_root(resolved):
+    if sandbox._overlaps_project_root(resolved):
         return None
-    if sysguard._overlaps_project_root(rule_path):
+    if sandbox._overlaps_project_root(rule_path):
         return None
-    if sysguard.is_path_allowed(str(resolved), mode):
+    if sandbox.is_path_allowed(str(resolved), mode):
         return None
     return {
         "label": "Shell external path",

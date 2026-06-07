@@ -418,7 +418,6 @@ def write_session_prefix(ws: Workspace, session_id: str, config: SessionConfig) 
     from agent.core.prompts import SYSTEM_PROMPT
     from agent.tools.shell import get_platform_hint
     from agent.tools.skill import get_skill, skill_context_message
-    from app.core.config import AGENT_DATA_DIR
 
     turn_id = _uuid.uuid4().hex
 
@@ -428,16 +427,6 @@ def write_session_prefix(ws: Workspace, session_id: str, config: SessionConfig) 
             _uuid.uuid4().hex,
             turn_id,
             f"## Platform\n{get_platform_hint()}",
-        ),
-        Message.system_message(
-            _uuid.uuid4().hex,
-            turn_id,
-            (
-                f"## System Directory\n"
-                f"The `{AGENT_DATA_DIR}/` directory at the project root is managed by "
-                f"the system for internal storage. "
-                f"Do NOT read, edit, create, or delete files under `{AGENT_DATA_DIR}`."
-            ),
         ),
         Message.system_message(_uuid.uuid4().hex, turn_id, skill_context_message()["content"]),
     ]

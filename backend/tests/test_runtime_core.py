@@ -32,7 +32,7 @@ from agent.core.workspace import Workspace
 
 # Import under test
 from agent.runtime import AgentRuntime
-from agent.session.entry import SessionEntry
+from agent.session.session_entry import SessionEntry
 from agent.session.status import RuntimeStatus, SessionStatus
 from shared.hooks import HookManager
 

@@ -18,14 +18,14 @@ import uuid as _uuid
 
 from agent.core.config import SessionConfig
 from agent.core.workspace import Workspace
-from agent.runtime.driver import execute_turn
+from agent.runtime.turn import execute_turn
 from agent.runtime.messages import (
     emit_error_message,
     finish_partial_streaming_message,
 )
-from agent.runtime.pending import ask_guard, ask_user_input, resolve
+from agent.runtime.guard import ask_guard, ask_user_input, resolve
 from agent.runtime.subagents import invoke_agent, invoke_subagent
-from agent.session.entry import SessionEntry
+from agent.session.session_entry import SessionEntry
 from agent.session.status import RuntimeStatus, SessionStatus
 from shared.hooks import HookManager
 from shared.types import Message

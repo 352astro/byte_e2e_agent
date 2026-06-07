@@ -143,9 +143,9 @@ class Workspace:
             resolved.relative_to(self.root)
         except ValueError:
             if external_mode is not None:
-                from agent.utils import sysguard
+                from agent.utils import sandbox
 
-                if sysguard.is_path_allowed(
+                if sandbox.is_path_allowed(
                     str(resolved),
                     external_mode,
                     workspace_uuid=self.uuid,

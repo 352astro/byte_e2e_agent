@@ -803,7 +803,7 @@ class TestBrowserInspectExecution:
     @pytest.mark.asyncio
     async def test_dispatch_uses_ephemeral_browser_session(self, tmp_path):
         """BrowserInspect creates and closes an isolated browser scope."""
-        from agent.actions import execute_one_tool
+        from agent.tool_execution import execute_one_tool
         from agent.core.workspace import Workspace
 
         closed = False
@@ -814,11 +814,11 @@ class TestBrowserInspectExecution:
                 closed = True
 
         with (
-            patch("agent.actions.BrowserSession", return_value=FakeBrowserSession()),
-            patch("agent.actions.set_active_browser_session") as set_active,
-            patch("agent.actions.reset_active_browser_session") as reset_active,
-            patch("agent.actions.open_url", AsyncMock(return_value="opened")),
-            patch("agent.actions.run_subagent", AsyncMock(return_value="inspected")),
+            patch("agent.tools.browser.BrowserSession", return_value=FakeBrowserSession()),
+            patch("agent.tools.browser.set_active_browser_session") as set_active,
+            patch("agent.tools.browser.reset_active_browser_session") as reset_active,
+            patch("agent.tools.browser.open_url", AsyncMock(return_value="opened")),
+            patch("agent.runtime.subagents.run_subagent", AsyncMock(return_value="inspected")),
         ):
             set_active.return_value = "token"
             result = await execute_one_tool(
@@ -1006,7 +1006,7 @@ class TestExecuteOneToolInterrupt:
     @pytest.mark.asyncio
     async def test_interrupt_before_any_execution(self):
         """execute_one_tool raises InterruptedError if event is set before dispatch."""
-        from agent.actions import execute_one_tool
+        from agent.tool_execution import execute_one_tool
         from agent.errors import InterruptedError
 
         ws = _make_ws()
@@ -1025,7 +1025,7 @@ class TestExecuteOneToolInterrupt:
     @pytest.mark.asyncio
     async def test_unknown_tool_parse_error(self):
         """execute_one_tool returns error for unknown tool name."""
-        from agent.actions import execute_one_tool
+        from agent.tool_execution import execute_one_tool
 
         ws = _make_ws()
         toolset = ToolSet(tool_registry, "Shell")

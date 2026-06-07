@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from agent.hook.stream_driver import StreamDriverHook
+from agent.hook.stream_hook import StreamDriverHook
 from app.services.context import WorkspaceContext
 from app.services.errors import AgentBusy, PendingRequestNotFound, SessionNotFound
 from app.services.session_scope import SessionLocator

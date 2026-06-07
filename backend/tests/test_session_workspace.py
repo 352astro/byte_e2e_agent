@@ -27,7 +27,7 @@ from agent.core.config import (
     Visibility,
 )
 from agent.core.workspace import BYTE_AGENT_DIR, Workspace
-from agent.session.entry import SessionEntry
+from agent.session.session_entry import SessionEntry
 from agent.session.status import RuntimeStatus, SessionStatus
 
 # ═══════════════════════════════════════════════════════════════════

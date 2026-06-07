@@ -5,12 +5,12 @@ from __future__ import annotations
 import logging
 import uuid as _uuid
 
-from agent.actions import model_call
 from agent.errors import InterruptedError
+from agent.llm_call import model_call
 from agent.runtime.context_builder import build_llm_messages
 from agent.runtime.messages import emit_system_message, extract_usage
 from agent.runtime.tooling import default_toolset
-from agent.session.entry import SessionEntry
+from agent.session.session_entry import SessionEntry
 from agent.session.status import SessionStatus
 from agent.tool_execution import execute_tool_calls
 from agent.tools import tool_registry

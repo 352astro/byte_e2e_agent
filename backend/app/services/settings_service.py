@@ -129,7 +129,7 @@ def _config_path(filename: str) -> Path:
 
 
 def load_sysguard_rules(workspace_uuid: str | None = None) -> dict[str, Any]:
-    from agent.utils.sysguard import list_builtin_rules
+    from agent.utils.sandbox import list_builtin_rules
 
     return {
         "builtin": [rule.__dict__ for rule in list_builtin_rules()],

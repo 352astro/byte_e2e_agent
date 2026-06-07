@@ -1,7 +1,7 @@
 """Unit + integration tests for bwrap sandbox.
 
 Covers:
-- agent/utils/sysguard.py — build_bwrap_cmd (pure function)
+- agent/utils/sandbox.py — build_bwrap_cmd (pure function)
 - agent/tools/terminal.py — PersistentTerminal with bwrap (integration)
 """
 
@@ -15,8 +15,8 @@ from unittest.mock import patch
 
 import pytest
 
-from agent.tools.terminal import PersistentTerminal
-from agent.utils.sysguard import build_bwrap_cmd, bwrap_available
+from agent.utils.terminal import PersistentTerminal
+from agent.utils.sandbox import build_bwrap_cmd, bwrap_available
 
 # ═══════════════════════════════════════════════════════════
 # Helpers
@@ -53,11 +53,11 @@ class TestBuildBwrapCmd:
     def _mock_rules(self):
         with (
             patch(
-                "agent.utils.sysguard._rule_paths_from_environment",
+                "agent.utils.sandbox._rule_paths_from_environment",
                 return_value=[],
             ),
             patch(
-                "agent.utils.sysguard.list_builtin_rules",
+                "agent.utils.sandbox.list_builtin_rules",
                 return_value=[],
             ),
         ):
@@ -125,7 +125,7 @@ class TestBuildBwrapCmd:
 
     def test_toolchain_dirs_are_bind(self):
         """Builtin toolchain dirs (~/.cargo, ~/.local, etc.) get --bind."""
-        from agent.utils.sysguard import SysguardRule
+        from agent.utils.sandbox import SysguardRule
 
         toolchain = [
             SysguardRule(
@@ -142,7 +142,7 @@ class TestBuildBwrapCmd:
             ),
         ]
         with patch(
-            "agent.utils.sysguard.list_builtin_rules",
+            "agent.utils.sandbox.list_builtin_rules",
             return_value=toolchain,
         ):
             cmd = self._cmd("/ws", ["bash"])
@@ -152,7 +152,7 @@ class TestBuildBwrapCmd:
 
     def test_disabled_toolchain_not_bound(self):
         """Disabled toolchain rules are skipped."""
-        from agent.utils.sysguard import SysguardRule
+        from agent.utils.sandbox import SysguardRule
 
         toolchain = [
             SysguardRule(
@@ -163,7 +163,7 @@ class TestBuildBwrapCmd:
             ),
         ]
         with patch(
-            "agent.utils.sysguard.list_builtin_rules",
+            "agent.utils.sandbox.list_builtin_rules",
             return_value=toolchain,
         ):
             cmd = self._cmd("/ws", ["bash"])
@@ -172,7 +172,7 @@ class TestBuildBwrapCmd:
 
     def test_custom_readwrite_is_bind(self):
         with patch(
-            "agent.utils.sysguard._rule_paths_from_environment",
+            "agent.utils.sandbox._rule_paths_from_environment",
             side_effect=lambda mode, workspace_uuid=None: (
                 ["/opt/tools"] if mode == "readwrite" else []
             ),
@@ -183,7 +183,7 @@ class TestBuildBwrapCmd:
 
     def test_custom_readwrite_not_duplicated(self):
         with patch(
-            "agent.utils.sysguard._rule_paths_from_environment",
+            "agent.utils.sandbox._rule_paths_from_environment",
             side_effect=lambda mode, workspace_uuid=None: ["/ws"] if mode == "readwrite" else [],
         ):
             cmd = self._cmd("/ws", ["bash"])

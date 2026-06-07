@@ -21,7 +21,7 @@ if sys.platform != "win32":
 
 import contextlib
 
-from agent.utils import sysguard
+from agent.utils import sandbox
 
 
 @dataclass
@@ -113,8 +113,8 @@ class PersistentTerminal:
 
         shell_cmd = list(self._shell)
         if sys.platform == "darwin":
-            if sysguard.seatbelt_available():
-                profile = sysguard.build_seatbelt_profile(
+            if sandbox.seatbelt_available():
+                profile = sandbox.build_seatbelt_profile(
                     self._sandbox_root,
                     workspace_uuid=env.get("AGENT_WORKSPACE_UUID"),
                 )
@@ -128,12 +128,12 @@ class PersistentTerminal:
                 self._seatbelt_profile_path = tmpf.name
                 shell_cmd = ["sandbox-exec", "-f", tmpf.name, "--", *shell_cmd]
         elif sys.platform == "linux":
-            if not sysguard.bwrap_available():
+            if not sandbox.bwrap_available():
                 raise RuntimeError(
                     "bwrap (bubblewrap) is required for Linux sandbox. "
                     "Install with: apt-get install bubblewrap"
                 )
-            shell_cmd, blackhole = sysguard.build_bwrap_cmd(
+            shell_cmd, blackhole = sandbox.build_bwrap_cmd(
                 self._sandbox_root,
                 self._shell,
                 workspace_uuid=env.get("AGENT_WORKSPACE_UUID"),

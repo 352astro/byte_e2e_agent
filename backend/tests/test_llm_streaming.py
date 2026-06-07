@@ -8,7 +8,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.actions import execute_one_tool, model_call, run_subagent
+from agent.tool_execution import execute_one_tool, model_call, run_subagent
 from agent.core.workspace import Workspace
 from agent.errors import InterruptedError
 from agent.tools import tool_registry
@@ -148,8 +148,8 @@ class TestModelCall:
         interrupt_event = asyncio.Event()
 
         with (
-            patch("agent.actions._is_retriable_model_error", return_value=True),
-            patch("agent.actions._sleep_or_interrupt", new_callable=AsyncMock),
+            patch("agent.llm_call._is_retriable_model_error", return_value=True),
+            patch("agent.llm_call._sleep_or_interrupt", new_callable=AsyncMock),
         ):
             msg, finish_reason = await model_call(
                 client,
@@ -228,7 +228,7 @@ class TestExecuteOneTool:
         toolset = ToolSet(tool_registry, "SubAgent", "Shell")
         interrupt_event = asyncio.Event()
 
-        with patch("agent.actions.run_subagent", new_callable=AsyncMock) as mock_run:
+        with patch("agent.runtime.subagents.run_subagent", new_callable=AsyncMock) as mock_run:
             mock_run.return_value = "subagent result"
             result = await execute_one_tool(
                 {
