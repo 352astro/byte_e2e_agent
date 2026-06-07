@@ -15,8 +15,8 @@ from unittest.mock import patch
 
 import pytest
 
-from agent.utils.terminal import PersistentTerminal
 from agent.utils.sandbox import build_bwrap_cmd, bwrap_available
+from agent.utils.terminal import PersistentTerminal
 
 # ═══════════════════════════════════════════════════════════
 # Helpers
@@ -379,7 +379,7 @@ class TestBwrapTerminal:
         terminal = self._start_terminal(workspace)
         try:
             # Reading /etc/hostname should work (if exists)
-            result = terminal.run("cat /etc/hostname 2>&1 || true", timeout_ms=5000)
+            _result = terminal.run("cat /etc/hostname 2>&1 || true", timeout_ms=5000)
             # Writing MUST fail (read-only)
             result_w = terminal.run("touch /etc/bwrap_test_probe 2>&1 || true", timeout_ms=5000)
             combined = result_w.output.lower()

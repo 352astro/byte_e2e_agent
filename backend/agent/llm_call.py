@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-import uuid as _uuid
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError
 

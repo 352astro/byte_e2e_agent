@@ -8,9 +8,9 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.tool_execution import execute_one_tool, model_call, run_subagent
 from agent.core.workspace import Workspace
 from agent.errors import InterruptedError
+from agent.tool_execution import execute_one_tool, model_call, run_subagent
 from agent.tools import tool_registry
 from agent.tools.toolset import ToolSet
 from shared.hooks import HookManager

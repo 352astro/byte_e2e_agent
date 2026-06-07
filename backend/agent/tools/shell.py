@@ -20,8 +20,8 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from agent.tools.result import ToolResult
-from agent.utils.terminal import PersistentTerminal
 from agent.utils import sandbox
+from agent.utils.terminal import PersistentTerminal
 
 _PLATFORM_MAP = {"linux": "Linux", "darwin": "macOS", "win32": "Windows"}
 _PERMISSION_DENIED_PATH_RE = re.compile(r"(?P<path>/[^\s:'\"]+):\s+Permission denied")

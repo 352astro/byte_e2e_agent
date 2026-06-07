@@ -803,8 +803,8 @@ class TestBrowserInspectExecution:
     @pytest.mark.asyncio
     async def test_dispatch_uses_ephemeral_browser_session(self, tmp_path):
         """BrowserInspect creates and closes an isolated browser scope."""
-        from agent.tool_execution import execute_one_tool
         from agent.core.workspace import Workspace
+        from agent.tool_execution import execute_one_tool
 
         closed = False
 
@@ -1006,8 +1006,8 @@ class TestExecuteOneToolInterrupt:
     @pytest.mark.asyncio
     async def test_interrupt_before_any_execution(self):
         """execute_one_tool raises InterruptedError if event is set before dispatch."""
-        from agent.tool_execution import execute_one_tool
         from agent.errors import InterruptedError
+        from agent.tool_execution import execute_one_tool
 
         ws = _make_ws()
         toolset = ToolSet(tool_registry, "Shell")
