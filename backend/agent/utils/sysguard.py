@@ -140,6 +140,13 @@ def build_bwrap_cmd(
     # Workspace: read-write hole through the ro root
     bcmd.extend(["--bind", sandbox_root, sandbox_root])
 
+    # ── Toolchain directories (home-based, read-write) ──
+    # Tools like cargo / npm / rustup need to write to their cache dirs.
+    # These are detected via ~/.cargo, ~/.rustup, ~/.local, etc. markers.
+    for rule in list_builtin_rules():
+        if rule.enabled and rule.path != sandbox_root:
+            bcmd.extend(["--bind", rule.path, rule.path])
+
     # Custom read-write rules (from user settings)
     for path in _rule_paths_from_environment("readwrite", workspace_uuid):
         if path != sandbox_root:

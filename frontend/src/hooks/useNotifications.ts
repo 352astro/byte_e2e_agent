@@ -17,7 +17,7 @@ interface Notice {
 }
 
 interface UseNotificationsReturn {
-  pendingGuard: GuardRequest | null;
+  pendingGuards: GuardRequest[];
   respondGuard: (
     requestId: string,
     response: Record<string, unknown>,
@@ -33,7 +33,7 @@ const RECONNECT_MAX_MS = 16000;
 export function useNotifications(
   sessionId: string | null,
 ): UseNotificationsReturn {
-  const [pendingGuard, setPendingGuard] = useState<GuardRequest | null>(null);
+  const [pendingGuards, setPendingGuards] = useState<GuardRequest[]>([]);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [connected, setConnected] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
@@ -59,18 +59,20 @@ export function useNotifications(
         });
         if (recoverRes.ok) {
           const data = await recoverRes.json();
-          if (data.pending_guard) {
-            const guard = data.pending_guard as GuardRequest;
+          if (data.pending_guards) {
+            const guards = data.pending_guards as GuardRequest[];
             const currentSid = sessionIdRef.current;
-            if (
-              currentSid &&
-              guard.session_id &&
-              guard.session_id !== currentSid
-            ) {
-              (guard as Record<string, unknown>)._comeFromSid =
-                guard.session_id;
+            for (const guard of guards) {
+              if (
+                currentSid &&
+                guard.session_id &&
+                guard.session_id !== currentSid
+              ) {
+                (guard as Record<string, unknown>)._comeFromSid =
+                  guard.session_id;
+              }
             }
-            setPendingGuard(guard);
+            setPendingGuards(guards);
           }
           if (data.notices) {
             const now = Date.now();
@@ -123,7 +125,18 @@ export function useNotifications(
                   (guard as Record<string, unknown>)._comeFromSid =
                     guard.session_id;
                 }
-                setPendingGuard(guard);
+                setPendingGuards((prev) => {
+                  // Replace guard with same request_id, or append
+                  const idx = prev.findIndex(
+                    (g) => g.request_id === guard.request_id,
+                  );
+                  if (idx >= 0) {
+                    const next = [...prev];
+                    next[idx] = guard;
+                    return next;
+                  }
+                  return [...prev, guard];
+                });
               } else if (ev.kind === "runtime_notice") {
                 const notice: Notice = {
                   id: ev.notice_id || "",
@@ -223,7 +236,9 @@ export function useNotifications(
         });
         if (!res.ok) throw new Error(`Server returned ${res.status}`);
       } finally {
-        setPendingGuard(null);
+        setPendingGuards((prev) =>
+          prev.filter((g) => g.request_id !== requestId),
+        );
       }
     },
     [],
@@ -240,7 +255,7 @@ export function useNotifications(
   }, []);
 
   return {
-    pendingGuard,
+    pendingGuards,
     respondGuard,
     notices,
     dismissNotice,

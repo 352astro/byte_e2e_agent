@@ -124,12 +124,17 @@ class AgentRuntime:
         sid = session_id or _uuid.uuid4().hex[:12]
         self._workspace.ensure_dirs(sid)
         self._workspace.save_session_config(sid, config)
-        self._workspace.messages_path(sid).touch(exist_ok=True)
 
         # Write immutable prefix messages (KV-cache anchor) once at creation.
-        from agent.session import write_session_prefix
+        # Skip if the JSONL already has content (e.g. server restart re-loading
+        # an existing session — the prefix was written when the session was
+        # first created).
+        messages_path = self._workspace.messages_path(sid)
+        messages_path.touch(exist_ok=True)
+        if messages_path.stat().st_size == 0:
+            from agent.session import write_session_prefix
 
-        write_session_prefix(self._workspace, sid, config)
+            write_session_prefix(self._workspace, sid, config)
 
         entry = SessionEntry(
             id=sid,

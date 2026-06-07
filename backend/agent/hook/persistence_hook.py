@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,16 @@ class PersistenceHook(BaseHook):
         path = self._messages_path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         record = msg.model_dump(mode="json")
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
-            fh.write("\n")
+        line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+
+        last_exc = None
+        for attempt in range(3):
+            try:
+                with open(path, "a", encoding="utf-8") as fh:
+                    fh.write(line)
+                return
+            except Exception as exc:
+                last_exc = exc
+                if attempt < 2:
+                    time.sleep(0.1)
+        raise last_exc  # type: ignore[misc]

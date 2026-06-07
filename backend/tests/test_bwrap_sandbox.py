@@ -51,9 +51,15 @@ class TestBuildBwrapCmd:
 
     @pytest.fixture(autouse=True)
     def _mock_rules(self):
-        with patch(
-            "agent.utils.sysguard._rule_paths_from_environment",
-            return_value=[],
+        with (
+            patch(
+                "agent.utils.sysguard._rule_paths_from_environment",
+                return_value=[],
+            ),
+            patch(
+                "agent.utils.sysguard.list_builtin_rules",
+                return_value=[],
+            ),
         ):
             yield
 
@@ -116,6 +122,53 @@ class TestBuildBwrapCmd:
         assert cmd[tmpfs_indices[0] + 1] == "/tmp"
 
     # ── Custom rules ─────────────────────────────────────
+
+    def test_toolchain_dirs_are_bind(self):
+        """Builtin toolchain dirs (~/.cargo, ~/.local, etc.) get --bind."""
+        from agent.utils.sysguard import SysguardRule
+
+        toolchain = [
+            SysguardRule(
+                id="test:cargo",
+                label="Cargo",
+                path="/home/user/.cargo",
+                enabled=True,
+            ),
+            SysguardRule(
+                id="test:local",
+                label="Local",
+                path="/home/user/.local",
+                enabled=True,
+            ),
+        ]
+        with patch(
+            "agent.utils.sysguard.list_builtin_rules",
+            return_value=toolchain,
+        ):
+            cmd = self._cmd("/ws", ["bash"])
+        bind_targets = _mount_targets(cmd, "--bind")
+        assert "/home/user/.cargo" in bind_targets
+        assert "/home/user/.local" in bind_targets
+
+    def test_disabled_toolchain_not_bound(self):
+        """Disabled toolchain rules are skipped."""
+        from agent.utils.sysguard import SysguardRule
+
+        toolchain = [
+            SysguardRule(
+                id="test:cargo",
+                label="Cargo",
+                path="/home/user/.cargo",
+                enabled=False,
+            ),
+        ]
+        with patch(
+            "agent.utils.sysguard.list_builtin_rules",
+            return_value=toolchain,
+        ):
+            cmd = self._cmd("/ws", ["bash"])
+        bind_targets = _mount_targets(cmd, "--bind")
+        assert "/home/user/.cargo" not in bind_targets
 
     def test_custom_readwrite_is_bind(self):
         with patch(

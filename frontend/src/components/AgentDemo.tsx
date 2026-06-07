@@ -416,7 +416,7 @@ export default function AgentDemo({
   });
 
   const {
-    pendingGuard,
+    pendingGuards,
     respondGuard,
     notices: globalNotices,
     dismissNotice: dismissGlobalNotice,
@@ -838,7 +838,7 @@ export default function AgentDemo({
         </div>
       </div>
 
-      {(notices.length > 0 || pendingGuard) && (
+      {(notices.length > 0 || pendingGuards.length > 0) && (
         <div
           className="agent-overlay-stack"
           ref={overlayStackRef}
@@ -846,12 +846,13 @@ export default function AgentDemo({
           aria-atomic="false"
         >
           <NoticeHost notices={notices} onDismiss={dismissNotice} />
-          {pendingGuard && (
+          {pendingGuards.map((guard) => (
             <PendingRequestPanel
-              request={pendingGuard}
+              key={guard.request_id}
+              request={guard}
               onRespond={respondGuard}
             />
-          )}
+          ))}
         </div>
       )}
 

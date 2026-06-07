@@ -31,7 +31,7 @@ class NotificationDriverHook(BaseHook):
         self._closed: bool = False
 
         # ── Recoverable state ─────────────────────────
-        self._pending_guard: dict | None = None
+        self._pending_guards: dict[str, dict] = {}  # request_id → payload
         self._notices: list[dict] = []
         self._active_subagents: dict[str, dict] = {}
 
@@ -129,7 +129,7 @@ class NotificationDriverHook(BaseHook):
             allow_custom=bool(check.payload.get("allow_custom", False)),
         )
         payload_dict = model.model_dump(mode="json")
-        self._pending_guard = payload_dict
+        self._pending_guards[request_id] = payload_dict
 
         event = StreamEvent.guard_request(
             request_id,
@@ -260,17 +260,17 @@ class NotificationDriverHook(BaseHook):
     def build_recover_payload(self) -> dict:
         """Return current state for /api/notifications/recover."""
         return {
-            "pending_guard": self._pending_guard,
+            "pending_guards": list(self._pending_guards.values()),
             "notices": self._notices,
             "active_subagents": list(self._active_subagents.values()),
         }
 
     def resolve_guard(self, request_id: str) -> None:
         """Clear pending guard after resolution."""
-        if self._pending_guard and self._pending_guard.get("request_id") == request_id:
-            self._pending_guard = None
+        self._pending_guards.pop(request_id, None)
         # Clear event buffer so reconnecting clients don't replay stale guards
-        self._event_buffers.pop("guard_request", None)
+        if not self._pending_guards:
+            self._event_buffers.pop("guard_request", None)
 
     async def clear_session_state(self, session_id: str) -> None:
         """Clear all pending guards, notices, and event buffers for *session_id*.
@@ -278,9 +278,10 @@ class NotificationDriverHook(BaseHook):
         Called on interrupt / turn end so a page refresh does not show stale
         guard requests or runtime notices.
         """
-        # Clear pending guard if it belongs to this session
-        if self._pending_guard and self._pending_guard.get("session_id") == session_id:
-            self._pending_guard = None
+        # Clear pending guards belonging to this session
+        self._pending_guards = {
+            rid: g for rid, g in self._pending_guards.items() if g.get("session_id") != session_id
+        }
 
         # Remove non-sticky notices for this session
         self._notices = [
