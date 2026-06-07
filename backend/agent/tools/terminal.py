@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import select
+import shutil
 import signal
 import subprocess
 import sys
@@ -60,6 +61,7 @@ class PersistentTerminal:
         self._cwd = ""
         self._sandbox_root = ""
         self._seatbelt_profile_path: str | None = None
+        self._blackhole_dir: str | None = None
         self._last_exit_code = -1
 
     def start(
@@ -126,15 +128,17 @@ class PersistentTerminal:
                 self._seatbelt_profile_path = tmpf.name
                 shell_cmd = ["sandbox-exec", "-f", tmpf.name, "--", *shell_cmd]
         elif sys.platform == "linux":
-            shell_cmd = [
-                sys.executable,
-                "-m",
-                "agent.utils.sysguard_exec",
-                "--workspace",
+            if not sysguard.bwrap_available():
+                raise RuntimeError(
+                    "bwrap (bubblewrap) is required for Linux sandbox. "
+                    "Install with: apt-get install bubblewrap"
+                )
+            shell_cmd, blackhole = sysguard.build_bwrap_cmd(
                 self._sandbox_root,
-                "--",
-                *shell_cmd,
-            ]
+                self._shell,
+                workspace_uuid=env.get("AGENT_WORKSPACE_UUID"),
+            )
+            self._blackhole_dir = blackhole
 
         self._proc = subprocess.Popen(
             shell_cmd,
@@ -193,6 +197,10 @@ class PersistentTerminal:
             with contextlib.suppress(OSError):
                 os.unlink(self._seatbelt_profile_path)
             self._seatbelt_profile_path = None
+        if self._blackhole_dir:
+            with contextlib.suppress(OSError):
+                shutil.rmtree(self._blackhole_dir, ignore_errors=True)
+            self._blackhole_dir = None
 
     @property
     def alive(self) -> bool:

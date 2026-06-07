@@ -58,7 +58,10 @@ byte_e2e_agent/
 | uv | 最新版 | `uv --version` |
 | Node.js | 20+ | `node --version` |
 | npm | 10+ | `npm --version` |
+| bubblewrap | 0.4+ | `bwrap --version` |
 | Chromium | Playwright | `cd backend && uv run playwright install chromium` |
+
+> **bubblewrap** 是 Linux 沙箱依赖，macOS 不需要。安装：`sudo apt-get install bubblewrap`（Debian/Ubuntu）或 `sudo pacman -S bubblewrap`（Arch）。没有 bwrap 时 Shell 工具会报错退出。
 
 ## 快速开始
 

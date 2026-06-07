@@ -308,6 +308,9 @@ async def execute_turn(
             runtime._loop_task = None
         entry.transition_to(SessionStatus.IDLE)
 
+        # Clear notification state so page refresh doesn't show stale guards/notices
+        await runtime._hooks.dispatch("clear_session_state", session_id=sid)
+
         await runtime._hooks.on_turn_end(
             turn_id=turn_id,
             session_id=sid,

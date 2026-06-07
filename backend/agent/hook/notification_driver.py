@@ -271,3 +271,31 @@ class NotificationDriverHook(BaseHook):
             self._pending_guard = None
         # Clear event buffer so reconnecting clients don't replay stale guards
         self._event_buffers.pop("guard_request", None)
+
+    async def clear_session_state(self, session_id: str) -> None:
+        """Clear all pending guards, notices, and event buffers for *session_id*.
+
+        Called on interrupt / turn end so a page refresh does not show stale
+        guard requests or runtime notices.
+        """
+        # Clear pending guard if it belongs to this session
+        if self._pending_guard and self._pending_guard.get("session_id") == session_id:
+            self._pending_guard = None
+
+        # Remove non-sticky notices for this session
+        self._notices = [
+            n for n in self._notices if n.get("session_id") != session_id or n.get("sticky")
+        ]
+
+        # Remove subagents owned by this session
+        to_remove = [
+            sid
+            for sid, info in self._active_subagents.items()
+            if info.get("parent_session_id") == session_id
+        ]
+        for sid in to_remove:
+            self._active_subagents.pop(sid, None)
+
+        # Clear replay buffers so reconnecting SSE clients don't see stale events
+        self._event_buffers.pop("guard_request", None)
+        self._event_buffers.pop("runtime_notice", None)

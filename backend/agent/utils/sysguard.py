@@ -1,22 +1,19 @@
 """Kernel-level sandbox helpers for child processes.
 
-Linux uses Landlock in the child process before exec. macOS uses
-``sandbox-exec`` by wrapping the target command.
+Linux uses bwrap (bubblewrap) to create a mount namespace before exec.
+macOS uses ``sandbox-exec`` by wrapping the target command.
 """
 
 from __future__ import annotations
 
-import contextlib
 import os
 import shlex
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
-
-from landlock.plumbing import FSAccess
-from landlock.porcelain import Ruleset
 
 _READONLY_PATHS = [
     "/usr",
@@ -28,6 +25,7 @@ _READONLY_PATHS = [
     "/dev",
     "/proc",
     "/sys",
+    "/run",
 ]
 
 _READWRITE_DEVICE_PATHS = [
@@ -91,68 +89,65 @@ _BUILTIN_RULE_SPECS = [
 ]
 
 
-def apply(workspace: str) -> None:
-    """Apply the platform sandbox to the current child process."""
-    ws = os.path.abspath(workspace)
-    if sys.platform == "linux":
-        _apply_landlock(ws)
-    elif sys.platform == "darwin":
-        # macOS is handled by wrapping the command with sandbox-exec.
-        return
+def bwrap_available() -> bool:
+    """Check whether bwrap (bubblewrap) is installed on this system."""
+    return shutil.which("bwrap") is not None
 
 
-def _apply_landlock(workspace: str) -> None:
+def build_bwrap_cmd(
+    sandbox_root: str,
+    shell: list[str],
+    workspace_uuid: str | None = None,
+) -> tuple[list[str], str | None]:
+    """Build a bwrap command using mount-namespace isolation.
+
+    Strategy:
+
+    1. ``--ro-bind / /`` — entire host filesystem visible read-only.
+    2. Work‐space (``--bind``) and custom read‐write rules punch
+       read‐write holes through the read‐only root.
+    3. ``PROJECT_ROOT`` is blacklisted: an empty directory is bind‐mounted
+       over it so the agent cannot read its own source code.
+    4. ``/proc``, ``/dev`` are mounted fresh; ``/tmp`` is an isolated tmpfs.
+
+    Returns ``(cmd, cleanup_path)``.  *cleanup_path* is a temporary empty
+    directory created for the blacklist — the caller MUST delete it after
+    the bwrap process exits.
+    """
+    bcmd = ["bwrap"]
+    cleanup_path: str | None = None
+
+    # Entire host filesystem, read-only
+    bcmd.extend(["--ro-bind", "/", "/"])
+
+    # Fresh proc, dev, isolated tmp
+    bcmd.extend(["--proc", "/proc"])
+    bcmd.extend(["--dev", "/dev"])
+    bcmd.extend(["--tmpfs", "/tmp"])
+
+    # ── Blacklist: hide PROJECT_ROOT behind an empty directory ──
     try:
-        rw = (
-            FSAccess.READ_FILE
-            | FSAccess.READ_DIR
-            | FSAccess.WRITE_FILE
-            | FSAccess.TRUNCATE
-            | FSAccess.EXECUTE
-            | FSAccess.REFER
-            | FSAccess.MAKE_REG
-            | FSAccess.MAKE_DIR
-            | FSAccess.MAKE_SYM
-            | FSAccess.MAKE_FIFO
-            | FSAccess.MAKE_SOCK
-            | FSAccess.REMOVE_FILE
-            | FSAccess.REMOVE_DIR
-        )
-        ro = FSAccess.READ_FILE | FSAccess.READ_DIR | FSAccess.REFER
-        ro_exec = ro | FSAccess.EXECUTE
-        external_rw = (
-            FSAccess.READ_FILE
-            | FSAccess.READ_DIR
-            | FSAccess.WRITE_FILE
-            | FSAccess.TRUNCATE
-            | FSAccess.REFER
-            | FSAccess.MAKE_REG
-            | FSAccess.MAKE_DIR
-            | FSAccess.MAKE_SYM
-            | FSAccess.MAKE_FIFO
-            | FSAccess.MAKE_SOCK
-            | FSAccess.REMOVE_FILE
-            | FSAccess.REMOVE_DIR
-        )
-        rw_device = FSAccess.READ_FILE | FSAccess.WRITE_FILE
+        from app.core.config import PROJECT_ROOT
 
-        ruleset = Ruleset()
-        ruleset.allow(workspace, rules=rw)
-        readonly_paths = _rule_paths_from_environment("readonly")
-        readonly_exec_paths = _rule_paths_from_environment("readonly_exec")
-        readwrite_paths = _rule_paths_from_environment("readwrite")
-        if readonly_paths:
-            ruleset.allow(*readonly_paths, rules=ro)
-        if readonly_exec_paths:
-            ruleset.allow(*readonly_exec_paths, rules=ro_exec)
-        if readwrite_paths:
-            ruleset.allow(*readwrite_paths, rules=external_rw)
-        existing_rw_devices = _existing_paths(_READWRITE_DEVICE_PATHS)
-        if existing_rw_devices:
-            ruleset.allow(*existing_rw_devices, rules=rw_device)
-        ruleset.apply()
-    except Exception as exc:
-        _fail(f"Landlock failed: {exc}")
+        project = Path(PROJECT_ROOT).resolve()
+        if project.exists():
+            blackhole = tempfile.mkdtemp(prefix="bwrap_blackhole_")
+            cleanup_path = blackhole
+            bcmd.extend(["--ro-bind", blackhole, str(project)])
+    except Exception:
+        pass  # PROJECT_ROOT not available (e.g. during tests)
+
+    # Workspace: read-write hole through the ro root
+    bcmd.extend(["--bind", sandbox_root, sandbox_root])
+
+    # Custom read-write rules (from user settings)
+    for path in _rule_paths_from_environment("readwrite", workspace_uuid):
+        if path != sandbox_root:
+            bcmd.extend(["--bind", path, path])
+
+    # ── The actual command ───────────────────────────────
+    bcmd.extend(["--", *shell])
+    return bcmd, cleanup_path
 
 
 def build_seatbelt_profile(workspace: str, workspace_uuid: str | None = None) -> str:
@@ -203,7 +198,7 @@ def seatbelt_available() -> bool:
 
 def is_available() -> bool:
     if sys.platform == "linux":
-        return True
+        return bwrap_available()
     if sys.platform == "darwin":
         return seatbelt_available()
     return False
@@ -211,7 +206,7 @@ def is_available() -> bool:
 
 def status() -> str:
     if sys.platform == "linux":
-        return "Landlock configured"
+        return "bwrap available" if bwrap_available() else "bwrap not found (install bubblewrap)"
     if sys.platform == "darwin":
         return "Seatbelt available" if seatbelt_available() else "Seatbelt unavailable"
     return f"{sys.platform} unsupported"
@@ -310,12 +305,6 @@ def external_path_mode_for_rule(
             if best is None or _MODE_LEVEL[mode] > _MODE_LEVEL[best]:
                 best = mode
     return best
-
-
-def _fail(message: str) -> None:
-    with contextlib.suppress(Exception):
-        os.write(2, f"[sysguard] {message}\n".encode())
-    os._exit(126)
 
 
 def _rule_paths_from_environment(
