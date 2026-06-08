@@ -231,6 +231,7 @@ class SessionConfig:
     custom_tools: list[str] = field(default_factory=list)
     preloaded_skills: list[str] = field(default_factory=list)
     rules: list[str] = field(default_factory=list)
+    assigned_task: str = ""
     access: AccessPolicy = field(default_factory=AccessPolicy.user_default)
 
     def tool_names(self) -> list[str]:
@@ -259,6 +260,7 @@ class SessionConfig:
             custom_tools=list(custom_tools or []),
             preloaded_skills=list(preloaded_skills or []),
             rules=list(rules or []),
+            assigned_task="",
             access=AccessPolicy.user_default(),
         )
 
@@ -278,6 +280,7 @@ class SessionConfig:
             model_id=model_id,
             preamble=preamble,
             tool_set_preset=tool_set_preset,
-            rules=[task],
+            rules=[],
+            assigned_task=task,
             access=AccessPolicy.subagent(parent_id),
         )

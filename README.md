@@ -1,80 +1,66 @@
 # Byte E2E Agent
 
-ReAct 智能体 + FastAPI 后端 + React/Vite 前端。后端以 Message 为核心数据模型，通过 Hook 系统把模型流、工具调用、持久化、指标和 SSE 广播串起来。
+ReAct coding agent with a FastAPI backend and React/Vite frontend. The backend keeps the prompt flow append-only: durable context is persisted as messages, and runtime components assemble model input from the persisted transcript without injecting temporary dynamic context outside the transcript.
 
-## 项目结构
+## Layout
 
 ```text
 byte_e2e_agent/
-├── README.md
-├── start.sh                   # 一键启动前后端
-├── start-cli.sh               # CLI 终端对话
-├── lint.sh                    # 一键 Lint
-├── .gitignore
-├── docs/                      # 架构文档与变更记录
 ├── backend/
-│   ├── pyproject.toml         # Python 依赖（uv 管理）
-│   ├── uv.lock                # Python 锁定文件
-│   ├── .python-version        # Python 3.14
-│   ├── .env.example           # 环境变量模板
-│   ├── main.py                # FastAPI + uvicorn 入口
-│   ├── cli.py                 # 命令行对话入口
-│   ├── shared/                # 前后端共享类型 + Hook 基础设施
+│   ├── main.py                  # FastAPI entrypoint
+│   ├── cli.py                   # CLI entrypoint
 │   ├── app/
-│   │   ├── api/               # FastAPI routes / SSE helper
-│   │   ├── core/              # 配置 / CORS
-│   │   ├── schemas/           # 请求和响应模型
-│   │   └── services/          # 业务层：chat / session / checkpoint / metrics
+│   │   ├── api/                 # routes and SSE responses
+│   │   ├── core/                # configuration
+│   │   ├── schemas/             # request/response models
+│   │   └── services/            # workspace, chat, session, metrics services
 │   ├── agent/
-│   │   ├── actions.py         # model_call / execute_one_tool / subagent invoke
-│   │   ├── llm.py             # OpenAI 客户端工厂
-│   │   ├── tool_execution.py  # 工具批量执行 + guard
-│   │   ├── shadow_repo.py     # Dulwich shadow git repo
-│   │   ├── metrics.py         # SQLite LLM 指标
-│   │   ├── core/              # Workspace / SessionConfig / prompts
-│   │   ├── hook/              # StreamDriver / Metrics / Persistence / ShadowCommit
-│   │   ├── memory/            # 长期记忆（MemoryStore + MemoryHook）
-│   │   ├── runtime/           # AgentRuntime / context_builder / driver / subagents
-│   │   ├── session/           # Session 数据容器 + JSONL 持久化
-│   │   └── tools/             # Shell / file I/O / grep / browser / task / skill
+│   │   ├── llm_streaming.py     # streamed model calls
+│   │   ├── tool_execution.py    # tool-call dispatch
+│   │   ├── shadow_repo.py       # Dulwich snapshot/restore repo
+│   │   ├── core/                # Workspace, SessionConfig, prompts
+│   │   ├── hook/                # SSE, persistence, metrics, memory hooks
+│   │   ├── memory/              # long-term memory store and hook
+│   │   ├── runtime/             # AgentRuntime and turn execution
+│   │   ├── session/             # RuntimeSession and SessionTranscript
+│   │   └── tools/               # shell, files, browser, search, task, skills
 │   └── tests/
 └── frontend/
-    ├── package.json
-    ├── eslint.config.js
-    ├── tsconfig.json
-    ├── vite.config.ts
-    └── src/
-        ├── components/        # AgentDemo / MessageCard / SessionSidebar / CommitGraphPanel
-        ├── hooks/             # useAgentStream / messageReducer / pairTools
-        ├── types.ts           # 前端手写协议类型
-        └── types.generated.ts # OpenAPI 自动生成
+    ├── src/
+    │   ├── components/
+    │   ├── hooks/
+    │   ├── types.ts
+    │   └── types.generated.ts
+    └── package.json
 ```
 
-## 环境要求
+## Requirements
 
-| 工具 | 版本 | 检查 |
-|------|------|------|
-| Python | 3.14+ | `python --version` |
-| uv | 最新版 | `uv --version` |
-| Node.js | 20+ | `node --version` |
-| npm | 10+ | `npm --version` |
-| bubblewrap | 0.4+ | `bwrap --version` |
-| BrowserGym core | Python 依赖 | `cd backend && uv run python -c "import browsergym.core"` |
-| Chromium | Playwright | `cd backend && uv run playwright install chromium` |
+| Tool | Notes |
+| --- | --- |
+| Python 3.14+ | backend runtime and tests |
+| uv | Python dependency management |
+| Node.js 20+ / npm 10+ | frontend tooling |
+| Chromium | installed through Playwright |
+| bubblewrap | optional Linux shell sandbox dependency |
 
-> **bubblewrap** 是 Linux 沙箱依赖，macOS 不需要。安装：`sudo apt-get install bubblewrap`（Debian/Ubuntu）或 `sudo pacman -S bubblewrap`（Arch）。没有 bwrap 时 Shell 工具会报错退出。
->
-> `BrowserInspect` 基于 `browsergym-core` 的 `BrowserEnv`，Python 依赖由 `uv sync` 安装；浏览器二进制仍需通过 Playwright 安装 Chromium。
+Install browser assets:
 
-## 快速开始
+```bash
+cd backend
+uv sync
+uv run playwright install chromium
+```
 
-### 1. 配置环境变量
+## Configuration
+
+Create backend environment config:
 
 ```bash
 cp backend/.env.example backend/.env
 ```
 
-至少需要：
+Required model variables:
 
 ```text
 LLM_API_KEY=...
@@ -82,35 +68,38 @@ LLM_BASE_URL=...
 LLM_MODEL_ID=...
 ```
 
-可选：SubAgent / BrowserInspect 可使用独立模型配置，不设置则回退到主 LLM：
+Useful optional variables:
 
-```text
-SUBAGENT_LLM_API_KEY=...
-SUBAGENT_LLM_BASE_URL=...
-SUBAGENT_LLM_MODEL_ID=...
-SUBAGENT_LLM_TIMEOUT=60
-```
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AGENT_WORKSPACE` | current directory | default workspace path |
+| `LLM_TIMEOUT` | `60` | model request timeout in seconds |
+| `LLM_MAX_RETRIES` | `3` | streamed model retry count |
+| `MEMORY_ENABLED` | `0` | enable long-term memory |
+| `SIDE_LLM_API_KEY` | `LLM_API_KEY` | side-query model key for memory |
+| `SIDE_LLM_BASE_URL` | `LLM_BASE_URL` | side-query endpoint |
+| `SIDE_LLM_MODEL_ID` | `LLM_MODEL_ID` | side-query model |
+| `SUBAGENT_LLM_API_KEY` | `LLM_API_KEY` | subagent model key |
+| `SUBAGENT_LLM_BASE_URL` | `LLM_BASE_URL` | subagent endpoint |
+| `SUBAGENT_LLM_MODEL_ID` | `LLM_MODEL_ID` | subagent model |
+| `BROWSER_HEADLESS` | `1` | set `0` for headed browser mode |
+| `SERPAPI_KEY` | unset | web search tool |
 
-### 2. 一键启动
+## Run
+
+Start both services:
 
 ```bash
 ./start.sh
 ```
 
-前端 `http://localhost:5173`，API 文档 `http://localhost:8000/docs`。
-
-### 3. 分别启动
-
-后端：
+Start separately:
 
 ```bash
 cd backend
 uv sync
-uv run playwright install chromium
 uv run uvicorn main:app --reload --port 8000
 ```
-
-前端：
 
 ```bash
 cd frontend
@@ -118,129 +107,117 @@ npm install
 npm run dev
 ```
 
-### 4. CLI 终端
+Frontend runs at `http://localhost:5173`; API docs run at `http://localhost:8000/docs`.
+
+CLI:
 
 ```bash
-./start-cli.sh                    # REPL 交互
-./start-cli.sh "帮我写排序函数"    # 单次提问
+./start-cli.sh
+./start-cli.sh "summarize this repository"
 ```
 
----
+## Validation
 
-## 开发命令
-
-### 一键 Lint
+Backend:
 
 ```bash
-./lint.sh                    # 前后端全量
-./lint.sh --backend          # 仅后端
-./lint.sh --frontend         # 仅前端
-./lint.sh --fix              # 全量 + auto-fix
-./lint.sh --backend --fix    # 后端 + auto-fix
+cd backend
+uv run ruff check .
+uv run ruff format .
+uv run pytest tests/ -q
 ```
 
-### 分别运行
+Frontend:
 
-| 位置 | 命令 | 说明 |
-|------|------|------|
-| 后端 | `uv run ruff check .` | Lint |
-| 后端 | `uv run ruff check . --fix` | Lint + 自动修复 |
-| 后端 | `uv run ruff format .` | 格式化 |
-| 后端 | `uv run pytest tests/ -q` | 测试 |
-| 前端 | `npm run lint` | ESLint |
-| 前端 | `npm run lint -- --fix` | ESLint + 自动修复 |
-| 前端 | `npm run test` | Vitest |
-| 前端 | `npm run build` | 生产构建 |
+```bash
+cd frontend
+npm run lint
+npm run test
+npm run build
+```
 
----
-
-## 核心架构
+## Architecture
 
 ```text
 React frontend
-  ↕ REST + SSE (StreamEvent)
+  <-> REST + SSE
 FastAPI routes
-  ↕
-WorkspaceContext
-  ├─ AgentRuntime          — ReAct 主循环
-  ├─ HookManager
-  │   ├─ StreamDriverHook      → SSE 广播
-  │   ├─ PersistenceHook       → messages.jsonl
-  │   ├─ MetricsHook           → SQLite metrics
-  │   ├─ ShadowCommitHook      → shadow git 快照
-  │   └─ MemoryHook            → 长期记忆
-  └─ ShadowRepo (Dulwich)
+  -> WorkspaceContext
+       -> AgentRuntime
+       -> RuntimeSession
+            -> SessionTranscript
+       -> HookManager
+            -> StreamDriverHook
+            -> PersistenceHook
+            -> MetricsHook
+            -> ShadowCommitHook
+            -> MemoryHook
+       -> ShadowRepo
 ```
 
-### 分层职责
+Core responsibilities:
 
-- `app/api/` — HTTP 参数、响应模型、SSE 传输、状态码映射
-- `app/services/` — 业务动作：chat、session recovery、checkpoint restore
-- `agent/runtime/` — ReAct 主循环、工具执行、subagent invoke、interrupt/pending
-- `agent/hook/` — 纯旁路通知（SSE、持久化、指标、快照、记忆），异常不影响主循环
-- `agent/session/` — Message 数据容器 + JSONL 磁盘持久化
+- `WorkspaceContext` owns the active workspace-level services: runtime, hooks, shadow repo, memory, and stream driver.
+- `AgentRuntime` manages active turns and session execution state.
+- `RuntimeSession` is the runtime session object; it holds a `Workspace`, `SessionConfig`, and `SessionTranscript`.
+- `SessionTranscript` is the append-only persisted message transcript.
+- `SessionLocation` and `SessionLocator` resolve session ids across registered workspaces.
+- `llm_context_builder.build_llm_messages` converts the transcript into model input.
+- `turn_context_updates.plan_context_updates` decides which durable context-update messages should be appended.
+- `llm_streaming.stream_model_call` performs streamed model calls.
+- `tool_execution.execute_tool_calls` dispatches tool calls. Tool handlers receive `workspace=`.
 
-## Message 和 SSE
+## Prompt Flow
 
-`shared/types.py` 中的 `Message` 是持久化、SSE 协议和前端渲染的共同数据模型。所有上下文（system prompt、skills、tasks、memory）均为 append-only 的系统消息，存储在 Session JSONL 中，确保 KV-cache 前缀稳定性。
+The prompt flow is intentionally append-only.
 
-SSE 事件流：
+1. A session starts with persisted prefix messages from config, rules, preloaded skills, and initial context.
+2. User input is appended to `SessionTranscript`.
+3. Context updates are appended as system messages when needed.
+4. The model input is assembled from the persisted transcript.
+5. Assistant messages, tool calls, tool results, interruptions, and recoverable partial messages are appended.
+
+No temporary dynamic context is inserted outside the transcript. This keeps cache prefixes predictable and makes history recovery inspectable.
+
+## Persistence
+
+Agent data is stored under the repository-level data root:
 
 ```text
-message_start → chunk_delta → chunk_complete → message_finish → turn_complete
-                                                              → interrupted
+PROJECT_ROOT/.agent/
+  workspaces.json
+  workspaces/{workspace_uuid}/
+    sessions/{session_id}/
+      config.json
+      messages.jsonl
+      tasks.json
+    .shadow-vcs/
+    memory.db
 ```
 
-## 环境变量
+The workspace path itself remains the user project directory. Internal session data is keyed by workspace uuid under `PROJECT_ROOT/.agent/workspaces/`.
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `LLM_API_KEY` | — | API 密钥 |
-| `LLM_BASE_URL` | — | API 端点 |
-| `LLM_MODEL_ID` | — | 模型 ID |
-| `LLM_TIMEOUT` | `60` | 请求超时（秒） |
-| `AGENT_WORKSPACE` | 当前目录 | 默认 workspace |
-| `LLM_MAX_RETRIES` | `3` | 模型请求最大重试次数 |
-| `MEMORY_ENABLED` | `0` | 是否启用长期记忆 |
-| `SIDE_LLM_API_KEY` | `LLM_API_KEY` | 记忆 side-query API key |
-| `SIDE_LLM_BASE_URL` | `LLM_BASE_URL` | 记忆 side-query endpoint |
-| `SIDE_LLM_MODEL_ID` | `LLM_MODEL_ID` | 记忆 side-query model |
-| `BROWSER_HEADLESS` | `1` | `0` = 有头模式 |
-| `SERPAPI_KEY` | — | WebSearch 工具 |
+## API Surface
 
-## 数据路径
+Common endpoints:
 
-```text
-{workspace}/.byte_agent/
-  sessions/{session_id}/
-    session.json
-    config.json
-    messages.jsonl       # append-only 消息历史
-    tasks.json           # 任务看板
-  .shadow-vcs/           # shadow git 仓库
-  ai_metrics.sqlite3     # LLM 指标
-  memory.db              # 长期记忆（需 MEMORY_ENABLED=1）
-```
-
-## API 端点
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/api/workspace` | 当前 workspace |
-| `POST` | `/api/workspace/set` | 切换 workspace |
-| `POST` | `/api/session` | 创建 session |
-| `GET` | `/api/sessions` | 当前 workspace 的 session 列表 |
-| `DELETE` | `/api/session/{sid}` | 删除 session |
-| `GET` | `/api/session/{sid}/history` | 获取历史消息 |
-| `POST` | `/api/session/{sid}/chat` | 启动 Agent（SSE） |
-| `GET` | `/api/session/{sid}/stream` | SSE 断线重连 |
-| `GET` | `/api/session/{sid}/recover` | 恢复消息和运行状态 |
-| `POST` | `/api/session/{sid}/respond` | 响应 pending 请求 |
-| `POST` | `/api/session/{sid}/interrupt` | 中断 session |
-| `GET` | `/api/session/{sid}/commits` | shadow commit 列表 |
-| `POST` | `/api/session/{sid}/workspace/restore` | 恢复到指定 commit |
-| `POST` | `/api/session/{sid}/messages/truncate` | 截断消息历史 |
-| `GET` | `/api/metrics/llm/calls` | LLM 调用明细 |
-| `GET` | `/api/metrics/llm/summary` | LLM 调用汇总 |
-| `GET` | `/api/metrics/llm/dashboard` | LLM 仪表盘 |
-| `GET` | `/api/status` | 运行时状态 |
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/workspace` | current workspace |
+| `POST` | `/api/workspace/set` | switch workspace |
+| `POST` | `/api/session` | create session |
+| `GET` | `/api/sessions` | list sessions in current workspace |
+| `GET` | `/api/sessions/all` | list sessions across registered workspaces |
+| `DELETE` | `/api/session/{sid}` | delete session |
+| `GET` | `/api/session/{sid}/history` | persisted message history |
+| `POST` | `/api/session/{sid}/chat` | start a chat turn and stream SSE |
+| `GET` | `/api/session/{sid}/stream` | reconnect SSE stream |
+| `GET` | `/api/session/{sid}/recover` | recover messages and runtime state |
+| `POST` | `/api/session/{sid}/respond` | answer pending human input |
+| `POST` | `/api/session/{sid}/interrupt` | interrupt active run |
+| `GET` | `/api/session/{sid}/commits` | shadow commit list |
+| `GET` | `/api/session/{sid}/commits/{sha}` | shadow commit details |
+| `POST` | `/api/session/{sid}/checkout` | restore workspace to a commit |
+| `GET` | `/api/metrics/llm/calls` | LLM call rows |
+| `GET` | `/api/metrics/llm/summary` | LLM summary |
+| `GET` | `/api/metrics/llm/dashboard` | LLM dashboard |

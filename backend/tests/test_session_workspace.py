@@ -4,13 +4,14 @@ Covers:
 - agent/core/workspace.py   — Workspace
 - agent/core/config.py      — SessionConfig, AgentConfig, AccessPolicy, ToolSetPreset
 - agent/session/status.py   — SessionStatus, RuntimeStatus
-- agent/session/entry.py    — SessionEntry
+- agent/session/entry.py    — RuntimeSession
 """
 
 from __future__ import annotations
 
 import json
 import tempfile
+import uuid
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -26,9 +27,26 @@ from agent.core.config import (
     ToolSetPreset,
     Visibility,
 )
-from agent.core.workspace import BYTE_AGENT_DIR, Workspace
-from agent.session.session_entry import SessionEntry
+from agent.core.workspace import Workspace, validate_session_id
+from agent.paths import workspace_data_dir
+from agent.session.session_entry import RuntimeSession
 from agent.session.status import RuntimeStatus, SessionStatus
+
+
+def _workspace(root: str | Path) -> Workspace:
+    return Workspace(root, workspace_uuid=f"test-{uuid.uuid4().hex}")
+
+
+def _runtime_session(
+    session_id: str,
+    config: SessionConfig,
+    workspace: Workspace | None = None,
+) -> RuntimeSession:
+    return RuntimeSession(
+        id=session_id,
+        config=config,
+        workspace=workspace or _workspace(Path.cwd()),
+    )
 
 # ═══════════════════════════════════════════════════════════════════
 # Workspace tests
@@ -40,31 +58,32 @@ class TestWorkspaceConstructor:
 
     def test_default_root_is_cwd(self):
         """When root is None, workspace root defaults to Path.cwd()."""
-        ws = Workspace()
+        ws = _workspace(Path.cwd())
         assert ws.root == Path.cwd()
 
     def test_explicit_root_string(self):
         """Constructor accepts a string path."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             assert ws.root == Path(tmpdir).resolve()
 
     def test_explicit_root_path(self):
         """Constructor accepts a Path object."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=Path(tmpdir))
+            ws = _workspace(Path(tmpdir))
             assert ws.root == Path(tmpdir).resolve()
 
     def test_root_expands_user_tilde(self):
         """The root path expands ~ to the user home directory."""
-        ws = Workspace(root=Path("~/test_workspace"))
+        ws = _workspace(Path("~/test_workspace"))
         assert str(ws.root).startswith(str(Path.home()))
 
     def test_repr(self):
         """repr() shows the workspace root."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
-            assert repr(ws) == f"Workspace({Path(tmpdir).resolve()})"
+            ws = _workspace(tmpdir)
+            assert str(Path(tmpdir).resolve()) in repr(ws)
+            assert ws.uuid in repr(ws)
 
 
 class TestWorkspaceDirectoryPaths:
@@ -73,21 +92,21 @@ class TestWorkspaceDirectoryPaths:
     def test_agent_dir(self):
         """agent_dir() returns root/.byte_agent."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
-            assert ws.agent_dir() == Path(tmpdir).resolve() / BYTE_AGENT_DIR
+            ws = _workspace(tmpdir)
+            assert ws.agent_dir() == workspace_data_dir(ws.uuid)
 
     def test_sessions_dir(self):
         """sessions_dir() returns root/.byte_agent/sessions/."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
-            assert ws.sessions_dir() == Path(tmpdir).resolve() / BYTE_AGENT_DIR / "sessions"
+            ws = _workspace(tmpdir)
+            assert ws.sessions_dir() == workspace_data_dir(ws.uuid) / "sessions"
 
     def test_session_dir(self):
         """session_dir(sid) returns root/.byte_agent/sessions/{sid}/."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             assert ws.session_dir("abc123") == (
-                Path(tmpdir).resolve() / BYTE_AGENT_DIR / "sessions" / "abc123"
+                workspace_data_dir(ws.uuid) / "sessions" / "abc123"
             )
 
 
@@ -97,74 +116,74 @@ class TestWorkspaceFilePaths:
     def test_session_db_path(self):
         """session_db_path returns session_dir/session.db."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             expected = ws.session_dir("abc123") / "session.db"
             assert ws.session_db_path("abc123") == expected
 
     def test_session_config_path(self):
         """session_config_path returns session_dir/config.json."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             expected = ws.session_dir("abc123") / "config.json"
             assert ws.session_config_path("abc123") == expected
 
     def test_tasks_path(self):
         """tasks_path returns session_dir/tasks.json."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             expected = ws.session_dir("abc123") / "tasks.json"
             assert ws.tasks_path("abc123") == expected
 
     def test_messages_path(self):
         """messages_path returns session_dir/messages.jsonl."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             expected = ws.session_dir("abc123") / "messages.jsonl"
             assert ws.messages_path("abc123") == expected
 
 
 class TestValidateSessionId:
-    """Tests for Workspace._validate_session_id()."""
+    """Tests for validate_session_id()."""
 
     def test_accepts_lowercase_and_digits(self):
         """Valid session IDs contain only lowercase letters and digits."""
         # These should not raise
-        Workspace._validate_session_id("abc123")
-        Workspace._validate_session_id("session1")
-        Workspace._validate_session_id("test001")
-        Workspace._validate_session_id("a")
-        Workspace._validate_session_id("0")
+        validate_session_id("abc123")
+        validate_session_id("session1")
+        validate_session_id("test001")
+        validate_session_id("a")
+        validate_session_id("0")
 
     def test_rejects_uppercase(self):
         """Session IDs with uppercase letters are rejected."""
         with pytest.raises(ValueError, match="Invalid session_id"):
-            Workspace._validate_session_id("ABC")
+            validate_session_id("ABC")
         with pytest.raises(ValueError, match="Invalid session_id"):
-            Workspace._validate_session_id("Abc123")
+            validate_session_id("Abc123")
         with pytest.raises(ValueError, match="Invalid session_id"):
-            Workspace._validate_session_id("UPPERCASE")
+            validate_session_id("UPPERCASE")
 
     def test_rejects_special_characters(self):
         """Session IDs with special characters are rejected (hyphens now allowed)."""
         with pytest.raises(ValueError, match="Invalid session_id"):
-            Workspace._validate_session_id("abc_123")
+            validate_session_id("abc_123")
         with pytest.raises(ValueError, match="Invalid session_id"):
-            Workspace._validate_session_id("abc 123")
+            validate_session_id("abc 123")
         with pytest.raises(ValueError, match="Invalid session_id"):
-            Workspace._validate_session_id("abc.123")
+            validate_session_id("abc.123")
         with pytest.raises(ValueError, match="Invalid session_id"):
-            Workspace._validate_session_id("/etc")
+            validate_session_id("/etc")
 
     def test_allows_hyphens(self):
         """Session IDs may contain hyphens."""
-        Workspace._validate_session_id("abc-123")
-        Workspace._validate_session_id("my-custom-id")
-        Workspace._validate_session_id("a-b-c")
+        validate_session_id("abc-123")
+        validate_session_id("my-custom-id")
+        validate_session_id("a-b-c")
 
     def test_rejects_empty_string(self):
         """Empty string is rejected."""
         with pytest.raises(ValueError, match="Invalid session_id"):
-            Workspace._validate_session_id("")
+            validate_session_id("")
 
 
 class TestWorkspaceEnsureDirs:
@@ -173,7 +192,7 @@ class TestWorkspaceEnsureDirs:
     def test_creates_session_directory(self):
         """ensure_dirs creates the session directory and returns its path."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             sid = "testsession"
             # Directory should not exist before
             assert not ws.session_dir(sid).exists()
@@ -186,7 +205,7 @@ class TestWorkspaceEnsureDirs:
     def test_create_parent_directories(self):
         """ensure_dirs creates all parent directories as needed."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             sid = "nested"
             # Neither sessions_dir nor session_dir exist
             assert not ws.sessions_dir().exists()
@@ -201,7 +220,7 @@ class TestWorkspaceSaveLoadConfig:
     def test_round_trip(self):
         """save_session_config then load_session_config returns equivalent data."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             sid = "configtest"
             config = SessionConfig(
                 name="test-session",
@@ -211,6 +230,7 @@ class TestWorkspaceSaveLoadConfig:
                 custom_tools=["my_tool"],
                 preloaded_skills=["skill_a"],
                 rules=["rule1", "rule2"],
+                assigned_task="",
                 access=AccessPolicy.user_default(),
             )
             ws.save_session_config(sid, config)
@@ -227,6 +247,7 @@ class TestWorkspaceSaveLoadConfig:
             assert loaded["custom_tools"] == ["my_tool"]
             assert loaded["preloaded_skills"] == ["skill_a"]
             assert loaded["rules"] == ["rule1", "rule2"]
+            assert loaded["assigned_task"] == ""
             # Access policy fields
             access = loaded["access"]
             assert access["owner"]["kind"] == "user"
@@ -237,13 +258,13 @@ class TestWorkspaceSaveLoadConfig:
     def test_load_nonexistent_config(self):
         """load_session_config returns None for a session with no config."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             assert ws.load_session_config("nonexistent") is None
 
     def test_config_file_created_by_save(self):
         """save_session_config writes a valid JSON file."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             sid = "saveonly"
             config = SessionConfig(
                 name="minimal",
@@ -264,20 +285,20 @@ class TestWorkspaceListSessionIds:
     def test_empty_when_no_sessions(self):
         """Returns empty list when no session directories exist."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             assert ws.list_session_ids() == []
 
     def test_no_sessions_dir_yet(self):
         """Returns empty list when sessions dir doesn't even exist."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             # Don't create sessions dir
             assert ws.list_session_ids() == []
 
     def test_lists_created_sessions(self):
         """Returns sorted session IDs from created directories."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             ws.ensure_dirs("session2")
             ws.ensure_dirs("session1")
             ws.ensure_dirs("session10")
@@ -288,7 +309,7 @@ class TestWorkspaceListSessionIds:
     def test_filters_non_directories(self):
         """Only directories matching session ID pattern are returned."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             ws.ensure_dirs("valid1")
             # Create a file in sessions_dir (not a directory)
             ws.sessions_dir().mkdir(parents=True, exist_ok=True)
@@ -299,7 +320,7 @@ class TestWorkspaceListSessionIds:
     def test_filters_invalid_names(self):
         """Directories with invalid session ID names are excluded."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             ws.ensure_dirs("good")
             # Manually create directories with invalid names
             (ws.sessions_dir() / "BAD_SESSION").mkdir(parents=True, exist_ok=True)
@@ -315,35 +336,35 @@ class TestWorkspaceResolve:
     def test_resolve_normal_path(self):
         """Normal relative paths resolve within the workspace."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             result = ws.resolve("some/file.txt")
             assert result == (Path(tmpdir).resolve() / "some" / "file.txt")
 
     def test_resolve_dotdot_raises_permission_error(self):
         """Resolving '..' raises PermissionError (path traversal)."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
-            with pytest.raises(PermissionError, match="Path traversal denied"):
+            ws = _workspace(tmpdir)
+            with pytest.raises(PermissionError, match="Path is outside workspace"):
                 ws.resolve("..")
 
     def test_resolve_deep_dotdot_raises_permission_error(self):
         """Resolving deeply nested '..' raises PermissionError."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
-            with pytest.raises(PermissionError, match="Path traversal denied"):
+            ws = _workspace(tmpdir)
+            with pytest.raises(PermissionError, match="Path is outside workspace"):
                 ws.resolve("subdir/../../etc")
 
     def test_resolve_absolute_path_raises_permission_error(self):
         """Resolving an absolute path outside workspace raises PermissionError."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
-            with pytest.raises(PermissionError, match="Path traversal denied"):
+            ws = _workspace(tmpdir)
+            with pytest.raises(PermissionError, match="Path is outside workspace"):
                 ws.resolve("/etc/passwd")
 
     def test_resolve_empty_string(self):
         """Resolving empty string gives workspace root."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             result = ws.resolve("")
             assert result == Path(tmpdir).resolve()
 
@@ -354,7 +375,7 @@ class TestWorkspaceIsSafePath:
     def test_safe_relative_path(self):
         """An absolute path within workspace is safe."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             (Path(tmpdir) / "subdir").mkdir()
             filepath = str(Path(tmpdir) / "subdir" / "file.txt")
             Path(filepath).write_text("")
@@ -363,27 +384,27 @@ class TestWorkspaceIsSafePath:
     def test_safe_absolute_path_inside(self):
         """An absolute path inside workspace is safe."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             inside = str(Path(tmpdir) / "some" / "file.txt")
             assert ws.is_safe_path(inside) is True
 
     def test_unsafe_path_outside(self):
         """A path outside workspace is not safe."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             assert ws.is_safe_path("/etc/passwd") is False
 
     def test_unsafe_dotdot(self):
         """A path with '..' escaping workspace is not safe."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             outside = str(Path(tmpdir) / ".." / "other")
             assert ws.is_safe_path(outside) is False
 
     def test_safe_path_object(self):
         """is_safe_path accepts Path objects."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
             assert ws.is_safe_path(Path(tmpdir) / "sub") is True
 
 
@@ -469,15 +490,16 @@ class TestSessionConfigSubagent:
         assert config.access.owner.kind == "session"
         assert config.access.owner.session_id == "parent123"
 
-    def test_task_becomes_rule(self):
-        """subagent() stores the task as a rule."""
+    def test_task_becomes_assigned_task(self):
+        """subagent() stores the task as the assigned task."""
         config = SessionConfig.subagent(
             parent_id="parent123",
             name="sub",
             task="Summarize the document.",
             model_id="gpt-4",
         )
-        assert "Summarize the document." in config.rules
+        assert config.assigned_task == "Summarize the document."
+        assert config.rules == []
 
     def test_lifecycle_is_ephemeral(self):
         """subagent() defaults to EPHEMERAL lifecycle."""
@@ -977,51 +999,51 @@ class TestRuntimeStatus:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# SessionEntry tests
+# RuntimeSession tests
 # ═══════════════════════════════════════════════════════════════════
 
 
-class TestSessionEntryDefaults:
-    """Tests for SessionEntry default values."""
+class TestRuntimeSessionDefaults:
+    """Tests for RuntimeSession default values."""
 
     def test_default_status_is_idle(self):
-        """A new SessionEntry has IDLE status by default."""
+        """A new RuntimeSession has IDLE status by default."""
         config = SessionConfig.user_main(name="test", model_id="gpt-4")
-        entry = SessionEntry(id="session_001", config=config)
+        entry = _runtime_session("session-001", config)
         assert entry.status == SessionStatus.IDLE
 
     def test_default_ws_is_created(self):
-        """SessionEntry creates a default Workspace."""
+        """RuntimeSession creates a default Workspace."""
         config = SessionConfig.user_main(name="test", model_id="gpt-4")
-        entry = SessionEntry(id="session_001", config=config)
-        assert isinstance(entry.ws, Workspace)
+        entry = _runtime_session("session-001", config)
+        assert isinstance(entry.workspace, Workspace)
 
     def test_default_llm_client_is_none(self):
-        """SessionEntry default llm_client is None."""
+        """RuntimeSession default llm_client is None."""
         config = SessionConfig.user_main(name="test", model_id="gpt-4")
-        entry = SessionEntry(id="session_001", config=config)
+        entry = _runtime_session("session-001", config)
         assert entry.llm_client is None
 
     def test_session_id_property(self):
         """id field serves as the session identifier."""
         config = SessionConfig.user_main(name="test", model_id="gpt-4")
-        entry = SessionEntry(id="abc", config=config)
+        entry = _runtime_session("abc", config)
         assert entry.id == "abc"
 
     def test_model_id_property(self):
         """model_id property delegates to config.model_id."""
         config = SessionConfig.user_main(name="test", model_id="claude-3")
-        entry = SessionEntry(id="abc", config=config)
+        entry = _runtime_session("abc", config)
         assert entry.model_id == "claude-3"
 
 
-class TestSessionEntryProperties:
-    """Tests for SessionEntry is_idle / is_busy properties."""
+class TestRuntimeSessionProperties:
+    """Tests for RuntimeSession is_idle / is_busy properties."""
 
     def test_is_idle_when_idle(self):
         """is_idle is True when status is IDLE."""
         config = SessionConfig.user_main(name="test", model_id="gpt-4")
-        entry = SessionEntry(id="s1", config=config)
+        entry = _runtime_session("s1", config)
         entry.status = SessionStatus.IDLE
         assert entry.is_idle is True
         assert entry.is_busy is False
@@ -1029,7 +1051,7 @@ class TestSessionEntryProperties:
     def test_is_idle_when_running(self):
         """is_idle is False when status is RUNNING."""
         config = SessionConfig.user_main(name="test", model_id="gpt-4")
-        entry = SessionEntry(id="s1", config=config)
+        entry = _runtime_session("s1", config)
         entry.status = SessionStatus.RUNNING
         assert entry.is_idle is False
         assert entry.is_busy is True
@@ -1037,7 +1059,7 @@ class TestSessionEntryProperties:
     def test_is_busy_when_pending(self):
         """is_busy is True when status is PENDING."""
         config = SessionConfig.user_main(name="test", model_id="gpt-4")
-        entry = SessionEntry(id="s1", config=config)
+        entry = _runtime_session("s1", config)
         entry.status = SessionStatus.PENDING
         assert entry.is_busy is True
         assert entry.is_idle is False
@@ -1045,19 +1067,19 @@ class TestSessionEntryProperties:
     def test_is_busy_when_interrupted(self):
         """INTERRUPTED is neither idle nor busy."""
         config = SessionConfig.user_main(name="test", model_id="gpt-4")
-        entry = SessionEntry(id="s1", config=config)
+        entry = _runtime_session("s1", config)
         entry.status = SessionStatus.INTERRUPTED
         assert entry.is_idle is False
         assert entry.is_busy is False
 
 
-class TestSessionEntryTransition:
-    """Tests for SessionEntry.transition_to()."""
+class TestRuntimeSessionTransition:
+    """Tests for RuntimeSession.transition_to()."""
 
     def test_transition_idle_to_running(self):
         """transition_to changes status from IDLE to RUNNING."""
         config = SessionConfig.user_main(name="test", model_id="gpt-4")
-        entry = SessionEntry(id="s1", config=config)
+        entry = _runtime_session("s1", config)
         assert entry.status == SessionStatus.IDLE
         entry.transition_to(SessionStatus.RUNNING)
         assert entry.status == SessionStatus.RUNNING
@@ -1065,7 +1087,7 @@ class TestSessionEntryTransition:
     def test_transition_running_to_idle(self):
         """transition_to changes status from RUNNING back to IDLE."""
         config = SessionConfig.user_main(name="test", model_id="gpt-4")
-        entry = SessionEntry(id="s1", config=config)
+        entry = _runtime_session("s1", config)
         entry.transition_to(SessionStatus.RUNNING)
         entry.transition_to(SessionStatus.IDLE)
         assert entry.status == SessionStatus.IDLE
@@ -1073,7 +1095,7 @@ class TestSessionEntryTransition:
     def test_transition_running_to_pending(self):
         """transition_to can change from RUNNING to PENDING."""
         config = SessionConfig.user_main(name="test", model_id="gpt-4")
-        entry = SessionEntry(id="s1", config=config)
+        entry = _runtime_session("s1", config)
         entry.transition_to(SessionStatus.RUNNING)
         entry.transition_to(SessionStatus.PENDING)
         assert entry.status == SessionStatus.PENDING
@@ -1081,7 +1103,7 @@ class TestSessionEntryTransition:
     def test_transition_to_interrupted(self):
         """transition_to can change to INTERRUPTED."""
         config = SessionConfig.user_main(name="test", model_id="gpt-4")
-        entry = SessionEntry(id="s1", config=config)
+        entry = _runtime_session("s1", config)
         entry.transition_to(SessionStatus.RUNNING)
         entry.transition_to(SessionStatus.INTERRUPTED)
         assert entry.status == SessionStatus.INTERRUPTED
@@ -1093,13 +1115,13 @@ class TestSessionEntryTransition:
 
 
 class TestSessionWorkspaceChain:
-    """End-to-end chain tests tying Workspace + SessionConfig + SessionEntry together."""
+    """End-to-end chain tests tying Workspace + SessionConfig + RuntimeSession together."""
 
     def test_full_chain_user_session(self):
         """Simulate creating a user main session end-to-end."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # 1. Create workspace
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
 
             # 2. Create session config
             config = SessionConfig.user_main(
@@ -1109,7 +1131,7 @@ class TestSessionWorkspaceChain:
             )
 
             # 3. Create session entry
-            entry = SessionEntry(id="mysession", config=config)
+            entry = _runtime_session("mysession", config)
 
             # 4. Verify entry state
             assert entry.id == "mysession"
@@ -1132,14 +1154,14 @@ class TestSessionWorkspaceChain:
     def test_full_chain_subagent(self):
         """Simulate creating a subagent session end-to-end."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            ws = Workspace(root=tmpdir)
+            ws = _workspace(tmpdir)
 
             # Create parent main session
             parent_config = SessionConfig.user_main(
                 name="Parent",
                 model_id="gpt-4",
             )
-            SessionEntry(id="parent001", config=parent_config)
+            _runtime_session("parent001", parent_config)
             ws.save_session_config("parent001", parent_config)
 
             # Create subagent from parent
@@ -1150,7 +1172,7 @@ class TestSessionWorkspaceChain:
                 model_id="gpt-4",
                 tool_set_preset=ToolSetPreset.MINIMAL,
             )
-            SessionEntry(id="sub001", config=sub_config)
+            _runtime_session("sub001", sub_config)
             ws.save_session_config("sub001", sub_config)
 
             # Verify access control
@@ -1168,7 +1190,7 @@ class TestSessionWorkspaceChain:
     def test_status_lifecycle(self):
         """Test the full status lifecycle: IDLE -> RUNNING -> PENDING -> IDLE."""
         config = SessionConfig.user_main(name="lifecycle", model_id="gpt-4")
-        entry = SessionEntry(id="lifecycle_session", config=config)
+        entry = _runtime_session("lifecycle-session", config)
 
         # Start idle
         assert entry.is_idle

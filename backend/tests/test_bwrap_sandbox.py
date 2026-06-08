@@ -496,7 +496,7 @@ class TestShellHandlerBwrap:
     async def test_echo(self, ws):
         from agent.tools.shell import shell_handler
 
-        result = await shell_handler(command="echo hello-from-handler", ws=ws)
+        result = await shell_handler(command="echo hello-from-handler", workspace=ws)
         assert "hello-from-handler" in result.output
         assert result.status == "success"
 
@@ -504,7 +504,7 @@ class TestShellHandlerBwrap:
     async def test_exit_code_nonzero(self, ws):
         from agent.tools.shell import shell_handler
 
-        result = await shell_handler(command="exit 7", ws=ws)
+        result = await shell_handler(command="exit 7", workspace=ws)
         assert "exit code: 7" in result.output
         assert result.status == "error"
 
@@ -512,7 +512,7 @@ class TestShellHandlerBwrap:
     async def test_timeout(self, ws):
         from agent.tools.shell import shell_handler
 
-        result = await shell_handler(command="sleep 10", timeout_ms=500, ws=ws)
+        result = await shell_handler(command="sleep 10", timeout_ms=500, workspace=ws)
         assert "timed out" in result.output.lower()
         assert result.status == "timeout"
 
@@ -532,7 +532,7 @@ class TestShellHandlerBwrap:
         result = await shell_handler(
             command="sleep 10",
             timeout_ms=5000,
-            ws=ws,
+            workspace=ws,
             interrupt_event=interrupt_event,
         )
         await task
@@ -545,7 +545,7 @@ class TestShellHandlerBwrap:
         from agent.tools.shell import shell_handler
 
         result = await shell_handler(
-            command="echo written-from-handler > out.txt && cat out.txt", ws=ws
+            command="echo written-from-handler > out.txt && cat out.txt", workspace=ws
         )
         assert "written-from-handler" in result.output
         assert (ws.root / "out.txt").read_text().strip() == "written-from-handler"
@@ -557,7 +557,7 @@ class TestShellHandlerBwrap:
         """Writing to /etc must fail (read-only root)."""
         from agent.tools.shell import shell_handler
 
-        result = await shell_handler(command="touch /etc/bwrap_handler_probe 2>&1", ws=ws)
+        result = await shell_handler(command="touch /etc/bwrap_handler_probe 2>&1", workspace=ws)
         combined = result.output.lower()
         assert (
             "read-only" in combined or "permission denied" in combined or "cannot touch" in combined
@@ -568,14 +568,14 @@ class TestShellHandlerBwrap:
         from agent.tools.shell import shell_handler
 
         (ws.root / "subdir").mkdir()
-        result = await shell_handler(command="pwd", cwd="subdir", ws=ws)
+        result = await shell_handler(command="pwd", cwd="subdir", workspace=ws)
         assert str(ws.root / "subdir") in result.output
 
     @pytest.mark.asyncio
     async def test_truncation(self, ws):
         from agent.tools.shell import shell_handler
 
-        result = await shell_handler(command="printf 1234567890", max_bytes=5, ws=ws)
+        result = await shell_handler(command="printf 1234567890", max_bytes=5, workspace=ws)
         assert result.output.startswith("12345")
         assert "truncated" in result.output
 
@@ -583,6 +583,6 @@ class TestShellHandlerBwrap:
     async def test_cwd_escape_blocked(self, ws):
         from agent.tools.shell import shell_handler
 
-        result = await shell_handler(command="echo hi", cwd="../../../etc", ws=ws)
+        result = await shell_handler(command="echo hi", cwd="../../../etc", workspace=ws)
         assert result.status == "denied"
         assert "outside workspace" in result.output.lower() or "permission" in result.output.lower()

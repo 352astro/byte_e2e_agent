@@ -32,7 +32,7 @@ Tests are designed to be run **individually, per chain**.
 | `test_api_chat_flow.py` | API → Project → AgentRuntime → SSE streaming (端到端) |
 | `test_hook_system.py` | BaseHook + HookManager + StreamDriverHook + MetricsHook + LoggingHook |
 | `test_runtime_core.py` | AgentRuntime._execute_turn() ReAct 主循环 |
-| `test_llm_streaming.py` | LangChain model_call + astream + chunk 组装 |
+| `test_llm_streaming.py` | LangChain stream_model_call + astream + chunk 组装 |
 | `test_session_workspace.py` | Session 生命周期 + Workspace 路径管理 |
 | `test_tools.py` | ToolSet + 各个 Tool 的 function definition / parse / execute |
 | `test_sandbox.py` | Sandbox + PersistentTerminal (timeout/interrupt/recovery) |

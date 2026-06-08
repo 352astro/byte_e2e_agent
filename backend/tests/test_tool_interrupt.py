@@ -64,9 +64,9 @@ class TestShellExecution:
         from agent.core.workspace import Workspace
 
         handler = _get_handler("Shell")
-        ws = Workspace(tmp_path)
+        ws = Workspace(tmp_path, workspace_uuid="test-workspace")
 
-        result = await handler(command="echo hello", ws=ws)
+        result = await handler(command="echo hello", workspace=ws)
         assert "hello" in result
 
     @pytest.mark.asyncio
@@ -75,9 +75,9 @@ class TestShellExecution:
         from agent.core.workspace import Workspace
 
         handler = _get_handler("Shell")
-        ws = Workspace(tmp_path)
+        ws = Workspace(tmp_path, workspace_uuid="test-workspace")
 
-        result = await handler(command="exit 7", ws=ws)
+        result = await handler(command="exit 7", workspace=ws)
         assert "exit code: 7" in result
 
     @pytest.mark.asyncio
@@ -90,9 +90,9 @@ class TestShellExecution:
         from agent.core.workspace import Workspace
 
         handler = _get_handler("Shell")
-        ws = Workspace(tmp_path)
+        ws = Workspace(tmp_path, workspace_uuid="test-workspace")
 
-        result = await handler(command="sleep 120", timeout_ms=1000, ws=ws)
+        result = await handler(command="sleep 120", timeout_ms=1000, workspace=ws)
         assert "timed out" in result.lower()
         assert "interrupted" not in result.lower()
 
@@ -111,7 +111,7 @@ class TestShellExecution:
         from agent.core.workspace import Workspace
 
         handler = _get_handler("Shell")
-        ws = Workspace(tmp_path)
+        ws = Workspace(tmp_path, workspace_uuid="test-workspace")
         interrupt_event = asyncio.Event()
         interrupt_event.set()
 
@@ -119,7 +119,7 @@ class TestShellExecution:
         result = await handler(
             command="sleep 120",
             timeout_ms=5000,
-            ws=ws,
+            workspace=ws,
             interrupt_event=interrupt_event,
         )
         elapsed = time.perf_counter() - t0
@@ -140,7 +140,7 @@ class TestShellExecution:
         from agent.core.workspace import Workspace
 
         handler = _get_handler("Shell")
-        ws = Workspace(tmp_path)
+        ws = Workspace(tmp_path, workspace_uuid="test-workspace")
         interrupt_event = asyncio.Event()
 
         async def trigger():
@@ -152,7 +152,7 @@ class TestShellExecution:
         result = await handler(
             command="sleep 120",
             timeout_ms=5000,
-            ws=ws,
+            workspace=ws,
             interrupt_event=interrupt_event,
         )
         elapsed = time.perf_counter() - t0
@@ -177,7 +177,7 @@ class TestReadExecution:
         handler = _get_handler("Read")
         ws = _make_ws(read_file_ret="line1\nline2\nline3")
 
-        result = await handler(path="test.py", ws=ws)
+        result = await handler(path="test.py", workspace=ws)
         assert "line1" in result
         assert "line2" in result
 
@@ -187,7 +187,7 @@ class TestReadExecution:
         handler = _get_handler("Read")
         ws = _make_ws(read_file_ret="a\nb\nc\nd\ne")
 
-        result = await handler(path="test.py", start_line=2, end_line=4, ws=ws)
+        result = await handler(path="test.py", start_line=2, end_line=4, workspace=ws)
         assert "b" in result
         assert "c" in result
         assert "d" in result
@@ -199,7 +199,7 @@ class TestReadExecution:
         handler = _get_handler("Read")
         ws = _make_ws(read_file_ret="Error: file not found")
 
-        result = await handler(path="nope.txt", ws=ws)
+        result = await handler(path="nope.txt", workspace=ws)
         assert "Error" in result or "not found" in result.lower()
 
     @pytest.mark.asyncio
@@ -222,7 +222,7 @@ class TestWriteExecution:
         handler = _get_handler("Write")
         ws = _make_ws()
 
-        result = await handler(path="new.py", content="print(1)", ws=ws)
+        result = await handler(path="new.py", content="print(1)", workspace=ws)
         assert "Successfully" in result
 
     @pytest.mark.asyncio
@@ -231,7 +231,7 @@ class TestWriteExecution:
         handler = _get_handler("Write")
         ws = _make_ws(write_file_ret="Error: permission denied")
 
-        result = await handler(path="/root/x.py", content="bad", ws=ws)
+        result = await handler(path="/root/x.py", content="bad", workspace=ws)
         assert "Error" in result
 
     @pytest.mark.asyncio
@@ -255,8 +255,8 @@ class TestEditExecution:
 
         result = await handler(
             path="test.py",
-            edits=[{"old_text": "a", "new_text": "b"}],
-            ws=ws,
+            edits=[{"old_string": "a", "new_string": "b"}],
+            workspace=ws,
         )
         assert "Successfully" in result
 
@@ -264,12 +264,12 @@ class TestEditExecution:
     async def test_edit_error(self):
         """Edit returns error on failure."""
         handler = _get_handler("Edit")
-        ws = _make_ws(edit_file_ret="Error: cannot find old_text")
+        ws = _make_ws(edit_file_ret="Error: cannot find old_string")
 
         result = await handler(
             path="test.py",
-            edits=[{"old_text": "missing", "new_text": "x"}],
-            ws=ws,
+            edits=[{"old_string": "missing", "new_string": "x"}],
+            workspace=ws,
         )
         assert "Error" in result
 
@@ -296,7 +296,7 @@ class TestGlobExecution:
         (tmp_path / "b.py").write_text("")
         (tmp_path / "c.txt").write_text("")
 
-        result = await handler(pattern="*.py", ws=ws)
+        result = await handler(pattern="*.py", workspace=ws)
         assert "a.py" in result
         assert "b.py" in result
         assert "c.txt" not in result
@@ -307,7 +307,7 @@ class TestGlobExecution:
         handler = _get_handler("Glob")
         ws = _make_ws(resolve_path_ret=str(tmp_path))
 
-        result = await handler(pattern="*.js", ws=ws)
+        result = await handler(pattern="*.js", workspace=ws)
         assert "No files matching" in result
 
     @pytest.mark.asyncio
@@ -332,7 +332,7 @@ class TestGrepExecution:
         (tmp_path / "a.py").write_text("def foo():\n    pass\n")
         (tmp_path / "b.py").write_text("def bar():\n    pass\n")
 
-        result = await handler(regex=r"def \w+", ws=ws)
+        result = await handler(regex=r"def \w+", workspace=ws)
         assert "foo" in result
         assert "bar" in result
 
@@ -344,7 +344,7 @@ class TestGrepExecution:
 
         (tmp_path / "a.py").write_text("hello")
 
-        result = await handler(regex="zzzzNOTFOUNDzzzz", ws=ws)
+        result = await handler(regex="zzzzNOTFOUNDzzzz", workspace=ws)
         assert "No matches" in result
 
     @pytest.mark.asyncio
@@ -353,7 +353,7 @@ class TestGrepExecution:
         handler = _get_handler("Grep")
         ws = _make_ws(resolve_path_ret=str(tmp_path))
 
-        result = await handler(regex="[open", ws=ws)
+        result = await handler(regex="[open", workspace=ws)
         assert "Error" in result
 
     @pytest.mark.asyncio
@@ -465,7 +465,7 @@ class TestPyReplExecution:
                 "print('pydantic', pydantic.__version__)\n"
             ),
             timeout_ms=5000,
-            ws=ws,
+            workspace=ws,
         )
 
         assert '{"answer": 42}' in result
@@ -926,7 +926,10 @@ class TestBrowserInspectExecution:
                 AsyncMock(return_value="opened"),
             ) as start_browsergym,
             patch("agent.tool_execution.close_browser_session", AsyncMock()) as close_browsergym,
-            patch("agent.runtime.subagents.run_subagent", AsyncMock(return_value="inspected")),
+            patch(
+                "agent.runtime.subagents.run_inline_subagent",
+                AsyncMock(return_value="inspected"),
+            ),
         ):
             result = await execute_one_tool(
                 {
@@ -975,7 +978,7 @@ class TestTaskListExecution:
         ws = MagicMock()
         ws.tasks_path.return_value = Path("/tmp/nonexistent_tasks.json")
 
-        result = await handler(ws=ws, session_id="s1")
+        result = await handler(workspace=ws, session_id="s1")
         assert "tasks" in result.lower() or "No tasks" in result
 
     @pytest.mark.asyncio
@@ -1012,7 +1015,7 @@ class TestTaskRewriteExecution:
                         "summary": "",
                     }
                 ],
-                ws=ws,
+                workspace=ws,
                 session_id="s1",
             )
             assert "updated" in result.lower() or "Task list" in result
@@ -1025,7 +1028,7 @@ class TestTaskRewriteExecution:
 
         result = await handler(
             tasks=[{"id": "", "status": "pending"}],
-            ws=ws,
+            workspace=ws,
             session_id="s1",
         )
         assert "Error" in result
@@ -1074,7 +1077,7 @@ class TestTaskUpdateExecution:
                 id="1",
                 status="done",
                 summary="Completed",
-                ws=ws,
+                workspace=ws,
                 session_id="s1",
             )
             assert "updated" in result.lower() or "Task" in result
@@ -1092,7 +1095,7 @@ class TestTaskUpdateExecution:
             id="nonexistent",
             status="done",
             summary="x",
-            ws=ws,
+            workspace=ws,
             session_id="s1",
         )
         assert "Error" in result or "does not exist" in result.lower()

@@ -8,7 +8,6 @@
 
 ── 对标 ──
 - Rust: byte_e2e_agent_rs/src/core/runtime.rs
-- 替代: agent/scheduler.py (Scheduler)
 """
 
 from __future__ import annotations
@@ -25,9 +24,14 @@ from agent.runtime.messages import (
     emit_error_message,
     finish_partial_streaming_message,
 )
-from agent.runtime.subagents import invoke_agent, invoke_browser_inspect, invoke_subagent
+from agent.runtime.subagents import (
+    create_and_run_subagent,
+    invoke_browser_inspect,
+    invoke_existing_session,
+)
 from agent.runtime.turn import execute_turn
-from agent.session.session_entry import SessionEntry
+from agent.session import load_session
+from agent.session.session_entry import RuntimeSession
 from agent.session.status import RuntimeStatus, SessionStatus
 from shared.hooks import HookManager
 from shared.types import Message
@@ -42,7 +46,7 @@ class RunState:
     """Mutable state for one currently executing session."""
 
     session_id: str
-    entry: SessionEntry
+    entry: RuntimeSession
     interrupt_event: asyncio.Event
     task: asyncio.Task | None = None
     streaming_holder: list[Message | None] | None = None
@@ -59,9 +63,9 @@ class AgentRuntime:
     多个顶层 Session 可以并行运行；同一个 Session 仍然一次只允许一个 Turn。
 
     用法:
-        ws = Workspace("/path/to/project", workspace_uuid="...")
+        workspace = Workspace("/path/to/project", workspace_uuid="...")
         hooks = HookManager([StreamDriverHook(), LoggingHook()])
-        runtime = AgentRuntime(ws, hooks)
+        runtime = AgentRuntime(workspace, hooks)
 
         session = runtime.create_session(SessionConfig.user_main("main", "gpt-4"))
         await runtime.invoke_user(session, "帮我写一个函数")
@@ -78,7 +82,7 @@ class AgentRuntime:
         self._workspace = workspace
         self._hooks = hook_manager or HookManager()
         self._llm = llm  # (client, model_id) tuple (lazy init if None)
-        self._sessions: dict[str, SessionEntry] = {}
+        self._sessions: dict[str, RuntimeSession] = {}
         self._runs: dict[str, RunState] = {}
         # Compatibility mirrors for older tests/callers. Runtime authority lives
         # in _runs; these point at the first active run when one exists.
@@ -136,16 +140,17 @@ class AgentRuntime:
         config: SessionConfig,
         session_id: str | None = None,
         llm_client=None,
-        ws: Workspace | None = None,
-    ) -> SessionEntry:
+        workspace: Workspace | None = None,
+    ) -> RuntimeSession:
         """创建新 Session。
 
         Args:
             config: Session 不可变配置
             session_id: 可选预定义 ID（不提供则自动生成）
             llm_client: LLM 客户端
-            ws: Workspace 实例
+            workspace: Workspace 实例
         """
+        workspace = workspace or self._workspace
         sid = session_id or _uuid.uuid4().hex[:12]
         self._workspace.ensure_dirs(sid)
         self._workspace.save_session_config(sid, config)
@@ -161,16 +166,18 @@ class AgentRuntime:
 
             write_session_prefix(self._workspace, sid, config)
 
-        entry = SessionEntry(
+        transcript = load_session(sid, workspace=workspace, repair=False)
+        entry = RuntimeSession(
             id=sid,
             config=config,
             llm_client=llm_client,
-            ws=ws or self._workspace,
+            workspace=workspace,
+            transcript=transcript,
         )
         self._sessions[sid] = entry
         return entry
 
-    def get_session(self, session_id: str) -> SessionEntry | None:
+    def get_session(self, session_id: str) -> RuntimeSession | None:
         """获取已有 Session。"""
         return self._sessions.get(session_id)
 
@@ -246,7 +253,7 @@ class AgentRuntime:
 
     def _begin_run(
         self,
-        entry: SessionEntry,
+        entry: RuntimeSession,
         *,
         interrupt_event: asyncio.Event | None = None,
     ) -> RunState:
@@ -268,7 +275,7 @@ class AgentRuntime:
 
     def _start_entry(
         self,
-        entry: SessionEntry,
+        entry: RuntimeSession,
         question: str,
         *,
         max_steps: int = 50,
@@ -299,7 +306,7 @@ class AgentRuntime:
 
     async def invoke_user(
         self,
-        session: SessionEntry,
+        session: RuntimeSession,
         question: str,
         *,
         max_steps: int = 50,
@@ -310,7 +317,7 @@ class AgentRuntime:
         对标 Rust AgentRuntime::invoke_user()。
 
         Args:
-            session: SessionEntry
+            session: RuntimeSession
             question: 用户问题
             max_steps: ReAct 最大步数
             shadow_repo: Git 快照仓库（可选）
@@ -330,7 +337,7 @@ class AgentRuntime:
 
     def start(
         self,
-        session: SessionEntry,
+        session: RuntimeSession,
         question: str,
         *,
         max_steps: int = 50,
@@ -346,7 +353,7 @@ class AgentRuntime:
 
     # ── Invoke: Agent → Agent ────────────────────────────
 
-    async def invoke_agent(
+    async def invoke_existing_session(
         self,
         caller_id: str,
         target_id: str,
@@ -356,7 +363,7 @@ class AgentRuntime:
         parent_message_id: str = "",
         parent_tool_call_id: str = "",
     ) -> str:
-        return await invoke_agent(
+        return await invoke_existing_session(
             self,
             caller_id,
             target_id,
@@ -366,7 +373,7 @@ class AgentRuntime:
             parent_tool_call_id=parent_tool_call_id,
         )
 
-    async def invoke_subagent(
+    async def create_and_run_subagent(
         self,
         caller_id: str,
         task: str,
@@ -376,7 +383,7 @@ class AgentRuntime:
         parent_message_id: str = "",
         parent_tool_call_id: str = "",
     ) -> str:
-        return await invoke_subagent(
+        return await create_and_run_subagent(
             self,
             caller_id,
             task,
@@ -482,7 +489,7 @@ class AgentRuntime:
 
     async def _execute_turn(
         self,
-        entry: SessionEntry,
+        entry: RuntimeSession,
         question: str,
         max_steps: int,
         shadow_repo=None,

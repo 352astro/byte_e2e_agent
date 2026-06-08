@@ -27,15 +27,18 @@ class GlobInput(BaseModel):
     )
 
 
-async def glob_handler(pattern: str, max_results: int = 200, *, ws) -> str:
+async def glob_handler(pattern: str, max_results: int = 200, *, workspace=None) -> str:
     """Find files matching a glob pattern and return sorted relative paths."""
+    workspace_obj = workspace
     try:
-        workspace = Path(ws.resolve_path("."))
+        workspace_path = Path(workspace_obj.resolve_path("."))
     except Exception:
-        workspace = Path(".")
+        workspace_path = Path(".")
 
     try:
-        matches = sorted(str(p.relative_to(workspace)) for p in workspace.rglob(pattern))
+        matches = sorted(
+            str(p.relative_to(workspace_path)) for p in workspace_path.rglob(pattern)
+        )
     except Exception as exc:
         return f"Error: invalid glob pattern '{pattern}': {exc}"
 

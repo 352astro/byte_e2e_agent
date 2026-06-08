@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from agent.core.config import SessionConfig, ToolSetPreset
 from agent.core.workspace import Workspace
 from agent.llm import create_client
-from agent.runtime.context_builder import build_preloaded_skills_context
+from agent.runtime.llm_context_builder import build_preloaded_skills_context
 from agent.session.status import SessionStatus
 from app.core.config import get_settings
 
@@ -107,7 +107,7 @@ def get_subagent_llm(runtime):
     ), model_id
 
 
-async def invoke_agent(
+async def invoke_existing_session(
     runtime,
     caller_id: str,
     target_id: str,
@@ -167,7 +167,7 @@ async def invoke_agent(
             caller_entry.transition_to(SessionStatus.RUNNING)
 
 
-async def invoke_subagent(
+async def create_and_run_subagent(
     runtime,
     caller_id: str,
     task: str,
@@ -191,7 +191,7 @@ async def invoke_subagent(
         preamble=preamble,
         tool_set_preset=ToolSetPreset.CUSTOM,
         custom_tools=child_tools,
-        rules=[task],
+        assigned_task=task,
         access=SessionConfig.subagent(
             parent_id=caller_id,
             name=f"subagent:{caller_id}",
@@ -203,7 +203,7 @@ async def invoke_subagent(
         config,
         session_id=child_id,
         llm_client=openai_client,
-        ws=runtime._workspace,
+        workspace=runtime._workspace,
     )
     write_subagent_metadata(
         runtime._workspace,
@@ -213,7 +213,7 @@ async def invoke_subagent(
         parent_tool_call_id=parent_tool_call_id,
         task=task,
     )
-    result = await runtime.invoke_agent(
+    result = await runtime.invoke_existing_session(
         caller_id,
         child_id,
         task,
@@ -252,7 +252,7 @@ async def invoke_browser_inspect(
         ),
         tool_set_preset=ToolSetPreset.CUSTOM,
         custom_tools=["BrowserObserve", "BrowserAct"],
-        rules=[prompt],
+        assigned_task=prompt,
         access=SessionConfig.subagent(
             parent_id=caller_id,
             name=f"browser:{caller_id}",
@@ -264,7 +264,7 @@ async def invoke_browser_inspect(
         config,
         session_id=child_id,
         llm_client=openai_client,
-        ws=runtime._workspace,
+        workspace=runtime._workspace,
     )
     write_subagent_metadata(
         runtime._workspace,
@@ -299,7 +299,7 @@ async def invoke_browser_inspect(
             "\n\nInitial page state:\n"
             f"{open_result}"
         )
-        result = await runtime.invoke_agent(
+        result = await runtime.invoke_existing_session(
             caller_id,
             child_id,
             task,
@@ -313,12 +313,12 @@ async def invoke_browser_inspect(
 
 
 # ═══════════════════════════════════════════════════════════
-# run_subagent — standalone subagent loop (moved from actions.py)
+# run_inline_subagent — standalone subagent loop (moved from actions.py)
 # ═══════════════════════════════════════════════════════════
 
 
-async def run_subagent(
-    ws,
+async def run_inline_subagent(
+    workspace,
     toolset,
     prompt: str,
     max_steps: int,
@@ -335,7 +335,7 @@ async def run_subagent(
     """Run a sub-agent within the same session from a blank context."""
     import uuid as _uuid
 
-    from agent.llm_call import model_call
+    from agent.llm_streaming import stream_model_call
     from agent.tool_execution import execute_one_tool
     from agent.tools.skill import get_skill
 
@@ -381,7 +381,7 @@ async def run_subagent(
 
         stream_id = _uuid.uuid4().hex
 
-        msg, finish_reason = await model_call(
+        msg, finish_reason = await stream_model_call(
             openai_client,
             model_id,
             session_id,
@@ -416,7 +416,7 @@ async def run_subagent(
                 break
             result = await execute_one_tool(
                 tc,
-                ws,
+                workspace,
                 toolset,
                 interrupt_event=interrupt_event,
                 openai_client=openai_client,

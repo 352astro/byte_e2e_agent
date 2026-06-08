@@ -5,7 +5,7 @@ Tests cover:
 - Session management (CRUD)
 - invoke_user (main entry point)
 - start (compat wrapper)
-- invoke_agent (agent-to-agent)
+- invoke_existing_session (agent-to-agent)
 - interrupt / resolve
 - State transitions
 - Concurrent execution prevention
@@ -34,7 +34,7 @@ from agent.core.workspace import Workspace
 # Import under test
 from agent.runtime import AgentRuntime
 from agent.runtime.subagents import get_subagent_llm
-from agent.session.session_entry import SessionEntry
+from agent.session.session_entry import RuntimeSession
 from agent.session.status import RuntimeStatus, SessionStatus
 from app.core.config import get_settings
 from shared.hooks import HookManager
@@ -47,7 +47,7 @@ from shared.hooks import HookManager
 
 def _make_mock_execute_turn_complete(runtime: AgentRuntime):
     async def _mock(
-        entry: SessionEntry,
+        entry: RuntimeSession,
         question: str,
         max_steps: int,
         shadow_repo=None,
@@ -61,7 +61,7 @@ def _make_mock_execute_turn_complete(runtime: AgentRuntime):
 
 def _make_mock_execute_turn_interrupted(runtime: AgentRuntime):
     async def _mock(
-        entry: SessionEntry,
+        entry: RuntimeSession,
         question: str,
         max_steps: int,
         shadow_repo=None,
@@ -79,7 +79,7 @@ def _make_mock_execute_turn_interrupted(runtime: AgentRuntime):
 
 def _make_mock_execute_turn_hanging(runtime: AgentRuntime):
     async def _mock(
-        entry: SessionEntry,
+        entry: RuntimeSession,
         question: str,
         max_steps: int,
         shadow_repo=None,
@@ -90,7 +90,7 @@ def _make_mock_execute_turn_hanging(runtime: AgentRuntime):
 
 
 async def _mock_invoke_execute_turn(
-    entry: SessionEntry,
+    entry: RuntimeSession,
     question: str,
     max_steps: int,
     shadow_repo=None,
@@ -309,14 +309,15 @@ class TestSubAgentLlmConfig:
 class TestSessionManagement:
     """Tests for create_session, get_session, list_sessions, is_running_session."""
 
-    def test_create_session_returns_session_entry(self):
-        """create_session(config) returns a SessionEntry."""
+    def test_create_session_returns_runtime_session(self):
+        """create_session(config) returns a RuntimeSession."""
         runtime = _make_runtime()
         config = _make_config()
         entry = runtime.create_session(config)
-        assert isinstance(entry, SessionEntry)
+        assert isinstance(entry, RuntimeSession)
         assert entry.config is config
         assert entry.id  # auto-generated
+        assert entry.transcript.session_id == entry.id
 
     def test_create_session_with_custom_id(self):
         """create_session accepts an explicit session_id."""
@@ -334,7 +335,7 @@ class TestSessionManagement:
         assert runtime._sessions["sid1"] is entry
 
     def test_get_session_returns_entry(self):
-        """get_session returns the SessionEntry for a known id."""
+        """get_session returns the RuntimeSession for a known id."""
         runtime = _make_runtime()
         config = _make_config()
         entry = runtime.create_session(config, session_id="sid1")
@@ -558,23 +559,27 @@ class TestStart:
 
 
 # ═══════════════════════════════════════════════════════════
-# invoke_agent (Agent → Agent)
+# invoke_existing_session (Agent → Agent)
 # ═══════════════════════════════════════════════════════════
 
 
-class TestInvokeAgent:
-    """Tests for AgentRuntime.invoke_agent()."""
+class TestInvokeExistingSession:
+    """Tests for AgentRuntime.invoke_existing_session()."""
 
     @pytest.mark.asyncio
     async def test_returns_error_when_target_not_found(self):
-        """invoke_agent returns an error string when target_id can't be resolved."""
+        """invoke_existing_session returns an error when target_id can't be resolved."""
         runtime = _make_runtime()
-        result = await runtime.invoke_agent("caller-id", "nonexistent", "do something")
+        result = await runtime.invoke_existing_session(
+            "caller-id",
+            "nonexistent",
+            "do something",
+        )
         assert "not found" in result.lower() or "error" in result.lower()
 
     @pytest.mark.asyncio
     async def test_returns_error_when_permission_denied(self):
-        """invoke_agent returns an error when access policy denies invoke."""
+        """invoke_existing_session returns an error when access policy denies invoke."""
         runtime = _make_runtime()
         # Create a session with OWNER_ONLY access owned by a different session
         owner = Owner.session("owner-id")
@@ -589,12 +594,16 @@ class TestInvokeAgent:
         )
         runtime.create_session(config, session_id="protected-id")
 
-        result = await runtime.invoke_agent("caller-id", "protected-id", "do something")
+        result = await runtime.invoke_existing_session(
+            "caller-id",
+            "protected-id",
+            "do something",
+        )
         assert "does not allow invoke" in result.lower() or "error" in result.lower()
 
     @pytest.mark.asyncio
     async def test_resolves_target_id_by_prefix(self):
-        """invoke_agent resolves target_id via _resolve_id (prefix matching)."""
+        """invoke_existing_session resolves target_id via _resolve_id."""
         runtime = _make_runtime()
         config = _make_config()
         runtime.create_session(config, session_id="abcdef123456")
@@ -605,19 +614,23 @@ class TestInvokeAgent:
         # Patch the access to allow any agent
         with patch.object(entry.config.access, "can_invoke", return_value=True):
             with patch.object(runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn):
-                result = await runtime.invoke_agent("caller-id", "abc", "do something")
+                result = await runtime.invoke_existing_session(
+                    "caller-id",
+                    "abc",
+                    "do something",
+                )
             # Should resolve to abcdef123456 and not return an error
             assert "error" not in result.lower()
             assert "abcdef123456" in result
 
     @pytest.mark.asyncio
     async def test_calls_hooks_on_subagent_start_and_end(self):
-        """invoke_agent calls hook_manager.on_subagent_start and on_subagent_end."""
+        """invoke_existing_session calls subagent start/end hooks."""
         hm = MagicMock(spec=HookManager)
         hm.on_subagent_start = AsyncMock()
         hm.on_subagent_end = AsyncMock()
-        # Dispatch is used by convenience methods, but invoke_agent calls
-        # self._hooks.on_subagent_start/end directly — which are the
+        # Dispatch is used by convenience methods, but invoke_existing_session
+        # calls self._hooks.on_subagent_start/end directly, which are the
         # HookManager convenience methods that call dispatch.
         # We mock the convenience methods directly.
         runtime = AgentRuntime(workspace=_make_workspace(), hook_manager=hm)
@@ -630,7 +643,12 @@ class TestInvokeAgent:
         assert entry is not None
         with patch.object(entry.config.access, "can_invoke", return_value=True):
             with patch.object(runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn):
-                await runtime.invoke_agent("caller-id", "target-id", "do task", max_turns=5)
+                await runtime.invoke_existing_session(
+                    "caller-id",
+                    "target-id",
+                    "do task",
+                    max_turns=5,
+                )
 
         hm.on_subagent_start.assert_called_once()
         call_kwargs = hm.on_subagent_start.call_args.kwargs
@@ -642,7 +660,7 @@ class TestInvokeAgent:
 
     @pytest.mark.asyncio
     async def test_caller_transitions_to_pending_then_running(self):
-        """invoke_agent transitions caller to PENDING then back to RUNNING."""
+        """invoke_existing_session transitions caller to PENDING then back to RUNNING."""
         runtime = _make_runtime()
         config = _make_config()
 
@@ -652,15 +670,19 @@ class TestInvokeAgent:
         # Allow invoke
         with patch.object(target.config.access, "can_invoke", return_value=True):
             with patch.object(runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn):
-                await runtime.invoke_agent("caller-id", "target-id", "do task")
+                await runtime.invoke_existing_session(
+                    "caller-id",
+                    "target-id",
+                    "do task",
+                )
 
-        # After invoke_agent completes, caller should be back to RUNNING
+        # After invoke_existing_session completes, caller should be back to RUNNING
         # (It goes PENDING during the call, RUNNING after)
         assert caller.status == SessionStatus.RUNNING
 
     @pytest.mark.asyncio
     async def test_caller_pending_during_invoke(self):
-        """While invoke_agent is awaiting, the caller is in PENDING state."""
+        """While invoke_existing_session is awaiting, caller is PENDING."""
         runtime = _make_runtime()
         config = _make_config()
 
@@ -681,7 +703,11 @@ class TestInvokeAgent:
         with patch.object(target.config.access, "can_invoke", return_value=True):
             with patch.object(runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn):
                 task = asyncio.create_task(
-                    runtime.invoke_agent("caller-id", "target-id", "do task")
+                    runtime.invoke_existing_session(
+                        "caller-id",
+                        "target-id",
+                        "do task",
+                    )
                 )
                 # Give the task time to start and transition
                 await asyncio.sleep(0.05)

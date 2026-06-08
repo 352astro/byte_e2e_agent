@@ -96,7 +96,7 @@ async def shell_handler(
     max_bytes: int = 20000,
     command: str = "",
     *,
-    ws,
+    workspace=None,
     interrupt_event: asyncio.Event | None = None,
 ) -> ToolResult:
     """Execute a shell command in the workspace with async interrupt.
@@ -109,7 +109,7 @@ async def shell_handler(
       5. Normal exit: collect all output, return with exit code annotation.
     """
     try:
-        workdir = str(ws.resolve(cwd, external_mode="readwrite"))
+        workdir = str(workspace.resolve(cwd, external_mode="readwrite"))
     except PermissionError as exc:
         return ToolResult(
             f"Error: {exc}",
@@ -133,7 +133,7 @@ async def shell_handler(
         )
 
     terminal = PersistentTerminal()
-    terminal.start(workdir, sandbox_root=str(ws.root), workspace_uuid=ws.uuid)
+    terminal.start(workdir, sandbox_root=str(workspace.root), workspace_uuid=workspace.uuid)
 
     result_queue: queue.Queue[object] = queue.Queue(maxsize=1)
     result_status = "success"

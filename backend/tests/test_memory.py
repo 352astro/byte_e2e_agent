@@ -12,11 +12,12 @@ from shared.types import Message
 
 @pytest.mark.asyncio
 async def test_sqlite_memory_store_dedupes_by_workspace_scope_kind_hash(tmp_path):
-    store = SQLiteMemoryStore(tmp_path)
+    workspace = "test-memory-dedupe"
+    store = SQLiteMemoryStore(workspace)
 
     await store.add(
         MemoryRecord(
-            workspace=str(tmp_path),
+            workspace=workspace,
             session_id="s1",
             turn_id="t1",
             scope="workspace",
@@ -26,7 +27,7 @@ async def test_sqlite_memory_store_dedupes_by_workspace_scope_kind_hash(tmp_path
     )
     await store.add(
         MemoryRecord(
-            workspace=str(tmp_path),
+            workspace=workspace,
             session_id="s2",
             turn_id="t2",
             scope="workspace",
@@ -38,7 +39,7 @@ async def test_sqlite_memory_store_dedupes_by_workspace_scope_kind_hash(tmp_path
     assert await store.count() == 1
     results = await store.search(
         "SQLite memory",
-        workspace=str(tmp_path),
+        workspace=workspace,
         scopes=("workspace",),
     )
     assert len(results) == 1
@@ -48,10 +49,11 @@ async def test_sqlite_memory_store_dedupes_by_workspace_scope_kind_hash(tmp_path
 
 @pytest.mark.asyncio
 async def test_memory_store_filters_session_scope(tmp_path):
-    store = SQLiteMemoryStore(tmp_path)
+    workspace = "test-memory-session-filter"
+    store = SQLiteMemoryStore(workspace)
     await store.add(
         MemoryRecord(
-            workspace=str(tmp_path),
+            workspace=workspace,
             session_id="s1",
             scope="session",
             kind="fact",
@@ -60,7 +62,7 @@ async def test_memory_store_filters_session_scope(tmp_path):
     )
     await store.add(
         MemoryRecord(
-            workspace=str(tmp_path),
+            workspace=workspace,
             session_id="s2",
             scope="session",
             kind="fact",
@@ -71,7 +73,7 @@ async def test_memory_store_filters_session_scope(tmp_path):
     results = await store.search(
         "pytest",
         session_id="s1",
-        workspace=str(tmp_path),
+        workspace=workspace,
         scopes=("session",),
     )
 
@@ -80,10 +82,11 @@ async def test_memory_store_filters_session_scope(tmp_path):
 
 @pytest.mark.asyncio
 async def test_memory_store_recalls_cjk_natural_question(tmp_path):
-    store = SQLiteMemoryStore(tmp_path)
+    workspace = "test-memory-cjk"
+    store = SQLiteMemoryStore(workspace)
     await store.add(
         MemoryRecord(
-            workspace=str(tmp_path),
+            workspace=workspace,
             session_id="s1",
             scope="workspace",
             kind="preference",
@@ -94,7 +97,7 @@ async def test_memory_store_recalls_cjk_natural_question(tmp_path):
     results = await store.search(
         "请问我最爱喝什么？",
         session_id="s2",
-        workspace=str(tmp_path),
+        workspace=workspace,
         scopes=("workspace", "session"),
     )
 
@@ -103,7 +106,12 @@ async def test_memory_store_recalls_cjk_natural_question(tmp_path):
 
 
 class ExtractingMemoryHook(MemoryHook):
-    async def _llm_call(self, prompt: str, max_tokens: int = 120) -> str:
+    async def _llm_call(
+        self,
+        prompt: str,
+        max_tokens: int = 120,
+        call_type: str = "memory",
+    ) -> str:
         return json.dumps(
             {
                 "memories": [
@@ -149,7 +157,12 @@ class PickingMemoryHook(MemoryHook):
         super().__init__(*args, **kwargs)
         self.pick_prompt = ""
 
-    async def _llm_call(self, prompt: str, max_tokens: int = 120) -> str:
+    async def _llm_call(
+        self,
+        prompt: str,
+        max_tokens: int = 120,
+        call_type: str = "memory",
+    ) -> str:
         self.pick_prompt = prompt
         return "1"
 

@@ -106,11 +106,11 @@ async def _debug_bridge_silent(msg: Message | None, label: str) -> None:
 
 
 # ═══════════════════════════════════════════════════════════
-# model_call
+# stream_model_call
 # ═══════════════════════════════════════════════════════════
 
 
-async def model_call(
+async def stream_model_call(
     client,  # openai.OpenAI
     model_id: str,
     session_id: str,

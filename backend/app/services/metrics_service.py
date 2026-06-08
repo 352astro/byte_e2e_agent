@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.context import WorkspaceContext
+from app.services.workspace_context import WorkspaceContext
 
 
 class MetricsService:

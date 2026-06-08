@@ -1,7 +1,7 @@
-"""SessionEntry — 单个 Session 的完整运行时聚合。
+"""RuntimeSession — single session runtime state.
 
 ── 职责 ──
-- 持有 Session 数据容器 + 运行时状态 + 配置
+- 持有 SessionTranscript + 运行时状态 + 配置
 - 对标 Rust session/entry.rs
 
 ── 对标 ──
@@ -10,29 +10,53 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from agent.core.config import SessionConfig
 from agent.core.workspace import Workspace
+from agent.session.session import SessionTranscript, load_session
 from agent.session.status import SessionStatus
 
 
-@dataclass
-class SessionEntry:
-    """单个 Session 的运行时入口。
+@dataclass(init=False)
+class RuntimeSession:
+    """Runtime state and dependencies for one agent session.
 
-    对标 Rust SessionEntry:
+    对标 Rust RuntimeSession:
     - id: 唯一标识
     - config: 不可变配置
     - status: 运行时状态
-    - 持有 LLM 客户端、Workspace
+    - 持有 LLM 客户端、Workspace、SessionTranscript
     """
 
     id: str
     config: SessionConfig
     llm_client: object | None = None  # client or (client, model_id)
-    ws: Workspace = field(default_factory=Workspace)
+    workspace: Workspace
+    transcript: SessionTranscript
     status: SessionStatus = SessionStatus.IDLE
+
+    def __init__(
+        self,
+        id: str,
+        config: SessionConfig,
+        llm_client: object | None = None,
+        workspace: Workspace | None = None,
+        transcript: SessionTranscript | None = None,
+        status: SessionStatus = SessionStatus.IDLE,
+    ) -> None:
+        self.id = id
+        self.config = config
+        self.llm_client = llm_client
+        if workspace is None:
+            raise ValueError("RuntimeSession requires a workspace")
+        self.workspace = workspace
+        self.transcript = transcript or load_session(
+            id,
+            workspace=self.workspace,
+            repair=False,
+        )
+        self.status = status
 
     @property
     def model_id(self) -> str:

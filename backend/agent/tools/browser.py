@@ -572,7 +572,7 @@ async def browser_observe_handler(
     max_bytes: int = 80_000,
     detail: str = "full",
     *,
-    ws=None,
+    workspace=None,
     session_id: str = "",
     interrupt_event=None,
 ) -> str:
@@ -683,7 +683,7 @@ async def browser_act_handler(
     button: str = "left",
     options: str | list[str] = "",
     *,
-    ws=None,
+    workspace=None,
     session_id: str = "",
     interrupt_event=None,
 ) -> str:

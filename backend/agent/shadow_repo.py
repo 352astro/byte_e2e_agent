@@ -62,9 +62,9 @@ class ShadowRepo:
     def _branch_ref(session_id: str) -> bytes:
         return f"refs/heads/{session_id}".encode()
 
-    def __init__(self, ws: Workspace) -> None:
-        self._workdir = os.path.abspath(str(ws.root))
-        self._repodir = os.path.abspath(str(shadow_repo_dir(ws.uuid)))
+    def __init__(self, workspace: Workspace) -> None:
+        self._workdir = os.path.abspath(str(workspace.root))
+        self._repodir = os.path.abspath(str(shadow_repo_dir(workspace.uuid)))
 
         # ── open or init bare repo ──────────────────────
         _ensure_dir(self._repodir)

@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.dependencies import get_context as get_workspace_context
-from app.services.context import WorkspaceContext
+from app.services.workspace_context import WorkspaceContext
 from shared.types import StreamEvent
 
 logger = logging.getLogger(__name__)
@@ -83,9 +83,9 @@ async def notification_respond(
 ):
     """Respond to a pending guard request by its request_id."""
     # Resolve on the runtime (which holds _pending)
-    scheduler = ctx.scheduler
+    runtime = ctx.runtime
     try:
-        await scheduler.resolve(request_id, req.response)
+        await runtime.resolve(request_id, req.response)
     except KeyError:
         raise HTTPException(status_code=404, detail="Pending request not found") from None
 

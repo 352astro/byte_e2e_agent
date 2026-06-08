@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import re
 
-from app.services.context import WorkspaceContext
 from app.services.errors import CommitNotFound, SessionNotFound
 from app.services.session_scope import SessionLocator
 from app.services.session_service import SessionService
+from app.services.workspace_context import WorkspaceContext
 
 _SUBAGENT_RESULT_RE = re.compile(r"SubAgent session ([A-Za-z0-9_-]+) completed")
 

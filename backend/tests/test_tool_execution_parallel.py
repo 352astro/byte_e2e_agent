@@ -86,7 +86,7 @@ async def _allow_guard(*args, **kwargs) -> bool:
     return True
 
 
-async def _invoke_subagent(**kwargs) -> str:
+async def _run_child_agent(**kwargs) -> str:
     return "subagent"
 
 
@@ -106,14 +106,14 @@ async def test_read_tools_run_in_parallel(tmp_path):
     start = time.perf_counter()
     await execute_tool_calls(
         assistant_msg=msg,
-        ws=_workspace(tmp_path),
+        workspace=_workspace(tmp_path),
         toolset=_toolset("Read", "Grep"),
         interrupt_event=asyncio.Event(),
         session_id="sid",
         turn_id="turn",
         hook_manager=HookManager([capture]),
         ask_guard=_allow_guard,
-        invoke_subagent=_invoke_subagent,
+        run_child_agent=_run_child_agent,
         request_human_input=_request_human_input,
     )
     elapsed = time.perf_counter() - start
@@ -135,14 +135,14 @@ async def test_barrier_tool_splits_parallel_batches(tmp_path):
     start = time.perf_counter()
     await execute_tool_calls(
         assistant_msg=msg,
-        ws=_workspace(tmp_path),
+        workspace=_workspace(tmp_path),
         toolset=_toolset("Read", "Shell", "Grep"),
         interrupt_event=asyncio.Event(),
         session_id="sid",
         turn_id="turn",
         hook_manager=HookManager([capture]),
         ask_guard=_allow_guard,
-        invoke_subagent=_invoke_subagent,
+        run_child_agent=_run_child_agent,
         request_human_input=_request_human_input,
     )
     elapsed = time.perf_counter() - start
@@ -168,18 +168,18 @@ async def test_browser_inspect_tools_run_in_parallel(tmp_path):
         await asyncio.sleep(0.18)
         return prompt
 
-    with patch("agent.runtime.subagents.run_subagent") as standalone_run_subagent:
+    with patch("agent.runtime.subagents.run_inline_subagent") as standalone_run_subagent:
         start = time.perf_counter()
         await execute_tool_calls(
             assistant_msg=msg,
-            ws=_workspace(tmp_path),
+            workspace=_workspace(tmp_path),
             toolset=ToolSet(tool_registry, "BrowserInspect"),
             interrupt_event=asyncio.Event(),
             session_id="sid",
             turn_id="turn",
             hook_manager=HookManager([capture]),
             ask_guard=_allow_guard,
-            invoke_subagent=_invoke_subagent,
+            run_child_agent=_run_child_agent,
             invoke_browser_inspect=fake_browser_inspect,
             request_human_input=_request_human_input,
         )

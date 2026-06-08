@@ -12,13 +12,14 @@ from agent.tools.skill import (
     upsert_custom_skill,
 )
 from app.dependencies import get_settings_service
-from app.schemas.session import (
-    SessionSettings,
+from app.schemas.settings import SessionSettings
+from app.schemas.skills import (
     SkillDetailResponse,
     SkillListResponse,
     SkillUpsertRequest,
-    SysguardRuleRequest,
-    SysguardSettingsResponse,
+)
+from app.schemas.sysguard import SysguardRuleRequest, SysguardSettingsResponse
+from app.schemas.tools import (
     ToolPermissionSettings,
     ToolPresetListResponse,
 )

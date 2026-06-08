@@ -216,7 +216,7 @@ class SQLiteMemoryStore(MemoryStore):
     def __init__(self, workspace_uuid: str) -> None:
         from agent.paths import workspace_data_dir
 
-        self._workspace_uuid = workspace_uuid
+        self._workspace_uuid = str(workspace_uuid)
         self._db_path = workspace_data_dir(workspace_uuid) / "memory.db"
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None

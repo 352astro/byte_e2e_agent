@@ -7,10 +7,13 @@ set_head, delete_branch, and integration flow.
 
 import os
 import tempfile
+import uuid
 from pathlib import Path
 
 import pytest
 
+from agent.core.workspace import Workspace
+from agent.paths import shadow_repo_dir
 from agent.shadow_repo import ShadowRepo
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -48,9 +51,8 @@ def workdir():
 
 @pytest.fixture
 def shadow(workdir: str) -> ShadowRepo:
-    """Create a ShadowRepo with repodir under workdir's .byte_agent/.shadow-vcs."""
-    repodir = os.path.join(workdir, ".byte_agent", ".shadow-vcs")
-    return ShadowRepo(workdir=workdir, repodir=repodir)
+    """Create a ShadowRepo for a test workspace."""
+    return ShadowRepo(Workspace(workdir, workspace_uuid=f"test-shadow-{uuid.uuid4().hex}"))
 
 
 @pytest.fixture
@@ -64,28 +66,27 @@ def branch() -> str:
 class TestConstruction:
     def test_creates_repo_directory(self, workdir: str):
         """Constructor creates repo directory."""
-        repodir = os.path.join(workdir, ".byte_agent", ".shadow-vcs")
-        ShadowRepo(workdir=workdir, repodir=repodir)
-        assert os.path.isdir(repodir)
+        workspace = Workspace(workdir, workspace_uuid="test-shadow-create")
+        ShadowRepo(workspace)
+        assert shadow_repo_dir(workspace.uuid).is_dir()
 
     def test_works_with_string_workspace(self):
         """Works with string workspace."""
         with tempfile.TemporaryDirectory() as d:
-            repodir = os.path.join(d, ".byte_agent", ".shadow-vcs")
-            sr = ShadowRepo(workdir=d, repodir=repodir)
+            sr = ShadowRepo(Workspace(d, workspace_uuid="test-shadow-string"))
             assert os.path.isdir(sr._repodir)
 
     def test_works_with_path_workspace(self):
         """Works with Path workspace (converted to string via str())."""
         with tempfile.TemporaryDirectory() as d:
-            repodir = os.path.join(str(Path(d)), ".byte_agent", ".shadow-vcs")
-            sr = ShadowRepo(workdir=str(Path(d)), repodir=repodir)
+            sr = ShadowRepo(Workspace(Path(d), workspace_uuid="test-shadow-path"))
             assert os.path.isdir(sr._repodir)
 
     def test_repodir_under_agent_dir_shadow_vcs(self, shadow: ShadowRepo, workdir: str):
         """repo_dir is under .byte_agent/.shadow-vcs."""
-        expected = os.path.join(workdir, ".byte_agent", ".shadow-vcs")
-        assert shadow._repodir == os.path.abspath(expected)
+        path = Path(shadow._repodir)
+        assert path.name == ".shadow-vcs"
+        assert path.parent.parent.name == "workspaces"
 
 
 # ── snapshot ──────────────────────────────────────────────────────────

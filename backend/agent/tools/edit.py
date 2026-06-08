@@ -16,11 +16,11 @@ class EditInput(BaseModel):
     edits: list[EditOpModel] = Field(..., description="Ordered find-and-replace ops.")
 
 
-async def edit_handler(path: str, edits: list[dict], *, ws) -> str:
+async def edit_handler(path: str, edits: list[dict], *, workspace=None) -> str:
     """Apply ordered find-and-replace edits to a file."""
     # StructuredTool will parse edits as list of dicts from the LLM JSON
     ops = [{"old_text": e["old_string"], "new_text": e["new_string"]} for e in edits]
-    return await ws.edit_file(path, ops)
+    return await workspace.edit_file(path, ops)
 
 
 edit_tool = StructuredTool.from_function(

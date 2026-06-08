@@ -12,14 +12,14 @@ from app.services.chat_service import ChatService
 from app.services.errors import AgentBusy, PendingRequestNotFound, SessionNotFound
 
 
-def _make_ctx(*, get_session_side_effect=None, scheduler_start_side_effect=None):
+def _make_ctx(*, get_session_side_effect=None, runtime_start_side_effect=None):
     ctx = MagicMock()
     if get_session_side_effect is not None:
         ctx.get_session.side_effect = get_session_side_effect
     else:
         ctx.get_session.return_value = MagicMock()
-    if scheduler_start_side_effect is not None:
-        ctx.scheduler.start.side_effect = scheduler_start_side_effect
+    if runtime_start_side_effect is not None:
+        ctx.runtime.start.side_effect = runtime_start_side_effect
     ctx.scoped.return_value = ctx
     ctx.stream_driver.subscribe.return_value = asyncio.Queue()
     ctx.create_runtime_session_entry.return_value = MagicMock()
@@ -39,7 +39,7 @@ def test_start_chat_raises_session_not_found() -> None:
 
 def test_start_chat_raises_agent_busy() -> None:
     ctx = _make_ctx(
-        scheduler_start_side_effect=RuntimeError("Scheduler already running (state=running)")
+        runtime_start_side_effect=RuntimeError("Runtime already running (state=running)")
     )
     service = ChatService(ctx)
     service._locator.resolve = MagicMock(return_value=SimpleNamespace(workspace="workspace"))
@@ -51,7 +51,7 @@ def test_start_chat_raises_agent_busy() -> None:
 @pytest.mark.asyncio
 async def test_respond_raises_pending_not_found() -> None:
     ctx = _make_ctx()
-    ctx.scheduler.resolve.side_effect = KeyError("No pending request: tid1")
+    ctx.runtime.resolve.side_effect = KeyError("No pending request: tid1")
     service = ChatService(ctx)
     service._locator.resolve = MagicMock(return_value=SimpleNamespace(workspace="workspace"))
 

@@ -9,15 +9,15 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.workspace import Workspace as CoreWorkspace
-from app.services.context import WorkspaceContext
 from app.services.errors import AmbiguousSession, SessionNotFound
+from app.services.workspace_context import WorkspaceContext
 from app.services.workspace_registry import list_workspaces, register_workspace
 
 SESSION_META_FILE = "session.json"
 
 
 @dataclass(frozen=True)
-class SessionScope:
+class SessionLocation:
     session_id: str
     workspace: str
     session_dir: Path
@@ -35,7 +35,7 @@ class SessionLocator:
         session_id: str,
         *,
         workspace_hint: str | None = None,
-    ) -> SessionScope:
+    ) -> SessionLocation:
         candidates = self._candidate_workspaces(workspace_hint)
         matches = [
             scope
@@ -66,7 +66,7 @@ class SessionLocator:
         return result
 
     @staticmethod
-    def _scope_if_exists(workspace: str, session_id: str) -> SessionScope | None:
+    def _scope_if_exists(workspace: str, session_id: str) -> SessionLocation | None:
         try:
             resolved_workspace, workspace_uuid = register_workspace(workspace)
         except ValueError:
@@ -79,7 +79,7 @@ class SessionLocator:
         messages_path = session_dir / "messages.jsonl"
         if not messages_path.is_file():
             return None
-        return SessionScope(
+        return SessionLocation(
             session_id=session_id,
             workspace=resolved_workspace,
             session_dir=session_dir,
@@ -89,7 +89,7 @@ class SessionLocator:
         )
 
 
-def read_session_metadata(scope: SessionScope) -> dict[str, Any]:
+def read_session_metadata(scope: SessionLocation) -> dict[str, Any]:
     if not scope.metadata_path.is_file():
         return {}
     try:
@@ -99,7 +99,7 @@ def read_session_metadata(scope: SessionScope) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def write_session_metadata(scope: SessionScope) -> None:
+def write_session_metadata(scope: SessionLocation) -> None:
     now = datetime.now(UTC).isoformat()
     existing = read_session_metadata(scope)
     payload = {

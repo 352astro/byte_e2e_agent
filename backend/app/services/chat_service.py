@@ -6,9 +6,9 @@ import asyncio
 from dataclasses import dataclass
 
 from agent.hook.stream_hook import StreamDriverHook
-from app.services.context import WorkspaceContext
 from app.services.errors import AgentBusy, PendingRequestNotFound, SessionNotFound
 from app.services.session_scope import SessionLocator
+from app.services.workspace_context import WorkspaceContext
 from shared.types import StreamEvent
 
 
@@ -40,7 +40,7 @@ class ChatService:
         queue = driver.subscribe(session_id)
         entry = ctx.create_runtime_session_entry(session_id)
         try:
-            ctx.scheduler.start(
+            ctx.runtime.start(
                 entry,
                 question,
                 max_steps=max_steps,
@@ -69,6 +69,6 @@ class ChatService:
         try:
             scope = self._locator.resolve(session_id)
             ctx = self._ctx.scoped(scope.workspace)
-            await ctx.scheduler.resolve(message_id, response)
+            await ctx.runtime.resolve(message_id, response)
         except KeyError as exc:
             raise PendingRequestNotFound(message_id) from exc

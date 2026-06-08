@@ -252,7 +252,7 @@ class TestToolHandlers:
 
         ws = Workspace(tmp_path, workspace_uuid="test-workspace")
         tool = tool_registry.get("Shell")
-        result = await tool.coroutine(command="echo hi", ws=ws)
+        result = await tool.coroutine(command="echo hi", workspace=ws)
         assert "hi" in result
 
     @pytest.mark.asyncio
@@ -261,7 +261,7 @@ class TestToolHandlers:
 
         ws = Workspace(tmp_path, workspace_uuid="test-workspace")
         tool = tool_registry.get("Shell")
-        result = await tool.coroutine(command="exit 7", ws=ws)
+        result = await tool.coroutine(command="exit 7", workspace=ws)
         assert "exit code: 7" in result
 
     @pytest.mark.asyncio
@@ -270,7 +270,7 @@ class TestToolHandlers:
 
         ws = Workspace(tmp_path, workspace_uuid="test-workspace")
         tool = tool_registry.get("Shell")
-        result = await tool.coroutine(command="sleep 2", timeout_ms=1000, ws=ws)
+        result = await tool.coroutine(command="sleep 2", timeout_ms=1000, workspace=ws)
         assert "timed out" in result.lower()
 
     @pytest.mark.asyncio
@@ -280,7 +280,7 @@ class TestToolHandlers:
         (tmp_path / "sub").mkdir()
         ws = Workspace(tmp_path, workspace_uuid="test-workspace")
         tool = tool_registry.get("Shell")
-        result = await tool.coroutine(command="pwd", cwd="sub", ws=ws)
+        result = await tool.coroutine(command="pwd", cwd="sub", workspace=ws)
         assert str(tmp_path / "sub") in result
 
     @pytest.mark.asyncio
@@ -292,7 +292,7 @@ class TestToolHandlers:
         result = await tool.coroutine(
             command="printf 1234567890",
             max_bytes=5,
-            ws=ws,
+            workspace=ws,
         )
         assert result.startswith("12345")
         assert "output truncated" in result
@@ -306,7 +306,7 @@ class TestToolHandlers:
         result = await tool.coroutine(
             command="nohup sh -c 'sleep 0.2; echo done > nohup.out' >/dev/null 2>&1 &",
             timeout_ms=1000,
-            ws=ws,
+            workspace=ws,
         )
         await asyncio.sleep(0.5)
         assert "timed out" not in result.lower()
@@ -328,7 +328,7 @@ class TestToolHandlers:
         result = await tool.coroutine(
             command="sleep 5",
             timeout_ms=5000,
-            ws=ws,
+            workspace=ws,
             interrupt_event=interrupt_event,
         )
         await task
@@ -341,7 +341,7 @@ class TestToolHandlers:
         ws = AsyncMock()
         ws.read_file.return_value = "line1\nline2\nline3"
         tool = tool_registry.get("Read")
-        result = await tool.coroutine(path="test.py", ws=ws)
+        result = await tool.coroutine(path="test.py", workspace=ws)
         assert "line1" in result
 
     @pytest.mark.asyncio
@@ -354,7 +354,7 @@ class TestToolHandlers:
 
         ws = Workspace(tmp_path, workspace_uuid="test-workspace")
         tool = tool_registry.get("ListDir")
-        result = await tool.coroutine(path=".", recursive=True, ws=ws)
+        result = await tool.coroutine(path=".", recursive=True, workspace=ws)
 
         assert "src/" in result
         assert "app.py" in result
@@ -367,7 +367,7 @@ class TestToolHandlers:
         ws = AsyncMock()
         ws.write_file.return_value = "Successfully wrote test.py"
         tool = tool_registry.get("Write")
-        result = await tool.coroutine(path="test.py", content="data", ws=ws)
+        result = await tool.coroutine(path="test.py", content="data", workspace=ws)
         assert "Successfully" in result
 
     @pytest.mark.asyncio

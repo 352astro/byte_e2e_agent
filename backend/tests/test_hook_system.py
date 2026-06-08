@@ -500,20 +500,20 @@ class TestLoggingHook:
         captured = capsys.readouterr()
         assert "hello world" in captured.out
 
-    def test_step_counter_resets_on_turn_start(self):
-        """on_turn_start 重置 step 计数器。"""
+    def test_turn_start_keeps_output_state_clean(self):
+        """on_turn_start 重置输出换行状态。"""
         hook = LoggingHook(verbose=True)
-        hook._step = 5
+        hook._line_empty = False
         import asyncio
 
         async def _run():
             await hook.on_turn_start(turn_id="t", session_id="s", user_question="q")
 
         asyncio.run(_run())
-        assert hook._step == 0
+        assert hook._line_empty is True
 
-    def test_step_counter_increments_on_message_start(self):
-        """on_message_start 递增 step。"""
+    def test_message_start_is_noop(self):
+        """on_message_start 不再维护额外 step 状态。"""
         hook = LoggingHook(verbose=True)
         import asyncio
 
@@ -522,4 +522,4 @@ class TestLoggingHook:
             await hook.on_message_start(msg=msg)
 
         asyncio.run(_run())
-        assert hook._step == 1
+        assert not hasattr(hook, "_step")

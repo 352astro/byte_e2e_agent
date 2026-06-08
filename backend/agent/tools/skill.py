@@ -234,7 +234,7 @@ class LoadSkillInput(BaseModel):
     name: str = Field(..., description="Skill 目录名。")
 
 
-async def load_skill_handler(name: str, *, ws=None) -> str:
+async def load_skill_handler(name: str, *, workspace=None) -> str:
     """加载指定 Skill 的完整内容。"""
     skill = get_skill(name)
     if skill is None:
@@ -272,7 +272,7 @@ class WriteSkillInput(BaseModel):
     )
 
 
-async def write_skill_handler(name: str, content: str, *, ws=None) -> str:
+async def write_skill_handler(name: str, content: str, *, workspace=None) -> str:
     """Create or update a custom skill.
 
     Writes to .byte_agent/skills/<name>/SKILL.md.

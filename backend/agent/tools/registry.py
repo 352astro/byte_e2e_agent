@@ -4,7 +4,7 @@
 - 所有工具以 LangChain StructuredTool 形式注册（生态兼容）
 - OpenAI function definitions 从 StructuredTool.args_schema 生成
 - 执行分发仍由 execute_one_tool 掌控（SubAgent/BrowserInspect 特殊处理）
-- Workspace 在执行时通过 handler 的 ws= 关键字注入
+- Workspace 在执行时通过 handler 的 workspace= 关键字注入
 """
 
 from __future__ import annotations

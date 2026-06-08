@@ -32,7 +32,7 @@ class CommitNotFound(ServiceError):
 
 
 class AgentBusy(ServiceError):
-    """Raised when the workspace scheduler is already running a task."""
+    """Raised when the workspace runtime is already running a task."""
 
     def __init__(
         self,
@@ -51,5 +51,5 @@ class InvalidWorkspace(ServiceError):
     pass
 
 
-def is_scheduler_busy_error(exc: RuntimeError) -> bool:
-    return "Scheduler already running" in str(exc)
+def is_runtime_busy_error(exc: RuntimeError) -> bool:
+    return "Runtime already running" in str(exc)

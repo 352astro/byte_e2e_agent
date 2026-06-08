@@ -59,7 +59,7 @@ async def web_search_handler(
     gl: str = "cn",
     hl: str = "zh-cn",
     *,
-    ws=None,
+    workspace=None,
     interrupt_event: asyncio.Event | None = None,
 ) -> str:
     """搜索网络（SerpApi），通过线程池异步执行，支持中断。"""
@@ -103,7 +103,7 @@ async def web_fetch_handler(
     url: str,
     max_bytes: int = 50_000,
     *,
-    ws=None,
+    workspace=None,
     interrupt_event: asyncio.Event | None = None,
 ) -> str:
     """获取 URL 内容（httpx 异步），支持中断。"""

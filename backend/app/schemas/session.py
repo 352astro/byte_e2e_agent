@@ -1,11 +1,6 @@
-from typing import Literal
-
 from pydantic import BaseModel, Field
 
 from agent.core.config import ToolSetPreset
-
-ToolPermissionMode = Literal["allow", "ask", "deny"]
-SysguardRuleMode = Literal["readonly", "readonly_exec", "readwrite"]
 
 
 class CreateSessionRequest(BaseModel):
@@ -17,77 +12,23 @@ class CreateSessionRequest(BaseModel):
     custom_tools: list[str] = Field(default_factory=list)
 
 
-class SessionRule(BaseModel):
-    id: str
-    content: str
-
-
-class SessionSettings(BaseModel):
-    preamble: str = ""
-    rules: list[SessionRule] = Field(default_factory=list)
-    default_rule_ids: list[str] = Field(default_factory=list)
-    default_skill_names: list[str] = Field(default_factory=list)
-
-
-class SkillInfoResponse(BaseModel):
-    name: str
-    description: str
-    source: Literal["builtin", "custom"] = "builtin"
-    has_builtin: bool = False
-    overrides_builtin: bool = False
-
-
-class SkillListResponse(BaseModel):
-    skills: list[SkillInfoResponse]
-
-
-class SkillDetailResponse(SkillInfoResponse):
-    content: str
-
-
-class SkillUpsertRequest(BaseModel):
-    name: str | None = None
-    content: str
-
-
-class ToolInfoResponse(BaseModel):
-    name: str
-    description: str
-
-
-class ToolPresetResponse(BaseModel):
-    name: ToolSetPreset
-    tools: list[str]
-
-
-class ToolPresetListResponse(BaseModel):
-    presets: list[ToolPresetResponse]
-    tools: list[ToolInfoResponse]
-
-
-class ToolPermissionSettings(BaseModel):
-    tools: dict[str, ToolPermissionMode] = Field(default_factory=dict)
-
-
-class SysguardRuleResponse(BaseModel):
-    id: str
-    label: str
-    path: str
-    mode: SysguardRuleMode = "readonly_exec"
-    source: Literal["builtin", "global", "workspace"] = "builtin"
-    enabled: bool = True
-    description: str = ""
-
-
-class SysguardSettingsResponse(BaseModel):
-    builtin: list[SysguardRuleResponse] = Field(default_factory=list)
-    global_: list[SysguardRuleResponse] = Field(default_factory=list, alias="global")
-    workspace: list[SysguardRuleResponse] = Field(default_factory=list)
-
-
-class SysguardRuleRequest(BaseModel):
-    label: str
-    path: str
-    mode: SysguardRuleMode = "readonly_exec"
-    enabled: bool = True
-    description: str = ""
+from app.schemas.settings import SessionRule, SessionSettings  # noqa: E402,F401
+from app.schemas.skills import (  # noqa: E402,F401
+    SkillDetailResponse,
+    SkillInfoResponse,
+    SkillListResponse,
+    SkillUpsertRequest,
+)
+from app.schemas.sysguard import (  # noqa: E402,F401
+    SysguardRuleMode,
+    SysguardRuleRequest,
+    SysguardRuleResponse,
+    SysguardSettingsResponse,
+)
+from app.schemas.tools import (  # noqa: E402,F401
+    ToolInfoResponse,
+    ToolPermissionMode,
+    ToolPermissionSettings,
+    ToolPresetListResponse,
+    ToolPresetResponse,
+)

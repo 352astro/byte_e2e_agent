@@ -30,7 +30,7 @@ from shared.hooks import GuardCheck, GuardDecision, HookManager
 from shared.types import Message, ToolCall
 
 AskGuardFn = Callable[[GuardCheck, asyncio.Event], Awaitable[bool]]
-InvokeSubagentFn = Callable[..., Awaitable[str]]
+RunChildAgentFn = Callable[..., Awaitable[str]]
 InvokeBrowserInspectFn = Callable[..., Awaitable[str]]
 RequestHumanInputFn = Callable[..., Awaitable[dict]]
 
@@ -116,7 +116,7 @@ def _tool_call_info(tc: ToolCall, index: int) -> ToolCallInfo:
 async def execute_tool_calls(
     *,
     assistant_msg: Message,
-    ws: Workspace,
+    workspace: Workspace,
     toolset: ToolSet,
     interrupt_event: asyncio.Event,
     openai_client=None,
@@ -125,8 +125,8 @@ async def execute_tool_calls(
     turn_id: str,
     hook_manager: HookManager,
     ask_guard: AskGuardFn,
-    invoke_subagent: InvokeSubagentFn,
     request_human_input: RequestHumanInputFn,
+    run_child_agent: RunChildAgentFn,
     invoke_browser_inspect: InvokeBrowserInspectFn | None = None,
 ) -> None:
     """Execute all tool calls for one assistant message.
@@ -164,7 +164,7 @@ async def execute_tool_calls(
             await _run_tool_batch(
                 [ToolJob(first, first_decision)],
                 assistant_msg=assistant_msg,
-                ws=ws,
+                workspace=workspace,
                 toolset=toolset,
                 interrupt_event=interrupt_event,
                 openai_client=openai_client,
@@ -173,7 +173,7 @@ async def execute_tool_calls(
                 turn_id=turn_id,
                 hook_manager=hook_manager,
                 ask_guard=ask_guard,
-                invoke_subagent=invoke_subagent,
+                run_child_agent=run_child_agent,
                 invoke_browser_inspect=invoke_browser_inspect,
                 request_human_input=request_human_input,
             )
@@ -205,7 +205,7 @@ async def execute_tool_calls(
         await _run_tool_batch(
             jobs,
             assistant_msg=assistant_msg,
-            ws=ws,
+            workspace=workspace,
             toolset=toolset,
             interrupt_event=interrupt_event,
             openai_client=openai_client,
@@ -214,7 +214,7 @@ async def execute_tool_calls(
             turn_id=turn_id,
             hook_manager=hook_manager,
             ask_guard=ask_guard,
-            invoke_subagent=invoke_subagent,
+            run_child_agent=run_child_agent,
             invoke_browser_inspect=invoke_browser_inspect,
             request_human_input=request_human_input,
         )
@@ -247,7 +247,7 @@ async def _run_tool_batch(
     jobs: list[ToolJob],
     *,
     assistant_msg: Message,
-    ws: Workspace,
+    workspace: Workspace,
     toolset: ToolSet,
     interrupt_event: asyncio.Event,
     openai_client,
@@ -256,7 +256,7 @@ async def _run_tool_batch(
     turn_id: str,
     hook_manager: HookManager,
     ask_guard: AskGuardFn,
-    invoke_subagent: InvokeSubagentFn,
+    run_child_agent: RunChildAgentFn,
     invoke_browser_inspect: InvokeBrowserInspectFn | None,
     request_human_input: RequestHumanInputFn,
 ) -> None:
@@ -275,7 +275,7 @@ async def _run_tool_batch(
         await _run_tool_job(
             jobs[0],
             assistant_msg=assistant_msg,
-            ws=ws,
+            workspace=workspace,
             toolset=toolset,
             interrupt_event=interrupt_event,
             openai_client=openai_client,
@@ -284,7 +284,7 @@ async def _run_tool_batch(
             turn_id=turn_id,
             hook_manager=hook_manager,
             ask_guard=ask_guard,
-            invoke_subagent=invoke_subagent,
+            run_child_agent=run_child_agent,
             invoke_browser_inspect=invoke_browser_inspect,
             request_human_input=request_human_input,
             emit_lock=emit_lock,
@@ -296,7 +296,7 @@ async def _run_tool_batch(
             _run_tool_job(
                 job,
                 assistant_msg=assistant_msg,
-                ws=ws,
+                workspace=workspace,
                 toolset=toolset,
                 interrupt_event=interrupt_event,
                 openai_client=openai_client,
@@ -305,7 +305,7 @@ async def _run_tool_batch(
                 turn_id=turn_id,
                 hook_manager=hook_manager,
                 ask_guard=ask_guard,
-                invoke_subagent=invoke_subagent,
+                run_child_agent=run_child_agent,
                 invoke_browser_inspect=invoke_browser_inspect,
                 request_human_input=request_human_input,
                 emit_lock=emit_lock,
@@ -327,7 +327,7 @@ async def _run_tool_job(
     job: ToolJob,
     *,
     assistant_msg: Message,
-    ws: Workspace,
+    workspace: Workspace,
     toolset: ToolSet,
     interrupt_event: asyncio.Event,
     openai_client,
@@ -336,7 +336,7 @@ async def _run_tool_job(
     turn_id: str,
     hook_manager: HookManager,
     ask_guard: AskGuardFn,
-    invoke_subagent: InvokeSubagentFn,
+    run_child_agent: RunChildAgentFn,
     invoke_browser_inspect: InvokeBrowserInspectFn | None,
     request_human_input: RequestHumanInputFn,
     emit_lock: asyncio.Lock,
@@ -376,13 +376,13 @@ async def _run_tool_job(
             tool_status_reason = "rejected_by_user"
             tool_output = f"Permission denied: user rejected tool '{info.name}'."
 
-    async def job_invoke_subagent(
+    async def job_run_child_agent(
         prompt,
         max_steps=5,
         with_skills=None,
         tool_call_id="",
     ):
-        return await invoke_subagent(
+        return await run_child_agent(
             prompt=prompt,
             max_steps=max_steps,
             with_skills=with_skills,
@@ -402,14 +402,14 @@ async def _run_tool_job(
         try:
             path_approved = await _ask_structured_paths_if_needed(
                 info,
-                ws=ws,
+                workspace=workspace,
                 assistant_msg=assistant_msg,
                 session_id=session_id,
                 turn_id=turn_id,
                 interrupt_event=interrupt_event,
                 ask_guard=ask_guard,
                 sysguard_asks=sysguard_asks,
-                workspace_uuid=ws.uuid,
+                workspace_uuid=workspace.uuid,
             )
             if path_approved is False:
                 tool_status = "denied"
@@ -425,7 +425,7 @@ async def _run_tool_job(
                     interrupt_event=interrupt_event,
                     ask_guard=ask_guard,
                     sysguard_asks=sysguard_asks,
-                    workspace_uuid=ws.uuid,
+                    workspace_uuid=workspace.uuid,
                 )
                 if preapproved is False:
                     tool_status = "denied"
@@ -436,14 +436,14 @@ async def _run_tool_job(
                 raise _ToolOutputReady()
             tool_exec = await execute_one_tool(
                 info.tc_dict,
-                ws,
+                workspace,
                 toolset,
                 interrupt_event=interrupt_event,
                 openai_client=openai_client,
                 model_id=model_id,
                 session_id=session_id,
                 hook_manager=hook_manager,
-                agent_invoker=job_invoke_subagent,
+                agent_invoker=job_run_child_agent,
                 browser_inspector_invoker=invoke_browser_inspect,
                 human_input_requester=job_request_human_input,
             )
@@ -463,20 +463,20 @@ async def _run_tool_job(
                     interrupt_event=interrupt_event,
                     ask_guard=ask_guard,
                     sysguard_asks=sysguard_asks,
-                    workspace_uuid=ws.uuid,
+                    workspace_uuid=workspace.uuid,
                 )
                 if not approved:
                     break
                 tool_exec = await execute_one_tool(
                     info.tc_dict,
-                    ws,
+                    workspace,
                     toolset,
                     interrupt_event=interrupt_event,
                     openai_client=openai_client,
                     model_id=model_id,
                     session_id=session_id,
                     hook_manager=hook_manager,
-                    agent_invoker=job_invoke_subagent,
+                    agent_invoker=job_run_child_agent,
                     browser_inspector_invoker=invoke_browser_inspect,
                     human_input_requester=job_request_human_input,
                 )
@@ -558,7 +558,7 @@ def _is_sysguard_denial(tool_exec) -> bool:
 async def _ask_structured_paths_if_needed(
     info: ToolCallInfo,
     *,
-    ws: Workspace,
+    workspace: Workspace,
     assistant_msg: Message,
     session_id: str,
     turn_id: str,
@@ -581,7 +581,7 @@ async def _ask_structured_paths_if_needed(
         value = args.get(field)
         if not isinstance(value, str) or not value.strip():
             continue
-        candidate = _external_candidate_path(ws, value, mode)
+        candidate = _external_candidate_path(workspace, value, mode)
         if candidate is None:
             continue
         approved = await _ask_and_add_sysguard_rule(
@@ -606,20 +606,20 @@ async def _ask_structured_paths_if_needed(
 
 
 def _external_candidate_path(
-    ws: Workspace,
+    workspace: Workspace,
     value: str,
     mode: Literal["readonly", "readwrite"],
 ) -> Path | None:
     from agent.utils import sandbox
 
     raw = Path(value).expanduser()
-    resolved = raw.resolve() if raw.is_absolute() else (ws.root / raw).resolve()
+    resolved = raw.resolve() if raw.is_absolute() else (workspace.root / raw).resolve()
     try:
-        resolved.relative_to(ws.root)
+        resolved.relative_to(workspace.root)
         return None
     except ValueError:
         pass
-    if sandbox.is_path_allowed(str(resolved), mode, workspace_uuid=ws.uuid):
+    if sandbox.is_path_allowed(str(resolved), mode, workspace_uuid=workspace.uuid):
         return None
     if sandbox._overlaps_project_root(resolved):
         return None
@@ -815,7 +815,7 @@ def _coerce_tool_result(result: object) -> ToolExecutionResult:
 
 async def execute_one_tool(
     tc: dict,
-    ws: Workspace,
+    workspace: Workspace,
     toolset: ToolSet,
     *,
     interrupt_event: asyncio.Event,
@@ -854,10 +854,10 @@ async def execute_one_tool(
                 tool_call_id=tc.get("id", ""),
             )
         else:
-            from agent.runtime.subagents import run_subagent
+            from agent.runtime.subagents import run_inline_subagent
 
-            result_str = await run_subagent(
-                ws,
+            result_str = await run_inline_subagent(
+                workspace,
                 toolset,
                 prompt=args.get("prompt", ""),
                 max_steps=args.get("max_steps", 5),
@@ -888,10 +888,10 @@ async def execute_one_tool(
                     max_bytes=20_000,
                 )
 
-                from agent.runtime.subagents import run_subagent
+                from agent.runtime.subagents import run_inline_subagent
 
-                result_str = await run_subagent(
-                    ws,
+                result_str = await run_inline_subagent(
+                    workspace,
                     browser_toolset,
                     prompt=args.get("prompt", ""),
                     max_steps=args.get("max_steps", 8),
@@ -926,8 +926,9 @@ async def execute_one_tool(
     else:
         try:
             call_args = dict(args)
+            if _accepts_kwarg(tool.coroutine, "workspace"):
+                call_args["workspace"] = workspace
             for meta_name, meta_value in (
-                ("ws", ws),
                 ("session_id", session_id),
                 ("interrupt_event", interrupt_event),
                 ("human_input_requester", human_input_requester),

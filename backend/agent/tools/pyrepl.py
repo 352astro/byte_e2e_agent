@@ -117,13 +117,13 @@ async def pyrepl_handler(
     code: str,
     timeout_ms: int = 30000,
     *,
-    ws=None,
+    workspace=None,
     interrupt_event: asyncio.Event | None = None,
 ) -> ToolResult:
     """在独立子进程中运行 Python 代码。"""
     timeout_s = timeout_ms / 1000.0
-    sandbox_root = str(getattr(ws, "root", Path.cwd()))
-    workspace_uuid = getattr(ws, "uuid", None)
+    sandbox_root = str(getattr(workspace, "root", Path.cwd()))
+    workspace_uuid = getattr(workspace, "uuid", None)
 
     proc = None
     try:

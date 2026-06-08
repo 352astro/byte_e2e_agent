@@ -40,10 +40,10 @@ async def read_handler(
     end_line: int = 0,
     max_bytes: int = 50_000,
     *,
-    ws,
+    workspace=None,
 ) -> str:
     """Read a file (or a line range) from the workspace."""
-    full = await ws.read_file(path)
+    full = await workspace.read_file(path)
     if full.startswith("Error:"):
         return full
     if full == "(empty)":

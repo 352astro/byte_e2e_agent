@@ -194,7 +194,7 @@ def _append_bwrap_bind(bcmd: list[str], bind: BwrapBind, *, sandbox_root: str) -
 
 def build_seatbelt_profile(workspace: str, workspace_uuid: str | None = None) -> str:
     """Build an Apple Seatbelt profile that allows writes only in workspace."""
-    ws = os.path.abspath(workspace)
+    workspace_path = os.path.abspath(workspace)
     read_only_lines = "\n".join(
         f'    (allow file-read* (subpath "{path}"))'
         for path in _rule_paths_from_environment("readonly", workspace_uuid)
@@ -220,8 +220,8 @@ def build_seatbelt_profile(workspace: str, workspace_uuid: str | None = None) ->
 (version 1)
 (deny default)
 (deny network*)
-(allow file-read* (subpath "{ws}"))
-(allow file-write* (subpath "{ws}"))
+(allow file-read* (subpath "{workspace_path}"))
+(allow file-write* (subpath "{workspace_path}"))
 {read_only_lines}
 {read_only_exec_lines}
 {readwrite_lines}
