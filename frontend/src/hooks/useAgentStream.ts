@@ -790,10 +790,7 @@ export default function useAgentStream({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ question: q }),
-            signal: AbortSignal.any([
-              controller.signal,
-              AbortSignal.timeout(300_000),
-            ]),
+            signal: controller.signal,
           });
           if (!streamRes.ok) {
             if (streamRes.status === 409) {
