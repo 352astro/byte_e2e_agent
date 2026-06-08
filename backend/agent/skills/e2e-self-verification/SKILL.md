@@ -257,7 +257,7 @@ If you catch yourself thinking ANY of these:
 
 - `BrowserInspect` — The ONLY verification tool. Dispatches a sub-agent with browser + file + shell tools to verify ONE feature.
 - `Shell` — Used only for: `nohup npm run dev &`, `ss -tlnp`, `curl --noproxy '*'`, `fuser -k <PORT>/tcp`. No other shell commands.
-- `BrowserOpen` / `BrowserAct` — Used internally by BrowserInspect. Do NOT use these directly for verification; always go through BrowserInspect.
+- `BrowserAct` — Used internally by BrowserInspect. Do NOT use it directly for verification; always go through BrowserInspect.
 
 ## Integration
 

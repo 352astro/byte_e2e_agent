@@ -59,9 +59,12 @@ byte_e2e_agent/
 | Node.js | 20+ | `node --version` |
 | npm | 10+ | `npm --version` |
 | bubblewrap | 0.4+ | `bwrap --version` |
+| BrowserGym core | Python 依赖 | `cd backend && uv run python -c "import browsergym.core"` |
 | Chromium | Playwright | `cd backend && uv run playwright install chromium` |
 
 > **bubblewrap** 是 Linux 沙箱依赖，macOS 不需要。安装：`sudo apt-get install bubblewrap`（Debian/Ubuntu）或 `sudo pacman -S bubblewrap`（Arch）。没有 bwrap 时 Shell 工具会报错退出。
+>
+> `BrowserInspect` 基于 `browsergym-core` 的 `BrowserEnv`，Python 依赖由 `uv sync` 安装；浏览器二进制仍需通过 Playwright 安装 Chromium。
 
 ## 快速开始
 
@@ -94,6 +97,7 @@ LLM_MODEL_ID=...
 ```bash
 cd backend
 uv sync
+uv run playwright install chromium
 uv run uvicorn main:app --reload --port 8000
 ```
 

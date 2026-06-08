@@ -680,52 +680,71 @@ class TestSubAgentExecution:
 
 
 # ═══════════════════════════════════════════════════════════
-# BrowserOpen
+# BrowserObserve
 # ═══════════════════════════════════════════════════════════
 
 
-class TestBrowserOpenExecution:
-    """BrowserOpen tool — accepts interrupt_event parameter but relies on Playwright."""
+class TestBrowserObserveExecution:
+    """BrowserObserve tool — reads the current BrowserGym session only."""
+
+    def _obs(self):
+        return {
+            "url": "http://example.com",
+            "screenshot": MagicMock(shape=(720, 1280, 3)),
+            "open_pages_urls": ("http://example.com",),
+            "open_pages_titles": ("Example",),
+            "active_page_index": [0],
+            "focused_element_bid": "12",
+            "last_action": "",
+            "last_action_error": "",
+            "axtree_object": {
+                "nodes": [
+                    {
+                        "nodeId": "root",
+                        "childIds": ["button"],
+                        "role": {"value": "RootWebArea"},
+                        "name": {"value": "Example"},
+                    },
+                    {
+                        "nodeId": "button",
+                        "browsergym_id": "12",
+                        "role": {"value": "button"},
+                        "name": {"value": "Submit"},
+                    },
+                ]
+            },
+            "extra_element_properties": {
+                "12": {
+                    "bbox": [10, 20, 100, 30],
+                    "visibility": 1,
+                    "clickable": True,
+                    "set_of_marks": True,
+                }
+            },
+        }
 
     @pytest.mark.asyncio
-    async def test_basic_execution(self):
-        """BrowserOpen navigates to a URL."""
-        handler = _get_handler("BrowserOpen")
+    async def test_observe_current_browsergym_session(self):
+        handler = _get_handler("BrowserObserve")
+        session = MagicMock()
+        session.obs = self._obs()
 
-        with patch("agent.tools.browser._ensure_browser") as mock_browser:
-            mock_page = AsyncMock()
-            mock_page.content = AsyncMock(return_value="<html>test</html>")
-            mock_page.url = "http://example.com"
-            mock_page.title = AsyncMock(return_value="Example")
-            mock_browser.return_value = mock_page
+        with patch("agent.tools.browser._browsergym_sessions.peek", return_value=session):
+            result = await handler(session_id="sid")
 
-            result = await handler(url="http://example.com")
-            assert "Example" in result or "test" in result
-
-    @pytest.mark.asyncio
-    async def test_session_id_uses_per_session_browser(self):
-        """BrowserOpen routes ordinary calls through the per-session manager."""
-        handler = _get_handler("BrowserOpen")
-
-        with patch("agent.tools.browser._ensure_browser") as mock_browser:
-            mock_page = AsyncMock()
-            mock_page.on = MagicMock()
-            mock_page.content = AsyncMock(return_value="<html>session</html>")
-            mock_page.url = "http://example.com"
-            mock_page.title = AsyncMock(return_value="Session Browser")
-            mock_browser.return_value = mock_page
-
-            result = await handler(url="http://example.com", session_id="sid-a")
-
-        mock_browser.assert_called_once_with(session_id="sid-a")
-        assert "Session Browser" in result or "session" in result
+        assert "Current BrowserGym observation" in result
+        assert "Viewport: 1280x720" in result
+        assert '[bid=12] button "Submit"' in result
+        assert "bbox=(10,20,100,30)" in result
+        assert "Actionable Elements" in result
 
     @pytest.mark.asyncio
-    async def test_interrupt_not_supported(self):
-        pytest.skip(
-            "BrowserOpen accepts interrupt_event parameter but "
-            "does not meaningfully use it during Playwright navigation"
-        )
+    async def test_no_browsergym_session(self):
+        handler = _get_handler("BrowserObserve")
+
+        result = await handler(session_id="missing")
+
+        assert "BrowserGym environment is not open" in result
 
 
 # ═══════════════════════════════════════════════════════════
@@ -736,28 +755,96 @@ class TestBrowserOpenExecution:
 class TestBrowserActExecution:
     """BrowserAct tool — supports interrupt_event."""
 
+    def _obs(self, *, last_action: str = ""):
+        return {
+            "url": "http://example.com",
+            "screenshot": MagicMock(shape=(720, 1280, 3)),
+            "open_pages_urls": ("http://example.com",),
+            "open_pages_titles": ("Example",),
+            "active_page_index": [0],
+            "focused_element_bid": "",
+            "last_action": last_action,
+            "last_action_error": "",
+            "axtree_object": {
+                "nodes": [
+                    {
+                        "nodeId": "button",
+                        "browsergym_id": "12",
+                        "role": {"value": "button"},
+                        "name": {"value": "Submit"},
+                    }
+                ]
+            },
+            "extra_element_properties": {
+                "12": {
+                    "bbox": [10, 20, 100, 30],
+                    "visibility": 1,
+                    "clickable": True,
+                    "set_of_marks": True,
+                }
+            },
+        }
+
     @pytest.mark.asyncio
     async def test_basic_execution(self):
-        """BrowserAct performs click action."""
+        """BrowserAct sends click action to the BrowserGym session."""
         handler = _get_handler("BrowserAct")
 
-        with patch("agent.tools.browser._page") as mock_page:
-            mock_page = AsyncMock()
-            mock_page.click = AsyncMock()
-            mock_page.content = AsyncMock(return_value="<html>clicked</html>")
-            mock_page.url = "http://example.com"
-            mock_page.title = AsyncMock(return_value="After Click")
+        session = MagicMock()
+        session.step = AsyncMock(return_value=self._obs(last_action="click('12', 'left')"))
+        with patch("agent.tools.browser._browsergym_sessions.peek", return_value=session):
+            result = await handler(primitive="click", bid="12", session_id="sid")
 
-            # Inject the mock page
-            import agent.tools.browser as browser_mod
+        session.step.assert_called_once_with("click('12', 'left')")
+        assert "After action: click('12', 'left')" in result
+        assert "[bid=12]" in result
 
-            old_page = browser_mod._page
-            browser_mod._page = mock_page
-            try:
-                result = await handler(selector="#btn", action="click")
-                assert "After Click" in result or "clicked" in result
-            finally:
-                browser_mod._page = old_page
+    @pytest.mark.asyncio
+    async def test_fill_action(self):
+        """BrowserAct sends fill action to the BrowserGym session."""
+        handler = _get_handler("BrowserAct")
+
+        session = MagicMock()
+        session.step = AsyncMock(return_value=self._obs(last_action="fill('12', 'hello')"))
+        with patch("agent.tools.browser._browsergym_sessions.peek", return_value=session):
+            result = await handler(primitive="fill", bid="12", text="hello", session_id="sid")
+
+        session.step.assert_called_once_with("fill('12', 'hello')")
+        assert "fill('12', 'hello')" in result
+
+    @pytest.mark.asyncio
+    async def test_bid_click_action(self):
+        """BrowserAct validates bid-only element actions."""
+        handler = _get_handler("BrowserAct")
+
+        session = MagicMock()
+        session.step = AsyncMock(return_value=self._obs(last_action="click('12', 'left')"))
+        with patch("agent.tools.browser._browsergym_sessions.peek", return_value=session):
+            result = await handler(primitive="click", bid="12", session_id="sid")
+
+        session.step.assert_called_once_with("click('12', 'left')")
+        assert "Submit" in result
+
+    @pytest.mark.asyncio
+    async def test_keyboard_press_action(self):
+        """BrowserAct sends keyboard action to the BrowserGym session."""
+        handler = _get_handler("BrowserAct")
+
+        session = MagicMock()
+        session.step = AsyncMock(return_value=self._obs(last_action="keyboard_press('Enter')"))
+        with patch("agent.tools.browser._browsergym_sessions.peek", return_value=session):
+            result = await handler(primitive="keyboard_press", key="Enter", session_id="sid")
+
+        session.step.assert_called_once_with("keyboard_press('Enter')")
+        assert "keyboard_press('Enter')" in result
+
+    @pytest.mark.asyncio
+    async def test_missing_required_action_field(self):
+        """BrowserAct rejects missing required fields."""
+        handler = _get_handler("BrowserAct")
+
+        result = await handler(primitive="click")
+        assert "bid is required" in result
 
     @pytest.mark.asyncio
     async def test_interrupt_before_start(self):
@@ -766,23 +853,21 @@ class TestBrowserActExecution:
         interrupt_event = asyncio.Event()
         interrupt_event.set()
 
-        result = await handler(selector="#btn", action="click", interrupt_event=interrupt_event)
+        result = await handler(
+            primitive="click",
+            bid="12",
+            interrupt_event=interrupt_event,
+        )
         assert "interrupted" in result.lower()
 
     @pytest.mark.asyncio
     async def test_no_browser_open(self):
-        """BrowserAct returns error when no browser page is open."""
+        """BrowserAct returns error when no BrowserGym session is open."""
         handler = _get_handler("BrowserAct")
 
-        import agent.tools.browser as browser_mod
-
-        old_page = browser_mod._page
-        browser_mod._page = None
-        try:
-            result = await handler(selector="#btn", action="click")
-            assert "Error" in result or "Browser not open" in result
-        finally:
-            browser_mod._page = old_page
+        result = await handler(primitive="click", bid="12")
+        assert "Error" in result
+        assert "BrowserGym environment is not open" in result
 
 
 # ═══════════════════════════════════════════════════════════
@@ -801,26 +886,19 @@ class TestBrowserInspectExecution:
         assert "must be dispatched" in result.lower() or "Error" in result
 
     @pytest.mark.asyncio
-    async def test_dispatch_uses_ephemeral_browser_session(self, tmp_path):
-        """BrowserInspect creates and closes an isolated browser scope."""
+    async def test_dispatch_uses_browsergym_session(self, tmp_path):
+        """BrowserInspect creates and closes a BrowserGym session."""
         from agent.core.workspace import Workspace
         from agent.tool_execution import execute_one_tool
 
-        closed = False
-
-        class FakeBrowserSession:
-            async def close(self):
-                nonlocal closed
-                closed = True
-
         with (
-            patch("agent.tool_execution.BrowserSession", return_value=FakeBrowserSession()),
-            patch("agent.tool_execution.set_active_browser_session") as set_active,
-            patch("agent.tool_execution.reset_active_browser_session") as reset_active,
-            patch("agent.tool_execution.open_url", AsyncMock(return_value="opened")),
+            patch(
+                "agent.tool_execution.start_browsergym_session",
+                AsyncMock(return_value="opened"),
+            ) as start_browsergym,
+            patch("agent.tool_execution.close_browser_session", AsyncMock()) as close_browsergym,
             patch("agent.runtime.subagents.run_subagent", AsyncMock(return_value="inspected")),
         ):
-            set_active.return_value = "token"
             result = await execute_one_tool(
                 {
                     "id": "tc_browser",
@@ -841,8 +919,8 @@ class TestBrowserInspectExecution:
             )
 
         assert result.output == "inspected"
-        assert closed
-        reset_active.assert_called_once_with("token")
+        start_browsergym.assert_called_once()
+        close_browsergym.assert_called_once_with("sid")
 
     @pytest.mark.asyncio
     async def test_interrupt_not_supported(self):

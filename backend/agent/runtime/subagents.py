@@ -195,11 +195,17 @@ async def invoke_browser_inspect(
         model_id=model_id,
         preamble=(
             "You are a browser inspection sub-agent. Your toolset contains "
-            "ONLY browser tools (BrowserOpen, BrowserAct). Inspect the current "
-            "page and report what you see. Keep your reasoning extremely brief."
+            "ONLY BrowserObserve and BrowserAct. The page is already open inside "
+            "a BrowserGym environment. BrowserObserve reads the current page as "
+            "a rich text observation with actionable elements, page outline, bbox, "
+            "and visibility data; it never opens URLs. BrowserAct takes a "
+            "structured action with a primitive such as click, fill, "
+            "keyboard_press, scroll, or goto. Prefer bid over CSS selectors for "
+            "element actions. Inspect the current page and report what you see. "
+            "Keep your reasoning extremely brief."
         ),
         tool_set_preset=ToolSetPreset.CUSTOM,
-        custom_tools=["BrowserOpen", "BrowserAct"],
+        custom_tools=["BrowserObserve", "BrowserAct"],
         rules=[prompt],
         access=SessionConfig.subagent(
             parent_id=caller_id,
@@ -223,14 +229,27 @@ async def invoke_browser_inspect(
         task=prompt,
     )
 
-    from agent.tools.browser import close_browser_session, open_url
+    from agent.tools.browser import close_browser_session, start_browsergym_session
 
     try:
-        open_result = await open_url(url, max_bytes=20_000, session_id=child_id)
+        open_result = await start_browsergym_session(
+            child_id,
+            url=url,
+            goal=prompt,
+            max_bytes=20_000,
+        )
         task = (
             f"{prompt}\n\n"
             f"The page has already been opened at: {url}\n"
-            "Do not call BrowserOpen unless you must navigate to a different page."
+            "Use BrowserObserve with detail='full' whenever you need to inspect "
+            "the current page again. Use the bid values from BrowserObserve and "
+            "the initial BrowserGym observation below. Use BrowserAct with "
+            "structured actions, for example "
+            "{primitive: 'click', bid: '12'}, "
+            "{primitive: 'fill', bid: '23', text: 'hello'}, "
+            "{primitive: 'keyboard_press', key: 'Enter'}, "
+            "{primitive: 'scroll', dy: 600}, or "
+            "{primitive: 'goto', url: 'http://...'}."
             "\n\nInitial page state:\n"
             f"{open_result}"
         )

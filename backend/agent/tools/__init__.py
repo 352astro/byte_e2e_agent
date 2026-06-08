@@ -8,7 +8,7 @@ from agent.tools.ask_user import ask_user_tool
 from agent.tools.browser import (
     browser_act_tool,
     browser_inspect_tool,
-    browser_open_tool,
+    browser_observe_tool,
 )
 from agent.tools.edit import edit_tool
 from agent.tools.glob import glob_tool
@@ -44,7 +44,7 @@ tool_registry.register(ask_user_tool)
 tool_registry.register(load_skill_tool)
 tool_registry.register(write_skill_tool)
 tool_registry.register(subagent_tool)
-tool_registry.register(browser_open_tool)
+tool_registry.register(browser_observe_tool)
 tool_registry.register(browser_act_tool)
 tool_registry.register(browser_inspect_tool)
 tool_registry.register(task_list_tool)

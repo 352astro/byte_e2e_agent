@@ -21,10 +21,8 @@ from agent.core.workspace import Workspace
 from agent.errors import InterruptedError
 from agent.tools import tool_registry
 from agent.tools.browser import (
-    BrowserSession,
-    open_url,
-    reset_active_browser_session,
-    set_active_browser_session,
+    close_browser_session,
+    start_browsergym_session,
 )
 from agent.tools.result import ToolResult
 from agent.tools.toolset import ToolSet
@@ -881,11 +879,14 @@ async def execute_one_tool(
                 tool_call_id=tc.get("id", ""),
             )
         else:
-            browser_toolset = ToolSet(tool_registry, "BrowserOpen", "BrowserAct")
-            browser_session = BrowserSession()
-            token = set_active_browser_session(browser_session)
+            browser_toolset = ToolSet(tool_registry, "BrowserObserve", "BrowserAct")
             try:
-                open_result = await open_url(inspect_url, max_bytes=20_000)
+                open_result = await start_browsergym_session(
+                    session_id,
+                    url=inspect_url,
+                    goal=args.get("prompt", ""),
+                    max_bytes=20_000,
+                )
 
                 from agent.runtime.subagents import run_subagent
 
@@ -901,20 +902,27 @@ async def execute_one_tool(
                     hook_manager=hook_manager,
                     system_extra=(
                         "You are a browser inspection sub-agent. Your toolset "
-                        "contains ONLY browser tools (BrowserOpen, BrowserAct). "
+                        "contains ONLY BrowserObserve and BrowserAct. The current "
+                        "page has already been opened inside a BrowserGym "
+                        "environment. BrowserObserve reads the current page as a "
+                        "rich text observation with actionable elements, page "
+                        "outline, bbox, and visibility data; it never opens URLs. "
+                        "BrowserAct takes a structured action with a primitive "
+                        "such as click, fill, keyboard_press, scroll, or goto. "
+                        "Prefer bid over CSS selectors for element actions. "
                         f"The page has already been opened at: {inspect_url}\n"
-                        "Do not call BrowserOpen unless you must navigate to a "
-                        "different page. Inspect the current page and report what "
-                        "you see. Keep your reasoning extremely brief — one short "
-                        "sentence at most."
+                        "Use BrowserObserve with detail='full' whenever you need "
+                        "to inspect the page again. Use the bid values from the "
+                        "initial observation. Inspect the current page and report "
+                        "what you see. Keep your reasoning extremely brief — one "
+                        "short sentence at most."
                         "\n\nInitial page state:\n"
                         f"{open_result}"
                     ),
                     human_input_requester=human_input_requester,
                 )
             finally:
-                reset_active_browser_session(token)
-                await browser_session.close()
+                await close_browser_session(session_id)
     else:
         try:
             call_args = dict(args)
