@@ -139,7 +139,10 @@ function parseArgs(raw: string): Record<string, unknown> {
 
 function childSidFromResult(result: string | undefined): string {
   if (!result) return "";
-  return result.match(/SubAgent session ([A-Za-z0-9_-]+) completed/)?.[1] || "";
+  return (
+    result.match(/(?:SubAgent|BrowserInspect) session ([A-Za-z0-9_-]+) completed/)?.[1] ||
+    ""
+  );
 }
 
 function SubAgentTranscript({
@@ -285,12 +288,16 @@ function SubAgentTranscript({
   );
 }
 
-function SubAgentToolCard({
+function ChildSessionToolCard({
   pair,
+  label,
+  iconName,
   defaultCollapsed,
   depth,
 }: {
   pair: ToolPair;
+  label: string;
+  iconName: string;
   defaultCollapsed: boolean;
   depth: number;
 }) {
@@ -356,8 +363,8 @@ function SubAgentToolCard({
       headerClassName="subagent-card-header"
       title={
         <>
-          <Icon name="robot" size={14} className="subagent-card-icon" />
-          <span className="subagent-card-label">SubAgent</span>
+          <Icon name={iconName} size={14} className="subagent-card-icon" />
+          <span className="subagent-card-label">{label}</span>
           {effectiveChildSid && (
             <span className="subagent-card-sid">{effectiveChildSid}</span>
           )}
@@ -416,10 +423,12 @@ const ToolPairCard = React.memo(function ToolPairCard({
 
   const bodyContent = toolName === "Write" && rest ? rest : undefined;
 
-  if (toolName === "SubAgent") {
+  if (toolName === "SubAgent" || toolName === "BrowserInspect") {
     return (
-      <SubAgentToolCard
+      <ChildSessionToolCard
         pair={pair}
+        label={toolName}
+        iconName={toolName === "BrowserInspect" ? "eye" : "robot"}
         defaultCollapsed={defaultCollapsed}
         depth={depth}
       />

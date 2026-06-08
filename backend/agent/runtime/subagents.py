@@ -86,13 +86,10 @@ async def invoke_agent(
     if caller_entry:
         caller_entry.transition_to(SessionStatus.PENDING)
 
-    created_interrupt_event = False
-    if runtime._interrupt_event is None:
-        import asyncio
-
-        runtime._interrupt_event = asyncio.Event()
-        created_interrupt_event = True
-    previous_running = runtime._running_session_id
+    parent_run = runtime._runs.get(caller_id)
+    interrupt_event = (
+        parent_run.interrupt_event if parent_run is not None else runtime._interrupt_event
+    )
     try:
         await runtime._hooks.on_subagent_start(
             task=task,
@@ -102,15 +99,13 @@ async def invoke_agent(
             parent_tool_call_id=parent_tool_call_id,
             max_steps=max_turns or 10,
         )
-        runtime._running_session_id = target.id
-        target.transition_to(SessionStatus.RUNNING)
+        runtime._begin_run(target, interrupt_event=interrupt_event)
         result = await runtime._execute_turn(
             target,
             task,
             max_turns or 10,
             top_level=False,
         )
-        runtime._running_session_id = previous_running
         await runtime._hooks.on_subagent_end(
             result=result,
             parent_session_id=caller_id,
@@ -120,9 +115,6 @@ async def invoke_agent(
         )
         return result
     finally:
-        runtime._running_session_id = previous_running
-        if created_interrupt_event:
-            runtime._interrupt_event = None
         if target.status == SessionStatus.RUNNING:
             target.transition_to(SessionStatus.IDLE)
         if caller_entry:
@@ -184,6 +176,75 @@ async def invoke_subagent(
         parent_tool_call_id=parent_tool_call_id,
     )
     return f"SubAgent session {child_id} completed.\n\n{result}"
+
+
+async def invoke_browser_inspect(
+    runtime,
+    caller_id: str,
+    *,
+    url: str,
+    prompt: str,
+    max_steps: int = 8,
+    parent_message_id: str = "",
+    parent_tool_call_id: str = "",
+) -> str:
+    openai_client, model_id = runtime._get_llm()
+    child_id = f"{caller_id}-browser-{_uuid.uuid4().hex[:8]}"
+    config = SessionConfig(
+        name=f"browser:{caller_id}",
+        model_id=model_id,
+        preamble=(
+            "You are a browser inspection sub-agent. Your toolset contains "
+            "ONLY browser tools (BrowserOpen, BrowserAct). Inspect the current "
+            "page and report what you see. Keep your reasoning extremely brief."
+        ),
+        tool_set_preset=ToolSetPreset.CUSTOM,
+        custom_tools=["BrowserOpen", "BrowserAct"],
+        rules=[prompt],
+        access=SessionConfig.subagent(
+            parent_id=caller_id,
+            name=f"browser:{caller_id}",
+            task=prompt,
+            model_id=model_id,
+        ).access,
+    )
+    runtime.create_session(
+        config,
+        session_id=child_id,
+        llm_client=openai_client,
+        ws=runtime._workspace,
+    )
+    write_subagent_metadata(
+        runtime._workspace,
+        child_id,
+        parent_id=caller_id,
+        parent_message_id=parent_message_id,
+        parent_tool_call_id=parent_tool_call_id,
+        task=prompt,
+    )
+
+    from agent.tools.browser import close_browser_session, open_url
+
+    try:
+        open_result = await open_url(url, max_bytes=20_000, session_id=child_id)
+        task = (
+            f"{prompt}\n\n"
+            f"The page has already been opened at: {url}\n"
+            "Do not call BrowserOpen unless you must navigate to a different page."
+            "\n\nInitial page state:\n"
+            f"{open_result}"
+        )
+        result = await runtime.invoke_agent(
+            caller_id,
+            child_id,
+            task,
+            max_turns=max_steps,
+            parent_message_id=parent_message_id,
+            parent_tool_call_id=parent_tool_call_id,
+        )
+        return f"BrowserInspect session {child_id} completed.\n\n{result}"
+    finally:
+        await close_browser_session(child_id)
 
 
 # ═══════════════════════════════════════════════════════════

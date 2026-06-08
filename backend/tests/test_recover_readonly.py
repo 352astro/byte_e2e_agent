@@ -33,7 +33,7 @@ def test_recover_running_session_does_not_repair_unpaired_tool_call(tmp_path):
         + "\n",
         encoding="utf-8",
     )
-    ctx.scheduler._running_session_id = session_id
+    ctx.scheduler._begin_run(ctx.create_runtime_session_entry(session_id))
 
     state = service.get_recovery_state(session_id)
 
@@ -69,7 +69,7 @@ def test_recover_does_not_repair_when_workspace_runtime_busy_with_other_session(
         + "\n",
         encoding="utf-8",
     )
-    ctx.scheduler._running_session_id = child_id
+    ctx.scheduler._begin_run(ctx.create_runtime_session_entry(child_id))
 
     state = service.get_recovery_state(parent_id)
 
@@ -103,7 +103,7 @@ def test_stream_replay_does_not_repair_when_workspace_runtime_busy(tmp_path):
         + "\n",
         encoding="utf-8",
     )
-    ctx.scheduler._running_session_id = session_id
+    ctx.scheduler._begin_run(ctx.create_runtime_session_entry(session_id))
 
     stream = ChatService(ctx).get_stream(session_id)
 

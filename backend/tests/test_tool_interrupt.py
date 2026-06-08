@@ -814,10 +814,10 @@ class TestBrowserInspectExecution:
                 closed = True
 
         with (
-            patch("agent.tools.browser.BrowserSession", return_value=FakeBrowserSession()),
-            patch("agent.tools.browser.set_active_browser_session") as set_active,
-            patch("agent.tools.browser.reset_active_browser_session") as reset_active,
-            patch("agent.tools.browser.open_url", AsyncMock(return_value="opened")),
+            patch("agent.tool_execution.BrowserSession", return_value=FakeBrowserSession()),
+            patch("agent.tool_execution.set_active_browser_session") as set_active,
+            patch("agent.tool_execution.reset_active_browser_session") as reset_active,
+            patch("agent.tool_execution.open_url", AsyncMock(return_value="opened")),
             patch("agent.runtime.subagents.run_subagent", AsyncMock(return_value="inspected")),
         ):
             set_active.return_value = "token"
@@ -834,7 +834,7 @@ class TestBrowserInspectExecution:
                         ),
                     },
                 },
-                Workspace(tmp_path),
+                Workspace(tmp_path, workspace_uuid="test-workspace"),
                 ToolSet(tool_registry, "BrowserInspect"),
                 interrupt_event=asyncio.Event(),
                 session_id="sid",

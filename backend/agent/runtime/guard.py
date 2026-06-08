@@ -13,7 +13,9 @@ from shared.hooks import GuardCheck
 async def ask_guard(runtime, check: GuardCheck, interrupt_event: asyncio.Event) -> bool:
     request_id = _uuid.uuid4().hex
     event = asyncio.Event()
-    runtime._pending[request_id] = {
+    run = runtime._runs.get(check.session_id)
+    pending_store = run.pending if run is not None else runtime._pending
+    pending_store[request_id] = {
         "kind": "guard_request",
         "message": {
             "request_id": request_id,
@@ -39,10 +41,10 @@ async def ask_guard(runtime, check: GuardCheck, interrupt_event: asyncio.Event) 
             task.cancel()
         if interrupt_event.is_set():
             raise InterruptedError("Interrupted while waiting for approval")
-        response = runtime._pending.get(request_id, {}).get("response", {})
+        response = pending_store.get(request_id, {}).get("response", {})
         return bool(response.get("allow") or response.get("approved"))
     finally:
-        runtime._pending.pop(request_id, None)
+        pending_store.pop(request_id, None)
 
 
 async def ask_user_input(
@@ -74,7 +76,9 @@ async def ask_user_input(
         "message_id": message_id,
         "tool_call_id": tool_call_id,
     }
-    runtime._pending[request_id] = {
+    run = runtime._runs.get(session_id)
+    pending_store = run.pending if run is not None else runtime._pending
+    pending_store[request_id] = {
         "kind": "user_input_request",
         "message": message,
         "event": event,
@@ -104,15 +108,17 @@ async def ask_user_input(
             task.cancel()
         if interrupt_event.is_set():
             raise InterruptedError("Interrupted while waiting for user input")
-        return runtime._pending.get(request_id, {}).get("response", {})
+        return pending_store.get(request_id, {}).get("response", {})
     finally:
-        runtime._pending.pop(request_id, None)
+        pending_store.pop(request_id, None)
         if entry and entry.status == SessionStatus.PENDING:
             entry.transition_to(SessionStatus.RUNNING)
 
 
 async def resolve(runtime, message_id: str, response: dict) -> None:
-    pending = runtime._pending.get(message_id)
+    run = runtime._run_for_pending(message_id)
+    pending_store = run.pending if run is not None else runtime._pending
+    pending = pending_store.get(message_id)
     if pending is None:
         raise KeyError(f"No pending request: {message_id}")
     pending["response"] = response

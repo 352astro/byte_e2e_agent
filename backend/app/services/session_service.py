@@ -240,7 +240,7 @@ class SessionService:
         runtime = ctx.scheduler
         is_running = runtime.is_running_session(session_id)
         runtime_busy = self._ctx.any_runtime_running()
-        current_msg = runtime.current_message if is_running else None
+        current_msg = runtime.current_message_for_session(session_id) if is_running else None
         messages = ctx.get_session_messages(session_id, repair=not runtime_busy)
         return {
             "session": ctx.get_info(session_id),
@@ -248,7 +248,7 @@ class SessionService:
             "session_running": is_running,
             "runtime_busy": runtime_busy,
             "current_message": current_msg.model_dump(mode="json") if current_msg else None,
-            "pending_request": runtime.pending_request,
+            "pending_request": runtime.pending_request_for_session(session_id),
         }
 
     async def interrupt_session(self, session_id: str) -> bool:
@@ -258,7 +258,7 @@ class SessionService:
             ctx.get_info(session_id)
         except (KeyError, SessionNotFound) as exc:
             raise SessionNotFound(session_id) from exc
-        return await ctx.scheduler.interrupt()
+        return await ctx.scheduler.interrupt(session_id)
 
     async def interrupt_current(self) -> bool:
         return await self._ctx.scheduler.interrupt()

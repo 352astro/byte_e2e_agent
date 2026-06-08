@@ -114,8 +114,7 @@ async def execute_turn(
     model_id = entry.config.model_id or default_model_id
     sid = entry.id
     ws = entry.ws
-    intr = runtime._interrupt_event
-    assert intr is not None
+    intr = runtime._interrupt_event_for(sid)
 
     turn_id = _uuid.uuid4().hex
     final_answer = ""
@@ -196,7 +195,7 @@ async def execute_turn(
             toolset = ToolSet(tool_registry, *tool_names) if tool_names else default_toolset()
 
             streaming_holder: list[Message | None] = [None]
-            runtime._streaming_holder = streaming_holder
+            runtime._set_streaming_holder(sid, streaming_holder)
             assistant_msg, finish_reason = await model_call(
                 openai_client,
                 model_id,
@@ -209,7 +208,7 @@ async def execute_turn(
                 hook_manager=runtime._hooks,
                 streaming_holder=streaming_holder,
             )
-            runtime._streaming_holder = None
+            runtime._set_streaming_holder(sid, None)
 
             has_tool_calls = assistant_msg.has_tool_calls
             if assistant_msg.content:
@@ -245,6 +244,21 @@ async def execute_turn(
                     parent_tool_call_id=tool_call_id,
                 )
 
+            async def invoke_browser_inspector(
+                url,
+                prompt,
+                max_steps=8,
+                tool_call_id="",
+            ):
+                return await runtime.invoke_browser_inspect(
+                    sid,
+                    url=url,
+                    prompt=prompt,
+                    max_steps=max_steps,
+                    parent_message_id=assistant_msg.id,
+                    parent_tool_call_id=tool_call_id,
+                )
+
             async def request_human_input(
                 payload,
                 interrupt_event=None,
@@ -271,6 +285,7 @@ async def execute_turn(
                 hook_manager=runtime._hooks,
                 ask_guard=runtime._ask_guard,
                 invoke_subagent=invoke_child_agent,
+                invoke_browser_inspect=invoke_browser_inspector,
                 request_human_input=request_human_input,
             )
 
@@ -302,10 +317,8 @@ async def execute_turn(
         # Clean up runtime state FIRST, before cancellable hook calls.
         # If the task is cancelled during on_turn_end/flush, these must
         # already be cleared so the system doesn't stay permanently busy.
-        runtime._streaming_holder = None
-        if top_level:
-            runtime._running_session_id = None
-            runtime._loop_task = None
+        runtime._set_streaming_holder(sid, None)
+        runtime._finish_run(sid)
         entry.transition_to(SessionStatus.IDLE)
 
         # Clear notification state so page refresh doesn't show stale guards/notices

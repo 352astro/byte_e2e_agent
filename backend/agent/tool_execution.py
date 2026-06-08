@@ -33,6 +33,7 @@ from shared.types import Message, ToolCall
 
 AskGuardFn = Callable[[GuardCheck, asyncio.Event], Awaitable[bool]]
 InvokeSubagentFn = Callable[..., Awaitable[str]]
+InvokeBrowserInspectFn = Callable[..., Awaitable[str]]
 RequestHumanInputFn = Callable[..., Awaitable[dict]]
 
 _PARALLEL_READ_TOOLS = frozenset(
@@ -95,7 +96,13 @@ class SysguardAskTracker:
         return True
 
 
-def _is_parallel_candidate(info: ToolCallInfo) -> bool:
+def _is_parallel_candidate(
+    info: ToolCallInfo,
+    *,
+    allow_browser_inspect: bool = False,
+) -> bool:
+    if info.name == "BrowserInspect":
+        return allow_browser_inspect
     return info.name in _PARALLEL_READ_TOOLS
 
 
@@ -122,6 +129,7 @@ async def execute_tool_calls(
     ask_guard: AskGuardFn,
     invoke_subagent: InvokeSubagentFn,
     request_human_input: RequestHumanInputFn,
+    invoke_browser_inspect: InvokeBrowserInspectFn | None = None,
 ) -> None:
     """Execute all tool calls for one assistant message.
 
@@ -147,7 +155,14 @@ async def execute_tool_calls(
             hook_manager=hook_manager,
         )
 
-        if not _is_parallel_candidate(first) or first_decision == GuardDecision.ASK:
+        allow_browser_inspect = invoke_browser_inspect is not None
+        if (
+            not _is_parallel_candidate(
+                first,
+                allow_browser_inspect=allow_browser_inspect,
+            )
+            or first_decision == GuardDecision.ASK
+        ):
             await _run_tool_batch(
                 [ToolJob(first, first_decision)],
                 assistant_msg=assistant_msg,
@@ -161,6 +176,7 @@ async def execute_tool_calls(
                 hook_manager=hook_manager,
                 ask_guard=ask_guard,
                 invoke_subagent=invoke_subagent,
+                invoke_browser_inspect=invoke_browser_inspect,
                 request_human_input=request_human_input,
             )
             index += 1
@@ -171,7 +187,10 @@ async def execute_tool_calls(
 
         while index < len(infos):
             next_info = infos[index]
-            if not _is_parallel_candidate(next_info):
+            if not _is_parallel_candidate(
+                next_info,
+                allow_browser_inspect=allow_browser_inspect,
+            ):
                 break
             decision = await _guard_check(
                 next_info,
@@ -198,6 +217,7 @@ async def execute_tool_calls(
             hook_manager=hook_manager,
             ask_guard=ask_guard,
             invoke_subagent=invoke_subagent,
+            invoke_browser_inspect=invoke_browser_inspect,
             request_human_input=request_human_input,
         )
 
@@ -239,6 +259,7 @@ async def _run_tool_batch(
     hook_manager: HookManager,
     ask_guard: AskGuardFn,
     invoke_subagent: InvokeSubagentFn,
+    invoke_browser_inspect: InvokeBrowserInspectFn | None,
     request_human_input: RequestHumanInputFn,
 ) -> None:
     emit_lock = asyncio.Lock()
@@ -266,6 +287,7 @@ async def _run_tool_batch(
             hook_manager=hook_manager,
             ask_guard=ask_guard,
             invoke_subagent=invoke_subagent,
+            invoke_browser_inspect=invoke_browser_inspect,
             request_human_input=request_human_input,
             emit_lock=emit_lock,
         )
@@ -286,6 +308,7 @@ async def _run_tool_batch(
                 hook_manager=hook_manager,
                 ask_guard=ask_guard,
                 invoke_subagent=invoke_subagent,
+                invoke_browser_inspect=invoke_browser_inspect,
                 request_human_input=request_human_input,
                 emit_lock=emit_lock,
             )
@@ -316,6 +339,7 @@ async def _run_tool_job(
     hook_manager: HookManager,
     ask_guard: AskGuardFn,
     invoke_subagent: InvokeSubagentFn,
+    invoke_browser_inspect: InvokeBrowserInspectFn | None,
     request_human_input: RequestHumanInputFn,
     emit_lock: asyncio.Lock,
 ) -> None:
@@ -422,6 +446,7 @@ async def _run_tool_job(
                 session_id=session_id,
                 hook_manager=hook_manager,
                 agent_invoker=job_invoke_subagent,
+                browser_inspector_invoker=invoke_browser_inspect,
                 human_input_requester=job_request_human_input,
             )
             tool_output = tool_exec.output
@@ -454,6 +479,7 @@ async def _run_tool_job(
                     session_id=session_id,
                     hook_manager=hook_manager,
                     agent_invoker=job_invoke_subagent,
+                    browser_inspector_invoker=invoke_browser_inspect,
                     human_input_requester=job_request_human_input,
                 )
                 tool_output = tool_exec.output
@@ -800,6 +826,7 @@ async def execute_one_tool(
     session_id: str = "",
     hook_manager: HookManager | None = None,
     agent_invoker=None,
+    browser_inspector_invoker=None,
     human_input_requester=None,
 ) -> ToolExecutionResult:
     """Execute a single tool_call. SubAgent / BrowserInspect dispatched inline."""
@@ -845,41 +872,49 @@ async def execute_one_tool(
                 human_input_requester=human_input_requester,
             )
     elif tool.name == "BrowserInspect":
-        browser_toolset = ToolSet(tool_registry, "BrowserOpen", "BrowserAct")
         inspect_url = args.get("url", "")
-        browser_session = BrowserSession()
-        token = set_active_browser_session(browser_session)
-        try:
-            open_result = await open_url(inspect_url, max_bytes=20_000)
-
-            from agent.runtime.subagents import run_subagent
-
-            result_str = await run_subagent(
-                ws,
-                browser_toolset,
+        if browser_inspector_invoker is not None:
+            result_str = await browser_inspector_invoker(
+                url=inspect_url,
                 prompt=args.get("prompt", ""),
                 max_steps=args.get("max_steps", 8),
-                openai_client=openai_client,
-                model_id=model_id,
-                session_id=session_id,
-                interrupt_event=interrupt_event,
-                hook_manager=hook_manager,
-                system_extra=(
-                    "You are a browser inspection sub-agent. Your toolset "
-                    "contains ONLY browser tools (BrowserOpen, BrowserAct). "
-                    f"The page has already been opened at: {inspect_url}\n"
-                    "Do not call BrowserOpen unless you must navigate to a "
-                    "different page. Inspect the current page and report what "
-                    "you see. Keep your reasoning extremely brief — one short "
-                    "sentence at most."
-                    "\n\nInitial page state:\n"
-                    f"{open_result}"
-                ),
-                human_input_requester=human_input_requester,
+                tool_call_id=tc.get("id", ""),
             )
-        finally:
-            reset_active_browser_session(token)
-            await browser_session.close()
+        else:
+            browser_toolset = ToolSet(tool_registry, "BrowserOpen", "BrowserAct")
+            browser_session = BrowserSession()
+            token = set_active_browser_session(browser_session)
+            try:
+                open_result = await open_url(inspect_url, max_bytes=20_000)
+
+                from agent.runtime.subagents import run_subagent
+
+                result_str = await run_subagent(
+                    ws,
+                    browser_toolset,
+                    prompt=args.get("prompt", ""),
+                    max_steps=args.get("max_steps", 8),
+                    openai_client=openai_client,
+                    model_id=model_id,
+                    session_id=session_id,
+                    interrupt_event=interrupt_event,
+                    hook_manager=hook_manager,
+                    system_extra=(
+                        "You are a browser inspection sub-agent. Your toolset "
+                        "contains ONLY browser tools (BrowserOpen, BrowserAct). "
+                        f"The page has already been opened at: {inspect_url}\n"
+                        "Do not call BrowserOpen unless you must navigate to a "
+                        "different page. Inspect the current page and report what "
+                        "you see. Keep your reasoning extremely brief — one short "
+                        "sentence at most."
+                        "\n\nInitial page state:\n"
+                        f"{open_result}"
+                    ),
+                    human_input_requester=human_input_requester,
+                )
+            finally:
+                reset_active_browser_session(token)
+                await browser_session.close()
     else:
         try:
             call_args = dict(args)

@@ -168,7 +168,8 @@ class TestAgentRuntimeConstruction:
     def test_status_running_when_session_active(self):
         """status returns RUNNING when a session is running."""
         runtime = _make_runtime()
-        runtime._running_session_id = "some-id"
+        session = runtime.create_session(_make_config(), session_id="some-id")
+        runtime._begin_run(session)
         assert runtime.status == RuntimeStatus.RUNNING
 
     def test_pending_request_none_initially(self):
@@ -187,6 +188,7 @@ class TestAgentRuntimeConstruction:
             "kind": "approval",
             "message": {},
         }
+        runtime._running_session_id = "legacy"
         req = runtime.pending_request
         assert req is not None
         assert req["message_id"] == "tid-1"
@@ -253,7 +255,8 @@ class TestSessionManagement:
     def test_is_running_session_true_when_matches(self):
         """is_running_session returns True when the id matches the running session."""
         runtime = _make_runtime()
-        runtime._running_session_id = "active-id"
+        session = runtime.create_session(_make_config(), session_id="active-id")
+        runtime._begin_run(session)
         assert runtime.is_running_session("active-id") is True
 
     def test_is_running_session_false_when_different(self):
@@ -277,12 +280,12 @@ class TestInvokeUser:
     """Tests for AgentRuntime.invoke_user()."""
 
     @pytest.mark.asyncio
-    async def test_raises_runtimeerror_if_already_running(self):
-        """invoke_user raises RuntimeError when a session is already running."""
+    async def test_raises_runtimeerror_if_same_session_already_running(self):
+        """invoke_user raises RuntimeError when the same session is already running."""
         runtime = _make_runtime()
-        runtime._running_session_id = "existing-id"
         config = _make_config()
-        session = runtime.create_session(config, session_id="new-id")
+        session = runtime.create_session(config, session_id="sid1")
+        runtime._begin_run(session)
 
         with pytest.raises(RuntimeError, match="already running"):
             await runtime.invoke_user(session, "hello")
@@ -396,12 +399,11 @@ class TestStart:
     """Tests for AgentRuntime.start() — synchronous compat wrapper."""
 
     @pytest.mark.asyncio
-    async def test_raises_runtimeerror_if_running(self):
-        """start raises RuntimeError when another session is running."""
+    async def test_raises_runtimeerror_if_same_session_running(self):
+        """start raises RuntimeError when the same session is running."""
         runtime = _make_runtime()
-        runtime._running_session_id = "existing-id"
-        mock_session = MagicMock()
-        mock_session.session_id = "new-id"
+        mock_session = runtime.create_session(_make_config(), session_id="new-id")
+        runtime._begin_run(mock_session)
 
         with pytest.raises(RuntimeError, match="already running"):
             runtime.start(mock_session, "hello")
@@ -617,10 +619,10 @@ class TestInterrupt:
             # _interrupt_event is not yet set
             assert runtime._interrupt_event is not None
             assert not runtime._interrupt_event.is_set()
+            interrupt_event = runtime._runs["sid1"].interrupt_event
             await runtime.interrupt()
             # After interrupt, the event should have been set
-            assert runtime._interrupt_event is not None
-            assert runtime._interrupt_event.is_set()
+            assert interrupt_event.is_set()
 
     @pytest.mark.asyncio
     async def test_returns_true_after_successful_interrupt(self):
@@ -857,12 +859,12 @@ class TestStateTransitions:
 # ═══════════════════════════════════════════════════════════
 
 
-class TestConcurrentExecutionPrevention:
-    """Tests that enforce single-session execution guarantees."""
+class TestConcurrentExecution:
+    """Tests for per-session execution concurrency."""
 
     @pytest.mark.asyncio
-    async def test_cannot_invoke_user_while_running(self):
-        """invoke_user raises RuntimeError when a session is already running."""
+    async def test_can_invoke_different_sessions_while_running(self):
+        """Different sessions can run concurrently."""
         runtime = _make_runtime()
         config = _make_config()
         session_a = runtime.create_session(config, session_id="session-a")
@@ -874,18 +876,17 @@ class TestConcurrentExecutionPrevention:
             side_effect=_make_mock_execute_turn_hanging(runtime),
         ):
             await runtime.invoke_user(session_a, "hello")
-            # Now session A is running, invoking B should fail
-            with pytest.raises(RuntimeError, match="already running"):
-                await runtime.invoke_user(session_b, "world")
+            sid = await runtime.invoke_user(session_b, "world")
+            assert sid == "session-b"
+            assert runtime.is_running_session("session-a") is True
+            assert runtime.is_running_session("session-b") is True
 
     @pytest.mark.asyncio
-    async def test_cannot_start_while_running(self):
-        """start raises RuntimeError when a session is already running."""
+    async def test_cannot_start_same_session_while_running(self):
+        """start raises RuntimeError when the same session is already running."""
         runtime = _make_runtime()
-        runtime._running_session_id = "existing"
-
-        mock_session = MagicMock()
-        mock_session.session_id = "new-session"
+        mock_session = runtime.create_session(_make_config(), session_id="new-session")
+        runtime._begin_run(mock_session)
 
         with pytest.raises(RuntimeError, match="already running"):
             runtime.start(mock_session, "hello")

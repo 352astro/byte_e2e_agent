@@ -14,7 +14,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import uuid as _uuid
+from dataclasses import dataclass
 
 from agent.core.config import SessionConfig
 from agent.core.workspace import Workspace
@@ -23,7 +25,7 @@ from agent.runtime.messages import (
     emit_error_message,
     finish_partial_streaming_message,
 )
-from agent.runtime.subagents import invoke_agent, invoke_subagent
+from agent.runtime.subagents import invoke_agent, invoke_browser_inspect, invoke_subagent
 from agent.runtime.turn import execute_turn
 from agent.session.session_entry import SessionEntry
 from agent.session.status import RuntimeStatus, SessionStatus
@@ -35,10 +37,26 @@ from shared.types import Message
 # ═══════════════════════════════════════════════════════════
 
 
+@dataclass
+class RunState:
+    """Mutable state for one currently executing session."""
+
+    session_id: str
+    entry: SessionEntry
+    interrupt_event: asyncio.Event
+    task: asyncio.Task | None = None
+    streaming_holder: list[Message | None] | None = None
+    pending: dict[str, dict] | None = None
+
+    def __post_init__(self) -> None:
+        if self.pending is None:
+            self.pending = {}
+
+
 class AgentRuntime:
     """Per-Project 执行运行时（对标 Rust AgentRuntime）。
 
-    一次只允许一个 Session 在 RUNNING 状态。
+    多个顶层 Session 可以并行运行；同一个 Session 仍然一次只允许一个 Turn。
 
     用法:
         ws = Workspace("/path/to/project", workspace_uuid="...")
@@ -61,6 +79,9 @@ class AgentRuntime:
         self._hooks = hook_manager or HookManager()
         self._llm = llm  # (client, model_id) tuple (lazy init if None)
         self._sessions: dict[str, SessionEntry] = {}
+        self._runs: dict[str, RunState] = {}
+        # Compatibility mirrors for older tests/callers. Runtime authority lives
+        # in _runs; these point at the first active run when one exists.
         self._running_session_id: str | None = None
         self._interrupt_event: asyncio.Event | None = None
         self._loop_task: asyncio.Task | None = None
@@ -79,7 +100,7 @@ class AgentRuntime:
 
     @property
     def status(self) -> RuntimeStatus:
-        if self._running_session_id:
+        if self._runs:
             return RuntimeStatus.RUNNING
         return RuntimeStatus.IDLE
 
@@ -89,13 +110,17 @@ class AgentRuntime:
 
         仅在 Agent 运行且 LLM 正在输出时非 None。
         """
-        if self._streaming_holder is None:
-            return None
-        return self._streaming_holder[0]
+        if self._running_session_id:
+            return self.current_message_for_session(self._running_session_id)
+        return None
 
     @property
     def pending_request(self) -> dict | None:
         """当前待处理的权限请求。"""
+        if self._running_session_id:
+            req = self.pending_request_for_session(self._running_session_id)
+            if req is not None:
+                return req
         for mid, pending in self._pending.items():
             return {
                 "message_id": mid,
@@ -168,7 +193,78 @@ class AgentRuntime:
 
     def is_running_session(self, session_id: str) -> bool:
         """检查指定 session 是否正在运行。"""
-        return self._running_session_id == session_id
+        return session_id in self._runs
+
+    def current_message_for_session(self, session_id: str) -> Message | None:
+        run = self._runs.get(session_id)
+        if run is None or run.streaming_holder is None:
+            return None
+        return run.streaming_holder[0]
+
+    def pending_request_for_session(self, session_id: str) -> dict | None:
+        run = self._runs.get(session_id)
+        if run is None:
+            return None
+        for mid, pending in (run.pending or {}).items():
+            return {
+                "message_id": mid,
+                "kind": pending.get("kind", "permission_request"),
+                "message": pending.get("message", {}),
+            }
+        return None
+
+    def _sync_legacy_state(self) -> None:
+        first = next(iter(self._runs.values()), None)
+        self._running_session_id = first.session_id if first else None
+        self._interrupt_event = first.interrupt_event if first else None
+        self._loop_task = first.task if first else None
+        self._pending = first.pending if first and first.pending is not None else {}
+        self._streaming_holder = first.streaming_holder if first else None
+
+    def _run_for_pending(self, request_id: str) -> RunState | None:
+        for run in self._runs.values():
+            if request_id in (run.pending or {}):
+                return run
+        return None
+
+    def _interrupt_event_for(self, session_id: str) -> asyncio.Event:
+        run = self._runs.get(session_id)
+        if run is None:
+            raise RuntimeError(f"Session {session_id} is not running")
+        return run.interrupt_event
+
+    def _set_streaming_holder(
+        self,
+        session_id: str,
+        holder: list[Message | None] | None,
+    ) -> None:
+        run = self._runs.get(session_id)
+        if run is None:
+            return
+        run.streaming_holder = holder
+        self._sync_legacy_state()
+
+    def _begin_run(
+        self,
+        entry: SessionEntry,
+        *,
+        interrupt_event: asyncio.Event | None = None,
+    ) -> RunState:
+        if entry.id in self._runs:
+            raise RuntimeError(f"Runtime already running session {entry.id}")
+        run = RunState(
+            session_id=entry.id,
+            entry=entry,
+            interrupt_event=interrupt_event or asyncio.Event(),
+        )
+        self._runs[entry.id] = run
+        entry.transition_to(SessionStatus.RUNNING)
+        self._sync_legacy_state()
+        return run
+
+    def _finish_run(self, session_id: str) -> None:
+        self._runs.pop(session_id, None)
+        self._sync_legacy_state()
 
     def _start_entry(
         self,
@@ -178,18 +274,26 @@ class AgentRuntime:
         max_steps: int = 50,
         shadow_repo=None,
     ) -> str:
-        if self._running_session_id is not None:
-            raise RuntimeError(f"Runtime already running session {self._running_session_id}")
-
-        self._running_session_id = entry.id
-        entry.transition_to(SessionStatus.RUNNING)
-        self._interrupt_event = asyncio.Event()
-        self._pending.clear()
-        self._loop_task = asyncio.create_task(
+        run = self._begin_run(entry)
+        task = asyncio.create_task(
             self._execute_turn(entry, question, max_steps, shadow_repo),
             name=f"runtime-{entry.id}",
         )
+        run.task = task
+        task.add_done_callback(
+            lambda done_task, sid=entry.id: self._on_run_task_done(sid, done_task)
+        )
+        self._sync_legacy_state()
         return entry.id
+
+    def _on_run_task_done(self, session_id: str, task: asyncio.Task) -> None:
+        run = self._runs.get(session_id)
+        if run is not None and run.task is task:
+            if run.entry.status.is_busy():
+                run.entry.transition_to(SessionStatus.IDLE)
+            self._finish_run(session_id)
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            task.exception()
 
     # ── Invoke: 用户 ────────────────────────────────────
 
@@ -282,6 +386,26 @@ class AgentRuntime:
             parent_tool_call_id=parent_tool_call_id,
         )
 
+    async def invoke_browser_inspect(
+        self,
+        caller_id: str,
+        *,
+        url: str,
+        prompt: str,
+        max_steps: int = 8,
+        parent_message_id: str = "",
+        parent_tool_call_id: str = "",
+    ) -> str:
+        return await invoke_browser_inspect(
+            self,
+            caller_id,
+            url=url,
+            prompt=prompt,
+            max_steps=max_steps,
+            parent_message_id=parent_message_id,
+            parent_tool_call_id=parent_tool_call_id,
+        )
+
     async def resolve(self, message_id: str, response: dict) -> None:
         """解决待处理的权限请求。"""
         await resolve(self, message_id, response)
@@ -326,19 +450,30 @@ class AgentRuntime:
     async def _finish_partial_streaming_message(self, *, session_id: str) -> None:
         await finish_partial_streaming_message(
             self._hooks,
-            self.current_message,
+            self.current_message_for_session(session_id),
             session_id=session_id,
         )
 
-    async def interrupt(self) -> bool:
-        """中断当前运行的 Session。
+    async def interrupt(self, session_id: str | None = None) -> bool:
+        """中断运行中的 Session。
 
         只设置中断标志，不等待主循环退出。主循环的 finally
         块会异步完成清理。调用方不应假设调用返回后状态已归位。
         """
-        if self._interrupt_event is None:
+        if session_id is None:
+            if self._running_session_id:
+                session_id = self._running_session_id
+            elif len(self._runs) == 1:
+                session_id = next(iter(self._runs))
+        if not session_id:
             return False
-        self._interrupt_event.set()
+        run = self._runs.get(session_id)
+        if run is None:
+            return False
+        run.interrupt_event.set()
+        if run.task is not None:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await run.task
         return True
 
     # ═══════════════════════════════════════════════════════

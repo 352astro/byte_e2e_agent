@@ -25,6 +25,7 @@ export type IconName =
   | "settings"
   | "palette"
   | "robot"
+  | "eye"
   | "trash";
 
 const paths: Record<IconName, SVGProps<SVGPathElement>> = {
@@ -60,6 +61,9 @@ const paths: Record<IconName, SVGProps<SVGPathElement>> = {
   },
   robot: {
     d: "M7 4h10l3 5-2 10H6L4 9l3-5zM8.5 10.5h2.5l1 1.5-1 1.5H8.5L7.5 12l1-1.5zM13 12l1-1.5h2.5l1 1.5-1 1.5H14L13 12zM9 17h6M10.5 20h3M6 9h12M4 9l-2 2M20 9l2 2",
+  },
+  eye: {
+    d: "M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
   },
   error: {
     d: "M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01",

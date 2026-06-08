@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from contextvars import ContextVar
-from typing import Literal
+from typing import Any, Literal
 
 from langchain_core.tools import StructuredTool
 from playwright.async_api import Page, Playwright, async_playwright
@@ -26,6 +26,7 @@ class BrowserSession:
 
     def __init__(self) -> None:
         self._page: Page | None = None
+        self._browser: Any = None
         self._playwright = None
 
     async def ensure_page(self) -> Page:
@@ -38,8 +39,8 @@ class BrowserSession:
 
         headless = _is_headless()
         self._playwright = await async_playwright().__aenter__()
-        browser = await self._playwright.chromium.launch(headless=headless)
-        self._page = await browser.new_page()
+        self._browser = await self._playwright.chromium.launch(headless=headless)
+        self._page = await self._browser.new_page()
         return self._page
 
     async def current_page(self) -> Page | None:
@@ -53,11 +54,21 @@ class BrowserSession:
             return None
 
     async def close(self) -> None:
+        if self._page is not None:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(self._page.close(), timeout=5)
+        self._page = None
+        if self._browser is not None:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(self._browser.close(), timeout=5)
+        self._browser = None
         if self._playwright is not None:
             with contextlib.suppress(Exception):
-                await self._playwright.__aexit__(None, None, None)
+                await asyncio.wait_for(
+                    self._playwright.__aexit__(None, None, None),
+                    timeout=5,
+                )
         self._playwright = None
-        self._page = None
 
 
 class BrowserSessionManager:
