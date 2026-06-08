@@ -8,8 +8,10 @@ from datetime import UTC, datetime
 
 from agent.core.config import SessionConfig, ToolSetPreset
 from agent.core.workspace import Workspace
+from agent.llm import create_client
 from agent.runtime.context_builder import build_preloaded_skills_context
 from agent.session.status import SessionStatus
+from app.core.config import get_settings
 
 
 def build_subagent_preamble(with_skills: list[str]) -> str:
@@ -59,6 +61,50 @@ def write_subagent_metadata(
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+
+
+def get_subagent_llm(runtime):
+    """Return the LLM client/model for SubAgent and BrowserInspect sessions."""
+    settings = get_settings()
+    if not any(
+        [
+            settings.subagent_llm_api_key,
+            settings.subagent_llm_base_url,
+            settings.subagent_llm_model_id,
+            settings.subagent_llm_timeout is not None,
+        ]
+    ):
+        return runtime._get_llm()
+
+    parent_client, parent_model_id = runtime._get_llm()
+    model_id = settings.subagent_llm_model_id or parent_model_id
+    if not any(
+        [
+            settings.subagent_llm_api_key,
+            settings.subagent_llm_base_url,
+            settings.subagent_llm_timeout is not None,
+        ]
+    ):
+        return parent_client, model_id
+
+    api_key = settings.subagent_llm_api_key or settings.llm_api_key
+    base_url = settings.subagent_llm_base_url or settings.llm_base_url
+    timeout = (
+        settings.subagent_llm_timeout
+        if settings.subagent_llm_timeout is not None
+        else settings.llm_timeout
+    )
+    if (
+        api_key == settings.llm_api_key
+        and base_url == settings.llm_base_url
+        and timeout == settings.llm_timeout
+    ):
+        return parent_client, model_id
+    return create_client(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=timeout,
+    ), model_id
 
 
 async def invoke_agent(
@@ -131,7 +177,7 @@ async def invoke_subagent(
     parent_message_id: str = "",
     parent_tool_call_id: str = "",
 ) -> str:
-    openai_client, model_id = runtime._get_llm()
+    openai_client, model_id = get_subagent_llm(runtime)
     child_id = f"{caller_id}-sub-{_uuid.uuid4().hex[:8]}"
     preamble = build_subagent_preamble(with_skills or [])
     child_tools = [
@@ -188,7 +234,7 @@ async def invoke_browser_inspect(
     parent_message_id: str = "",
     parent_tool_call_id: str = "",
 ) -> str:
-    openai_client, model_id = runtime._get_llm()
+    openai_client, model_id = get_subagent_llm(runtime)
     child_id = f"{caller_id}-browser-{_uuid.uuid4().hex[:8]}"
     config = SessionConfig(
         name=f"browser:{caller_id}",

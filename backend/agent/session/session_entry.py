@@ -30,7 +30,7 @@ class SessionEntry:
 
     id: str
     config: SessionConfig
-    llm_client: object | None = None  # (openai_client, model_id) tuple
+    llm_client: object | None = None  # client or (client, model_id)
     ws: Workspace = field(default_factory=Workspace)
     status: SessionStatus = SessionStatus.IDLE
 

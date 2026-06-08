@@ -100,6 +100,18 @@ _TASK_REMINDER = (
 # ── Turn executor ───────────────────────────────────────
 
 
+def _resolve_entry_llm(runtime, entry: SessionEntry):
+    default_client, default_model_id = runtime._get_llm()
+    if entry.llm_client is None:
+        return default_client, entry.config.model_id or default_model_id
+
+    if isinstance(entry.llm_client, tuple) and len(entry.llm_client) == 2:
+        client, client_model_id = entry.llm_client
+        return client, entry.config.model_id or client_model_id or default_model_id
+
+    return entry.llm_client, entry.config.model_id or default_model_id
+
+
 async def execute_turn(
     runtime,
     entry: SessionEntry,
@@ -110,8 +122,7 @@ async def execute_turn(
     top_level: bool = True,
 ) -> str:
     """Run one ReAct turn for a session."""
-    openai_client, default_model_id = runtime._get_llm()
-    model_id = entry.config.model_id or default_model_id
+    openai_client, model_id = _resolve_entry_llm(runtime, entry)
     sid = entry.id
     ws = entry.ws
     intr = runtime._interrupt_event_for(sid)

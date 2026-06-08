@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agent.utils.sandbox import build_bwrap_cmd, bwrap_available
+from agent.utils.sandbox import BwrapBind, build_bwrap_cmd, bwrap_available
 from agent.utils.terminal import PersistentTerminal
 
 # ═══════════════════════════════════════════════════════════
@@ -189,6 +189,44 @@ class TestBuildBwrapCmd:
             cmd = self._cmd("/ws", ["bash"])
         bind_targets = _mount_targets(cmd, "--bind")
         assert bind_targets.count("/ws") == 1, f"Workspace bound {bind_targets.count('/ws')} times"
+
+    def test_extra_readonly_bind(self, tmp_path):
+        source = tmp_path / "venv"
+        source.mkdir()
+
+        cmd = self._cmd(
+            "/ws",
+            ["python"],
+            extra_binds=[
+                BwrapBind(
+                    source=str(source),
+                    target="/tmp/.venv",
+                    mode="readonly",
+                )
+            ],
+        )
+
+        ro_pairs = [(cmd[i + 1], cmd[i + 2]) for i in _find_arg_indices(cmd, "--ro-bind")]
+        assert (str(source.resolve()), "/tmp/.venv") in ro_pairs
+
+    def test_extra_readwrite_bind(self, tmp_path):
+        source = tmp_path / "cache"
+        source.mkdir()
+
+        cmd = self._cmd(
+            "/ws",
+            ["python"],
+            extra_binds=[
+                BwrapBind(
+                    source=str(source),
+                    target="/cache",
+                    mode="readwrite",
+                )
+            ],
+        )
+
+        bind_pairs = [(cmd[i + 1], cmd[i + 2]) for i in _find_arg_indices(cmd, "--bind")]
+        assert (str(source.resolve()), "/cache") in bind_pairs
 
     # ── Mount order ──────────────────────────────────────
 

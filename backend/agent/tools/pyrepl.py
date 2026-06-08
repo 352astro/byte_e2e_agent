@@ -1,29 +1,29 @@
-"""PyRepl 工具 — 安全受限的 Python 子进程执行器。
+"""PyRepl tool — sandboxed Python subprocess execution.
 
-通过独立子进程执行用户代码，避免:
-- exec() 阻塞事件循环
-- 恶意代码影响主进程
-- 中断无法生效
-
-安全模型: 子进程以 -S 启动（禁用 site），通过受限 builtins 执行。
+Runs user code in an isolated subprocess. Python semantics are normal
+(stdlib imports, project dependencies from the current venv, open(), etc.);
+filesystem restrictions come from the same OS-level sandbox used by Shell.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import os
 import signal
 import sys
-import textwrap
+from pathlib import Path
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from agent.tools.result import ToolResult
+from agent.utils import sandbox
 
-_MAX_OUTPUT_BYTES = 10_240  # 10 KiB
+_MAX_OUTPUT_BYTES = 20_000
 _DEFAULT_TIMEOUT_S = 30
+_SANDBOX_VENV = "/tmp/.venv"
 
 
 class PyReplInput(BaseModel):
@@ -38,82 +38,79 @@ class PyReplInput(BaseModel):
     code: str = Field(
         ...,
         description=(
-            "Python code to execute. The sandbox exposes print() and basic "
-            "builtins (int, str, list, dict, sorted, zip, ...). I/O and "
-            "imports are blocked."
+            "Python code to execute in a subprocess sandbox. Standard library "
+            "imports and normal Python I/O are available; filesystem writes "
+            "are constrained by the workspace sandbox."
         ),
     )
 
 
-def _build_sandbox_script(code: str) -> str:
-    """构建受限执行脚本，通过 restricted builtins 运行用户代码。"""
-    # 安全白名单内置函数
-    safe_names = [
-        "print",
-        "len",
-        "range",
-        "int",
-        "float",
-        "str",
-        "bool",
-        "bytes",
-        "list",
-        "dict",
-        "set",
-        "tuple",
-        "frozenset",
-        "enumerate",
-        "zip",
-        "map",
-        "filter",
-        "sorted",
-        "reversed",
-        "iter",
-        "next",
-        "slice",
-        "abs",
-        "min",
-        "max",
-        "sum",
-        "round",
-        "pow",
-        "divmod",
-        "ord",
-        "chr",
-        "repr",
-        "hash",
-        "id",
-        "type",
-        "isinstance",
-        "issubclass",
-        "callable",
-        "hasattr",
-        "all",
-        "any",
-        "Exception",
-        "ValueError",
-        "TypeError",
-        "KeyError",
-        "IndexError",
-        "StopIteration",
-        "True",
-        "False",
-        "None",
-    ]
-    safe_builtins = ",\n        ".join(f'"{n}": __builtins__["{n}"]' for n in safe_names)
+def _current_venv_root() -> Path | None:
+    prefix = Path(sys.prefix).resolve()
+    if sys.prefix == sys.base_prefix:
+        return None
+    if not (prefix / "pyvenv.cfg").exists():
+        return None
+    return prefix
 
-    return textwrap.dedent(f"""\
-    import builtins as __builtins__
-    __safe = {{
-        {safe_builtins}
-    }}
-    __builtins__["__import__"] = __import__
 
+def _sandbox_python(venv_root: Path | None) -> str:
+    if venv_root is None:
+        return sys.executable
+    executable = Path(sys.executable)
     try:
-        exec({code!r}, {{"__builtins__": __safe}})
-    except SystemExit:
-        pass
-    """)
+        rel = executable.relative_to(venv_root)
+    except ValueError:
+        rel = Path("bin") / executable.name
+    return str(Path(_SANDBOX_VENV) / rel)
+
+
+def _build_command(
+    code: str,
+    *,
+    sandbox_root: str,
+    workspace_uuid: str | None,
+) -> tuple[list[str], str | None]:
+    venv_root = _current_venv_root()
+    python = _sandbox_python(venv_root)
+    command = [python, "-c", code]
+    cleanup_path = None
+
+    if sys.platform == "linux":
+        if not sandbox.bwrap_available():
+            raise RuntimeError(
+                "bwrap (bubblewrap) is required for Linux PyRepl sandbox. "
+                "Install with: apt-get install bubblewrap"
+            )
+        extra_binds = []
+        if venv_root is not None:
+            extra_binds.append(
+                sandbox.BwrapBind(
+                    source=str(venv_root),
+                    target=_SANDBOX_VENV,
+                    mode="readonly",
+                )
+            )
+        command, cleanup_path = sandbox.build_bwrap_cmd(
+            sandbox_root,
+            command,
+            workspace_uuid=workspace_uuid,
+            extra_binds=extra_binds,
+        )
+    return command, cleanup_path
+
+
+def _build_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONNOUSERSITE"] = "1"
+    if _current_venv_root() is not None:
+        env["VIRTUAL_ENV"] = _SANDBOX_VENV if sys.platform == "linux" else str(sys.prefix)
+        bin_dir = (
+            f"{_SANDBOX_VENV}/bin" if sys.platform == "linux" else str(Path(sys.prefix) / "bin")
+        )
+        env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+    return env
 
 
 async def pyrepl_handler(
@@ -124,18 +121,23 @@ async def pyrepl_handler(
     interrupt_event: asyncio.Event | None = None,
 ) -> ToolResult:
     """在独立子进程中运行 Python 代码。"""
-    script = _build_sandbox_script(code)
     timeout_s = timeout_ms / 1000.0
+    sandbox_root = str(getattr(ws, "root", Path.cwd()))
+    workspace_uuid = getattr(ws, "uuid", None)
 
     proc = None
     try:
+        command, cleanup_path = _build_command(
+            code,
+            sandbox_root=sandbox_root,
+            workspace_uuid=workspace_uuid,
+        )
         proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-S",  # 禁用 site-packages
-            "-c",
-            script,
+            *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            cwd=sandbox_root,
+            env=_build_env(),
             start_new_session=True,
         )
 
@@ -196,21 +198,21 @@ async def pyrepl_handler(
             source="tool",
             reason=str(exc),
         )
+    finally:
+        if cleanup_path := locals().get("cleanup_path"):
+            with contextlib.suppress(OSError):
+                Path(cleanup_path).rmdir()
 
 
 def _kill_proc(proc) -> None:
-    """Send SIGKILL to the subprocess.
-
-    Uses os.kill (single process), NOT os.killpg (entire process group).
-    killpg is dangerous: if the child process exits and its PID is reused
-    by the kernel for a process-group-leader (e.g. a shell session),
-    killpg would kill that entire group, causing unexpected logout.
-    """
+    """Send SIGKILL to the subprocess process group."""
     try:
-        os.kill(proc.pid, signal.SIGKILL)
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
     except Exception:
         with contextlib.suppress(Exception):
-            proc.kill()
+            result = proc.kill()
+            if inspect.isawaitable(result):
+                result.close()
 
 
 pyrepl_tool = StructuredTool.from_function(

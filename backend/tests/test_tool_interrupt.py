@@ -16,13 +16,16 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.core.workspace import Workspace
 from agent.tools import tool_registry
 from agent.tools.toolset import ToolSet
+from agent.utils.sandbox import bwrap_available
 
 # ═══════════════════════════════════════════════════════════
 # Helpers
@@ -442,6 +445,32 @@ class TestPyReplExecution:
 
             result = await handler(code="while True: pass", timeout_ms=100)
             assert "timed out" in result.lower()
+
+    @pytest.mark.skipif(
+        sys.platform == "linux" and not bwrap_available(),
+        reason="bwrap not installed",
+    )
+    @pytest.mark.asyncio
+    async def test_real_execution_allows_imports_and_workspace_io(self, tmp_path):
+        handler = _get_handler("PyRepl")
+        ws = Workspace(tmp_path, workspace_uuid="pyrepl-test")
+
+        result = await handler(
+            code=(
+                "import json\n"
+                "import pydantic\n"
+                "from pathlib import Path\n"
+                "Path('data.json').write_text(json.dumps({'answer': 42}))\n"
+                "print(Path('data.json').read_text())\n"
+                "print('pydantic', pydantic.__version__)\n"
+            ),
+            timeout_ms=5000,
+            ws=ws,
+        )
+
+        assert '{"answer": 42}' in result
+        assert "pydantic" in result
+        assert (tmp_path / "data.json").read_text() == '{"answer": 42}'
 
 
 # ═══════════════════════════════════════════════════════════

@@ -138,7 +138,11 @@ async def model_call(
     if streaming_holder is not None:
         streaming_holder[0] = msg
     if hook_manager is not None:
-        await hook_manager.on_message_start(msg=msg, session_id=session_id)
+        await hook_manager.on_message_start(
+            msg=msg,
+            session_id=session_id,
+            model_id=model_id,
+        )
 
     kwargs: dict = {
         "model": model_id,
@@ -316,6 +320,7 @@ async def model_call(
             finish_reason=finish_reason or "stop",
             usage=usage,
             session_id=session_id,
+            model_id=model_id,
         )
 
     return msg, finish_reason

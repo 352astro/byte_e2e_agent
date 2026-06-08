@@ -10,7 +10,9 @@ import pytest
 
 from agent.core.workspace import Workspace
 from agent.errors import InterruptedError
-from agent.tool_execution import execute_one_tool, model_call, run_subagent
+from agent.llm_call import model_call
+from agent.runtime.subagents import run_subagent
+from agent.tool_execution import execute_one_tool
 from agent.tools import tool_registry
 from agent.tools.toolset import ToolSet
 from shared.hooks import HookManager
@@ -85,6 +87,13 @@ class TestModelCall:
         )
         hooks.on_chunk_delta.assert_any_call(
             msg=msg, field="content", delta="answer", session_id="s1"
+        )
+        hooks.on_message_finish.assert_called_once_with(
+            msg=msg,
+            finish_reason="stop",
+            usage={},
+            session_id="s1",
+            model_id="test-model",
         )
 
     @pytest.mark.asyncio
@@ -209,7 +218,7 @@ class TestExecuteOneTool:
 
     @pytest.mark.asyncio
     async def test_shell_executes_in_workspace(self, tmp_path):
-        ws = Workspace(tmp_path)
+        ws = Workspace(tmp_path, workspace_uuid="test-workspace")
         toolset = ToolSet(tool_registry, "Shell")
         interrupt_event = asyncio.Event()
 

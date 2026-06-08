@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import uuid as _uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -32,8 +33,10 @@ from agent.core.workspace import Workspace
 
 # Import under test
 from agent.runtime import AgentRuntime
+from agent.runtime.subagents import get_subagent_llm
 from agent.session.session_entry import SessionEntry
 from agent.session.status import RuntimeStatus, SessionStatus
+from app.core.config import get_settings
 from shared.hooks import HookManager
 
 # ═══════════════════════════════════════════════════════════
@@ -105,11 +108,13 @@ async def _mock_invoke_execute_turn(
 def _make_runtime(
     workspace: Workspace | None = None,
     hook_manager: HookManager | None = None,
+    llm=None,
 ) -> AgentRuntime:
     """Create an AgentRuntime with sensible test defaults."""
     return AgentRuntime(
         workspace=workspace or _make_workspace(),
         hook_manager=hook_manager or HookManager(),
+        llm=llm,
     )
 
 
@@ -124,6 +129,12 @@ def _make_workspace() -> Workspace:
 def _make_config(name: str = "test", model_id: str = "test-model") -> SessionConfig:
     """Create a SessionConfig for testing."""
     return SessionConfig.user_main(name=name, model_id=model_id)
+
+
+def _stream_chunk(content: str = "", finish_reason: str = ""):
+    delta = SimpleNamespace(content=content or None, reasoning_content=None, tool_calls=[])
+    choice = SimpleNamespace(delta=delta, finish_reason=finish_reason or None)
+    return SimpleNamespace(choices=[choice], usage=None)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -194,6 +205,100 @@ class TestAgentRuntimeConstruction:
         assert req["message_id"] == "tid-1"
         assert req["kind"] == "permission_request"
         assert req["message"] == {"tool": "shell"}
+
+
+# ═══════════════════════════════════════════════════════════
+# execute_turn
+# ═══════════════════════════════════════════════════════════
+
+
+class TestExecuteTurn:
+    @pytest.mark.asyncio
+    async def test_uses_session_llm_client_when_present(self):
+        default_client = MagicMock()
+        child_client = MagicMock()
+        child_client.chat.completions.create.return_value = [
+            _stream_chunk(content="done", finish_reason="stop")
+        ]
+        runtime = _make_runtime(llm=(default_client, "default-model"))
+        entry = runtime.create_session(
+            _make_config(model_id="child-model"),
+            session_id="child-session",
+            llm_client=child_client,
+        )
+
+        runtime._begin_run(entry)
+        try:
+            await runtime._execute_turn(entry, "hello", max_steps=1)
+        finally:
+            runtime._finish_run(entry.id)
+
+        default_client.chat.completions.create.assert_not_called()
+        child_client.chat.completions.create.assert_called_once()
+        assert child_client.chat.completions.create.call_args.kwargs["model"] == "child-model"
+
+
+class TestSubAgentLlmConfig:
+    """Tests for SubAgent-specific LLM environment overrides."""
+
+    def _clear_subagent_env(self, monkeypatch):
+        for name in (
+            "SUBAGENT_LLM_API_KEY",
+            "SUBAGENT_LLM_BASE_URL",
+            "SUBAGENT_LLM_MODEL_ID",
+            "SUBAGENT_LLM_TIMEOUT",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        get_settings.cache_clear()
+
+    def test_subagent_llm_defaults_to_runtime_llm(self, monkeypatch):
+        self._clear_subagent_env(monkeypatch)
+        runtime = MagicMock()
+        client = object()
+        runtime._get_llm.return_value = (client, "main-model")
+
+        try:
+            assert get_subagent_llm(runtime) == (client, "main-model")
+        finally:
+            get_settings.cache_clear()
+
+    def test_subagent_model_override_reuses_runtime_client(self, monkeypatch):
+        self._clear_subagent_env(monkeypatch)
+        monkeypatch.setenv("SUBAGENT_LLM_MODEL_ID", "sub-model")
+        get_settings.cache_clear()
+        runtime = MagicMock()
+        client = object()
+        runtime._get_llm.return_value = (client, "main-model")
+
+        try:
+            with patch("agent.runtime.subagents.create_client") as create_client:
+                assert get_subagent_llm(runtime) == (client, "sub-model")
+                create_client.assert_not_called()
+        finally:
+            get_settings.cache_clear()
+
+    def test_subagent_connection_override_creates_dedicated_client(self, monkeypatch):
+        self._clear_subagent_env(monkeypatch)
+        monkeypatch.setenv("SUBAGENT_LLM_API_KEY", "sub-key")
+        monkeypatch.setenv("SUBAGENT_LLM_BASE_URL", "https://sub.example/v1")
+        monkeypatch.setenv("SUBAGENT_LLM_MODEL_ID", "sub-model")
+        monkeypatch.setenv("SUBAGENT_LLM_TIMEOUT", "12")
+        get_settings.cache_clear()
+        runtime = MagicMock()
+        parent_client = object()
+        sub_client = object()
+        runtime._get_llm.return_value = (parent_client, "main-model")
+
+        try:
+            with patch("agent.runtime.subagents.create_client", return_value=sub_client) as create:
+                assert get_subagent_llm(runtime) == (sub_client, "sub-model")
+                create.assert_called_once_with(
+                    api_key="sub-key",
+                    base_url="https://sub.example/v1",
+                    timeout=12,
+                )
+        finally:
+            get_settings.cache_clear()
 
 
 # ═══════════════════════════════════════════════════════════

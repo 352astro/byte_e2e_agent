@@ -61,6 +61,13 @@ class SysguardRule:
     description: str = ""
 
 
+@dataclass(frozen=True)
+class BwrapBind:
+    source: str
+    target: str
+    mode: Literal["readonly", "readwrite"] = "readonly"
+
+
 _BUILTIN_RULE_SPECS = [
     {
         "id": "cargo",
@@ -98,6 +105,7 @@ def build_bwrap_cmd(
     sandbox_root: str,
     shell: list[str],
     workspace_uuid: str | None = None,
+    extra_binds: list[BwrapBind] | None = None,
 ) -> tuple[list[str], str | None]:
     """Build a bwrap command using mount-namespace isolation.
 
@@ -108,7 +116,9 @@ def build_bwrap_cmd(
        read‐write holes through the read‐only root.
     3. ``PROJECT_ROOT`` is blacklisted: an empty directory is bind‐mounted
        over it so the agent cannot read its own source code.
-    4. ``/proc``, ``/dev`` are mounted fresh; ``/tmp`` is an isolated tmpfs.
+    4. Optional caller-provided extra binds add precise mount holes for
+       tool-specific runtime needs.
+    5. ``/proc``, ``/dev`` are mounted fresh; ``/tmp`` is an isolated tmpfs.
 
     Returns ``(cmd, cleanup_path)``.  *cleanup_path* is a temporary empty
     directory created for the blacklist — the caller MUST delete it after
@@ -152,9 +162,34 @@ def build_bwrap_cmd(
         if path != sandbox_root:
             bcmd.extend(["--bind", path, path])
 
+    # Tool-specific binds. Keep this narrow: callers must specify exact source,
+    # target, and access mode instead of changing the global sandbox policy.
+    for bind in extra_binds or []:
+        _append_bwrap_bind(bcmd, bind, sandbox_root=sandbox_root)
+
     # ── The actual command ───────────────────────────────
     bcmd.extend(["--", *shell])
     return bcmd, cleanup_path
+
+
+def _append_bwrap_bind(bcmd: list[str], bind: BwrapBind, *, sandbox_root: str) -> None:
+    source = Path(bind.source).expanduser().resolve()
+    if not source.exists():
+        raise ValueError(f"extra bind source does not exist: {bind.source}")
+    target = Path(bind.target)
+    if not target.is_absolute():
+        raise ValueError(f"extra bind target must be absolute: {bind.target}")
+
+    source_s = str(source)
+    target_s = str(target)
+    if source_s == sandbox_root and target_s == sandbox_root:
+        return
+    if bind.mode == "readonly":
+        bcmd.extend(["--ro-bind", source_s, target_s])
+    elif bind.mode == "readwrite":
+        bcmd.extend(["--bind", source_s, target_s])
+    else:
+        raise ValueError(f"unsupported extra bind mode: {bind.mode}")
 
 
 def build_seatbelt_profile(workspace: str, workspace_uuid: str | None = None) -> str:
