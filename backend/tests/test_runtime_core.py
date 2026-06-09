@@ -5,7 +5,7 @@ Tests cover:
 - Session management (CRUD)
 - invoke_user (main entry point)
 - start (compat wrapper)
-- invoke_agent (agent-to-agent)
+- invoke_existing_session (agent-to-agent)
 - interrupt / resolve
 - State transitions
 - Concurrent execution prevention
@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import uuid as _uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -32,8 +33,10 @@ from agent.core.workspace import Workspace
 
 # Import under test
 from agent.runtime import AgentRuntime
-from agent.session.entry import SessionEntry
+from agent.runtime.subagents import get_subagent_llm
+from agent.session.session_entry import RuntimeSession
 from agent.session.status import RuntimeStatus, SessionStatus
+from app.core.config import get_settings
 from shared.hooks import HookManager
 
 # ═══════════════════════════════════════════════════════════
@@ -44,7 +47,7 @@ from shared.hooks import HookManager
 
 def _make_mock_execute_turn_complete(runtime: AgentRuntime):
     async def _mock(
-        entry: SessionEntry,
+        entry: RuntimeSession,
         question: str,
         max_steps: int,
         shadow_repo=None,
@@ -58,7 +61,7 @@ def _make_mock_execute_turn_complete(runtime: AgentRuntime):
 
 def _make_mock_execute_turn_interrupted(runtime: AgentRuntime):
     async def _mock(
-        entry: SessionEntry,
+        entry: RuntimeSession,
         question: str,
         max_steps: int,
         shadow_repo=None,
@@ -76,7 +79,7 @@ def _make_mock_execute_turn_interrupted(runtime: AgentRuntime):
 
 def _make_mock_execute_turn_hanging(runtime: AgentRuntime):
     async def _mock(
-        entry: SessionEntry,
+        entry: RuntimeSession,
         question: str,
         max_steps: int,
         shadow_repo=None,
@@ -87,7 +90,7 @@ def _make_mock_execute_turn_hanging(runtime: AgentRuntime):
 
 
 async def _mock_invoke_execute_turn(
-    entry: SessionEntry,
+    entry: RuntimeSession,
     question: str,
     max_steps: int,
     shadow_repo=None,
@@ -105,11 +108,13 @@ async def _mock_invoke_execute_turn(
 def _make_runtime(
     workspace: Workspace | None = None,
     hook_manager: HookManager | None = None,
+    llm=None,
 ) -> AgentRuntime:
     """Create an AgentRuntime with sensible test defaults."""
     return AgentRuntime(
         workspace=workspace or _make_workspace(),
         hook_manager=hook_manager or HookManager(),
+        llm=llm,
     )
 
 
@@ -124,6 +129,12 @@ def _make_workspace() -> Workspace:
 def _make_config(name: str = "test", model_id: str = "test-model") -> SessionConfig:
     """Create a SessionConfig for testing."""
     return SessionConfig.user_main(name=name, model_id=model_id)
+
+
+def _stream_chunk(content: str = "", finish_reason: str = ""):
+    delta = SimpleNamespace(content=content or None, reasoning_content=None, tool_calls=[])
+    choice = SimpleNamespace(delta=delta, finish_reason=finish_reason or None)
+    return SimpleNamespace(choices=[choice], usage=None)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -168,7 +179,8 @@ class TestAgentRuntimeConstruction:
     def test_status_running_when_session_active(self):
         """status returns RUNNING when a session is running."""
         runtime = _make_runtime()
-        runtime._running_session_id = "some-id"
+        session = runtime.create_session(_make_config(), session_id="some-id")
+        runtime._begin_run(session)
         assert runtime.status == RuntimeStatus.RUNNING
 
     def test_pending_request_none_initially(self):
@@ -187,11 +199,106 @@ class TestAgentRuntimeConstruction:
             "kind": "approval",
             "message": {},
         }
+        runtime._running_session_id = "legacy"
         req = runtime.pending_request
         assert req is not None
         assert req["message_id"] == "tid-1"
         assert req["kind"] == "permission_request"
         assert req["message"] == {"tool": "shell"}
+
+
+# ═══════════════════════════════════════════════════════════
+# execute_turn
+# ═══════════════════════════════════════════════════════════
+
+
+class TestExecuteTurn:
+    @pytest.mark.asyncio
+    async def test_uses_session_llm_client_when_present(self):
+        default_client = MagicMock()
+        child_client = MagicMock()
+        child_client.chat.completions.create.return_value = [
+            _stream_chunk(content="done", finish_reason="stop")
+        ]
+        runtime = _make_runtime(llm=(default_client, "default-model"))
+        entry = runtime.create_session(
+            _make_config(model_id="child-model"),
+            session_id="child-session",
+            llm_client=child_client,
+        )
+
+        runtime._begin_run(entry)
+        try:
+            await runtime._execute_turn(entry, "hello", max_steps=1)
+        finally:
+            runtime._finish_run(entry.id)
+
+        default_client.chat.completions.create.assert_not_called()
+        child_client.chat.completions.create.assert_called_once()
+        assert child_client.chat.completions.create.call_args.kwargs["model"] == "child-model"
+
+
+class TestSubAgentLlmConfig:
+    """Tests for SubAgent-specific LLM environment overrides."""
+
+    def _clear_subagent_env(self, monkeypatch):
+        for name in (
+            "SUBAGENT_LLM_API_KEY",
+            "SUBAGENT_LLM_BASE_URL",
+            "SUBAGENT_LLM_MODEL_ID",
+            "SUBAGENT_LLM_TIMEOUT",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        get_settings.cache_clear()
+
+    def test_subagent_llm_defaults_to_runtime_llm(self, monkeypatch):
+        self._clear_subagent_env(monkeypatch)
+        runtime = MagicMock()
+        client = object()
+        runtime._get_llm.return_value = (client, "main-model")
+
+        try:
+            assert get_subagent_llm(runtime) == (client, "main-model")
+        finally:
+            get_settings.cache_clear()
+
+    def test_subagent_model_override_reuses_runtime_client(self, monkeypatch):
+        self._clear_subagent_env(monkeypatch)
+        monkeypatch.setenv("SUBAGENT_LLM_MODEL_ID", "sub-model")
+        get_settings.cache_clear()
+        runtime = MagicMock()
+        client = object()
+        runtime._get_llm.return_value = (client, "main-model")
+
+        try:
+            with patch("agent.runtime.subagents.create_client") as create_client:
+                assert get_subagent_llm(runtime) == (client, "sub-model")
+                create_client.assert_not_called()
+        finally:
+            get_settings.cache_clear()
+
+    def test_subagent_connection_override_creates_dedicated_client(self, monkeypatch):
+        self._clear_subagent_env(monkeypatch)
+        monkeypatch.setenv("SUBAGENT_LLM_API_KEY", "sub-key")
+        monkeypatch.setenv("SUBAGENT_LLM_BASE_URL", "https://sub.example/v1")
+        monkeypatch.setenv("SUBAGENT_LLM_MODEL_ID", "sub-model")
+        monkeypatch.setenv("SUBAGENT_LLM_TIMEOUT", "12")
+        get_settings.cache_clear()
+        runtime = MagicMock()
+        parent_client = object()
+        sub_client = object()
+        runtime._get_llm.return_value = (parent_client, "main-model")
+
+        try:
+            with patch("agent.runtime.subagents.create_client", return_value=sub_client) as create:
+                assert get_subagent_llm(runtime) == (sub_client, "sub-model")
+                create.assert_called_once_with(
+                    api_key="sub-key",
+                    base_url="https://sub.example/v1",
+                    timeout=12,
+                )
+        finally:
+            get_settings.cache_clear()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -202,14 +309,15 @@ class TestAgentRuntimeConstruction:
 class TestSessionManagement:
     """Tests for create_session, get_session, list_sessions, is_running_session."""
 
-    def test_create_session_returns_session_entry(self):
-        """create_session(config) returns a SessionEntry."""
+    def test_create_session_returns_runtime_session(self):
+        """create_session(config) returns a RuntimeSession."""
         runtime = _make_runtime()
         config = _make_config()
         entry = runtime.create_session(config)
-        assert isinstance(entry, SessionEntry)
+        assert isinstance(entry, RuntimeSession)
         assert entry.config is config
         assert entry.id  # auto-generated
+        assert entry.transcript.session_id == entry.id
 
     def test_create_session_with_custom_id(self):
         """create_session accepts an explicit session_id."""
@@ -227,7 +335,7 @@ class TestSessionManagement:
         assert runtime._sessions["sid1"] is entry
 
     def test_get_session_returns_entry(self):
-        """get_session returns the SessionEntry for a known id."""
+        """get_session returns the RuntimeSession for a known id."""
         runtime = _make_runtime()
         config = _make_config()
         entry = runtime.create_session(config, session_id="sid1")
@@ -253,7 +361,8 @@ class TestSessionManagement:
     def test_is_running_session_true_when_matches(self):
         """is_running_session returns True when the id matches the running session."""
         runtime = _make_runtime()
-        runtime._running_session_id = "active-id"
+        session = runtime.create_session(_make_config(), session_id="active-id")
+        runtime._begin_run(session)
         assert runtime.is_running_session("active-id") is True
 
     def test_is_running_session_false_when_different(self):
@@ -277,12 +386,12 @@ class TestInvokeUser:
     """Tests for AgentRuntime.invoke_user()."""
 
     @pytest.mark.asyncio
-    async def test_raises_runtimeerror_if_already_running(self):
-        """invoke_user raises RuntimeError when a session is already running."""
+    async def test_raises_runtimeerror_if_same_session_already_running(self):
+        """invoke_user raises RuntimeError when the same session is already running."""
         runtime = _make_runtime()
-        runtime._running_session_id = "existing-id"
         config = _make_config()
-        session = runtime.create_session(config, session_id="new-id")
+        session = runtime.create_session(config, session_id="sid1")
+        runtime._begin_run(session)
 
         with pytest.raises(RuntimeError, match="already running"):
             await runtime.invoke_user(session, "hello")
@@ -396,12 +505,11 @@ class TestStart:
     """Tests for AgentRuntime.start() — synchronous compat wrapper."""
 
     @pytest.mark.asyncio
-    async def test_raises_runtimeerror_if_running(self):
-        """start raises RuntimeError when another session is running."""
+    async def test_raises_runtimeerror_if_same_session_running(self):
+        """start raises RuntimeError when the same session is running."""
         runtime = _make_runtime()
-        runtime._running_session_id = "existing-id"
-        mock_session = MagicMock()
-        mock_session.session_id = "new-id"
+        mock_session = runtime.create_session(_make_config(), session_id="new-id")
+        runtime._begin_run(mock_session)
 
         with pytest.raises(RuntimeError, match="already running"):
             runtime.start(mock_session, "hello")
@@ -451,23 +559,27 @@ class TestStart:
 
 
 # ═══════════════════════════════════════════════════════════
-# invoke_agent (Agent → Agent)
+# invoke_existing_session (Agent → Agent)
 # ═══════════════════════════════════════════════════════════
 
 
-class TestInvokeAgent:
-    """Tests for AgentRuntime.invoke_agent()."""
+class TestInvokeExistingSession:
+    """Tests for AgentRuntime.invoke_existing_session()."""
 
     @pytest.mark.asyncio
     async def test_returns_error_when_target_not_found(self):
-        """invoke_agent returns an error string when target_id can't be resolved."""
+        """invoke_existing_session returns an error when target_id can't be resolved."""
         runtime = _make_runtime()
-        result = await runtime.invoke_agent("caller-id", "nonexistent", "do something")
+        result = await runtime.invoke_existing_session(
+            "caller-id",
+            "nonexistent",
+            "do something",
+        )
         assert "not found" in result.lower() or "error" in result.lower()
 
     @pytest.mark.asyncio
     async def test_returns_error_when_permission_denied(self):
-        """invoke_agent returns an error when access policy denies invoke."""
+        """invoke_existing_session returns an error when access policy denies invoke."""
         runtime = _make_runtime()
         # Create a session with OWNER_ONLY access owned by a different session
         owner = Owner.session("owner-id")
@@ -482,12 +594,16 @@ class TestInvokeAgent:
         )
         runtime.create_session(config, session_id="protected-id")
 
-        result = await runtime.invoke_agent("caller-id", "protected-id", "do something")
+        result = await runtime.invoke_existing_session(
+            "caller-id",
+            "protected-id",
+            "do something",
+        )
         assert "does not allow invoke" in result.lower() or "error" in result.lower()
 
     @pytest.mark.asyncio
     async def test_resolves_target_id_by_prefix(self):
-        """invoke_agent resolves target_id via _resolve_id (prefix matching)."""
+        """invoke_existing_session resolves target_id via _resolve_id."""
         runtime = _make_runtime()
         config = _make_config()
         runtime.create_session(config, session_id="abcdef123456")
@@ -498,19 +614,23 @@ class TestInvokeAgent:
         # Patch the access to allow any agent
         with patch.object(entry.config.access, "can_invoke", return_value=True):
             with patch.object(runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn):
-                result = await runtime.invoke_agent("caller-id", "abc", "do something")
+                result = await runtime.invoke_existing_session(
+                    "caller-id",
+                    "abc",
+                    "do something",
+                )
             # Should resolve to abcdef123456 and not return an error
             assert "error" not in result.lower()
             assert "abcdef123456" in result
 
     @pytest.mark.asyncio
     async def test_calls_hooks_on_subagent_start_and_end(self):
-        """invoke_agent calls hook_manager.on_subagent_start and on_subagent_end."""
+        """invoke_existing_session calls subagent start/end hooks."""
         hm = MagicMock(spec=HookManager)
         hm.on_subagent_start = AsyncMock()
         hm.on_subagent_end = AsyncMock()
-        # Dispatch is used by convenience methods, but invoke_agent calls
-        # self._hooks.on_subagent_start/end directly — which are the
+        # Dispatch is used by convenience methods, but invoke_existing_session
+        # calls self._hooks.on_subagent_start/end directly, which are the
         # HookManager convenience methods that call dispatch.
         # We mock the convenience methods directly.
         runtime = AgentRuntime(workspace=_make_workspace(), hook_manager=hm)
@@ -523,7 +643,12 @@ class TestInvokeAgent:
         assert entry is not None
         with patch.object(entry.config.access, "can_invoke", return_value=True):
             with patch.object(runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn):
-                await runtime.invoke_agent("caller-id", "target-id", "do task", max_turns=5)
+                await runtime.invoke_existing_session(
+                    "caller-id",
+                    "target-id",
+                    "do task",
+                    max_turns=5,
+                )
 
         hm.on_subagent_start.assert_called_once()
         call_kwargs = hm.on_subagent_start.call_args.kwargs
@@ -535,7 +660,7 @@ class TestInvokeAgent:
 
     @pytest.mark.asyncio
     async def test_caller_transitions_to_pending_then_running(self):
-        """invoke_agent transitions caller to PENDING then back to RUNNING."""
+        """invoke_existing_session transitions caller to PENDING then back to RUNNING."""
         runtime = _make_runtime()
         config = _make_config()
 
@@ -545,15 +670,19 @@ class TestInvokeAgent:
         # Allow invoke
         with patch.object(target.config.access, "can_invoke", return_value=True):
             with patch.object(runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn):
-                await runtime.invoke_agent("caller-id", "target-id", "do task")
+                await runtime.invoke_existing_session(
+                    "caller-id",
+                    "target-id",
+                    "do task",
+                )
 
-        # After invoke_agent completes, caller should be back to RUNNING
+        # After invoke_existing_session completes, caller should be back to RUNNING
         # (It goes PENDING during the call, RUNNING after)
         assert caller.status == SessionStatus.RUNNING
 
     @pytest.mark.asyncio
     async def test_caller_pending_during_invoke(self):
-        """While invoke_agent is awaiting, the caller is in PENDING state."""
+        """While invoke_existing_session is awaiting, caller is PENDING."""
         runtime = _make_runtime()
         config = _make_config()
 
@@ -574,7 +703,11 @@ class TestInvokeAgent:
         with patch.object(target.config.access, "can_invoke", return_value=True):
             with patch.object(runtime, "_execute_turn", side_effect=_mock_invoke_execute_turn):
                 task = asyncio.create_task(
-                    runtime.invoke_agent("caller-id", "target-id", "do task")
+                    runtime.invoke_existing_session(
+                        "caller-id",
+                        "target-id",
+                        "do task",
+                    )
                 )
                 # Give the task time to start and transition
                 await asyncio.sleep(0.05)
@@ -617,10 +750,10 @@ class TestInterrupt:
             # _interrupt_event is not yet set
             assert runtime._interrupt_event is not None
             assert not runtime._interrupt_event.is_set()
+            interrupt_event = runtime._runs["sid1"].interrupt_event
             await runtime.interrupt()
             # After interrupt, the event should have been set
-            assert runtime._interrupt_event is not None
-            assert runtime._interrupt_event.is_set()
+            assert interrupt_event.is_set()
 
     @pytest.mark.asyncio
     async def test_returns_true_after_successful_interrupt(self):
@@ -857,12 +990,12 @@ class TestStateTransitions:
 # ═══════════════════════════════════════════════════════════
 
 
-class TestConcurrentExecutionPrevention:
-    """Tests that enforce single-session execution guarantees."""
+class TestConcurrentExecution:
+    """Tests for per-session execution concurrency."""
 
     @pytest.mark.asyncio
-    async def test_cannot_invoke_user_while_running(self):
-        """invoke_user raises RuntimeError when a session is already running."""
+    async def test_can_invoke_different_sessions_while_running(self):
+        """Different sessions can run concurrently."""
         runtime = _make_runtime()
         config = _make_config()
         session_a = runtime.create_session(config, session_id="session-a")
@@ -874,18 +1007,17 @@ class TestConcurrentExecutionPrevention:
             side_effect=_make_mock_execute_turn_hanging(runtime),
         ):
             await runtime.invoke_user(session_a, "hello")
-            # Now session A is running, invoking B should fail
-            with pytest.raises(RuntimeError, match="already running"):
-                await runtime.invoke_user(session_b, "world")
+            sid = await runtime.invoke_user(session_b, "world")
+            assert sid == "session-b"
+            assert runtime.is_running_session("session-a") is True
+            assert runtime.is_running_session("session-b") is True
 
     @pytest.mark.asyncio
-    async def test_cannot_start_while_running(self):
-        """start raises RuntimeError when a session is already running."""
+    async def test_cannot_start_same_session_while_running(self):
+        """start raises RuntimeError when the same session is already running."""
         runtime = _make_runtime()
-        runtime._running_session_id = "existing"
-
-        mock_session = MagicMock()
-        mock_session.session_id = "new-session"
+        mock_session = runtime.create_session(_make_config(), session_id="new-session")
+        runtime._begin_run(mock_session)
 
         with pytest.raises(RuntimeError, match="already running"):
             runtime.start(mock_session, "hello")

@@ -5,12 +5,13 @@ from __future__ import annotations
 import logging
 import uuid as _uuid
 
-from agent.actions import model_call
 from agent.errors import InterruptedError
-from agent.runtime.context_builder import build_llm_messages
+from agent.llm_streaming import stream_model_call
+from agent.runtime.llm_context_builder import build_llm_messages
 from agent.runtime.messages import emit_system_message, extract_usage
 from agent.runtime.tooling import default_toolset
-from agent.session.entry import SessionEntry
+from agent.runtime.turn_context_updates import plan_context_updates
+from agent.session.session_entry import RuntimeSession
 from agent.session.status import SessionStatus
 from agent.tool_execution import execute_tool_calls
 from agent.tools import tool_registry
@@ -19,90 +20,24 @@ from shared.types import Message
 
 logger = logging.getLogger(__name__)
 
-# Number of consecutive user/assistant exchanges without a task-tool call
-# before the system reminds the model to check its task list.
-_TASK_STALE_THRESHOLD = 2
-
-
-# ── Turn-start context helpers ──────────────────────────
-
-
-def _find_last_skill_content(history: list[dict]) -> str | None:
-    """Scan message history (OpenAI-format) from the end for the most recent
-    skill summary system message and return its content."""
-    for m in reversed(history):
-        if m.get("role") != "system":
-            continue
-        content = m.get("content", "")
-        if content.startswith("## Available Skills"):
-            return content
-    # Fallback: use empty string so first diff always triggers an append
-    return ""
-
-
-def _skills_diff_append(
-    hooks,
-    *,
-    session_id: str,
-    turn_id: str,
-    history: list[dict],
-) -> str | None:
-    """Return the skill summary content if it differs from the last written one,
-    or None if unchanged. Also emits the system message via hooks."""
-    from agent.tools.skill import skill_context_message
-
-    current = skill_context_message()["content"]
-    previous = _find_last_skill_content(history)
-    if current == previous:
-        return None
-    return current
-
-
-def _count_turns_since_last_task_tool(history: list[dict]) -> int:
-    """Count user messages since the last assistant message that contained
-    a TaskRewrite or TaskUpdate tool call."""
-    turns = 0
-    for m in reversed(history):
-        role = m.get("role", "")
-        if role == "user":
-            turns += 1
-            continue
-        if role == "assistant":
-            tool_calls = m.get("tool_calls") or []
-            for tc in tool_calls:
-                name = (tc.get("function") or {}).get("name", "")
-                if name in ("TaskRewrite", "TaskUpdate"):
-                    return turns
-    # No task tool call found at all — count all turns
-    return turns
-
-
-def _tasks_exist(ws, session_id: str) -> bool:
-    """Check whether the session has a non-empty task list on disk."""
-    try:
-        from agent.tools.task import _load_tasks_sync, _tasks_path
-
-        path = _tasks_path(ws, session_id)
-        if not path.exists():
-            return False
-        tasks = _load_tasks_sync(path)
-        return len(tasks) > 0
-    except Exception:
-        return False
-
-
-_TASK_REMINDER = (
-    "Your task list may be stale. "
-    "Use TaskList to review current status and continue from the next pending task."
-)
-
-
 # ── Turn executor ───────────────────────────────────────
+
+
+def _resolve_entry_llm(runtime, entry: RuntimeSession):
+    default_client, default_model_id = runtime._get_llm()
+    if entry.llm_client is None:
+        return default_client, entry.config.model_id or default_model_id
+
+    if isinstance(entry.llm_client, tuple) and len(entry.llm_client) == 2:
+        client, client_model_id = entry.llm_client
+        return client, entry.config.model_id or client_model_id or default_model_id
+
+    return entry.llm_client, entry.config.model_id or default_model_id
 
 
 async def execute_turn(
     runtime,
-    entry: SessionEntry,
+    entry: RuntimeSession,
     question: str,
     max_steps: int,
     shadow_repo=None,
@@ -110,12 +45,10 @@ async def execute_turn(
     top_level: bool = True,
 ) -> str:
     """Run one ReAct turn for a session."""
-    openai_client, default_model_id = runtime._get_llm()
-    model_id = entry.config.model_id or default_model_id
+    openai_client, model_id = _resolve_entry_llm(runtime, entry)
     sid = entry.id
-    ws = entry.ws
-    intr = runtime._interrupt_event
-    assert intr is not None
+    workspace = entry.workspace
+    intr = runtime._interrupt_event_for(sid)
 
     turn_id = _uuid.uuid4().hex
     final_answer = ""
@@ -141,47 +74,20 @@ async def execute_turn(
         )
         await runtime._hooks.on_message_finish(msg=user_msg, session_id=sid)
 
-        # ── 2. Load current history for diff checks ─────
-        history = build_llm_messages(session_id=sid, workspace=ws)
-
-        # ── 3. Skills diff → append if changed ─────────
-        new_skills = _skills_diff_append(
-            runtime._hooks,
+        # ── 2. Append per-turn context updates ─────────
+        updates = await plan_context_updates(
+            hooks=runtime._hooks,
             session_id=sid,
             turn_id=turn_id,
-            history=history,
-        )
-        if new_skills:
-            await emit_system_message(
-                runtime._hooks,
-                session_id=sid,
-                turn_id=turn_id,
-                content=new_skills,
-            )
-
-        # ── 4. Memory → append ─────────────────────────
-        injected = await runtime._hooks.gather_context(
-            turn_id=turn_id,
-            session_id=sid,
+            workspace=workspace,
             user_question=question,
         )
-        for item in injected:
-            if item.get("role") == "system" and item.get("content"):
-                await emit_system_message(
-                    runtime._hooks,
-                    session_id=sid,
-                    turn_id=turn_id,
-                    content=item["content"],
-                )
-
-        # ── 5. Task stale reminder ─────────────────────
-        turns_since_task = _count_turns_since_last_task_tool(history)
-        if turns_since_task >= _TASK_STALE_THRESHOLD and _tasks_exist(ws, sid):
+        for update in updates:
             await emit_system_message(
                 runtime._hooks,
                 session_id=sid,
                 turn_id=turn_id,
-                content=_TASK_REMINDER,
+                content=update.content,
             )
 
         # ── ReAct loop ─────────────────────────────────
@@ -189,15 +95,15 @@ async def execute_turn(
             if intr.is_set():
                 raise InterruptedError("Interrupted by user")
 
-            messages = build_llm_messages(session_id=sid, workspace=ws)
+            messages = build_llm_messages(session_id=sid, workspace=workspace)
 
             assistant_id = _uuid.uuid4().hex
             tool_names = entry.config.tool_names()
             toolset = ToolSet(tool_registry, *tool_names) if tool_names else default_toolset()
 
             streaming_holder: list[Message | None] = [None]
-            runtime._streaming_holder = streaming_holder
-            assistant_msg, finish_reason = await model_call(
+            runtime._set_streaming_holder(sid, streaming_holder)
+            assistant_msg, finish_reason = await stream_model_call(
                 openai_client,
                 model_id,
                 sid,
@@ -209,7 +115,7 @@ async def execute_turn(
                 hook_manager=runtime._hooks,
                 streaming_holder=streaming_holder,
             )
-            runtime._streaming_holder = None
+            runtime._set_streaming_holder(sid, None)
 
             has_tool_calls = assistant_msg.has_tool_calls
             if assistant_msg.content:
@@ -236,11 +142,26 @@ async def execute_turn(
                 with_skills=None,
                 tool_call_id="",
             ):
-                return await runtime.invoke_subagent(
+                return await runtime.create_and_run_subagent(
                     sid,
                     prompt,
                     max_steps=max_steps,
                     with_skills=with_skills,
+                    parent_message_id=assistant_msg.id,
+                    parent_tool_call_id=tool_call_id,
+                )
+
+            async def invoke_browser_inspector(
+                url,
+                prompt,
+                max_steps=8,
+                tool_call_id="",
+            ):
+                return await runtime.invoke_browser_inspect(
+                    sid,
+                    url=url,
+                    prompt=prompt,
+                    max_steps=max_steps,
                     parent_message_id=assistant_msg.id,
                     parent_tool_call_id=tool_call_id,
                 )
@@ -261,7 +182,7 @@ async def execute_turn(
 
             await execute_tool_calls(
                 assistant_msg=assistant_msg,
-                ws=ws,
+                workspace=workspace,
                 toolset=toolset,
                 interrupt_event=intr,
                 openai_client=openai_client,
@@ -270,7 +191,8 @@ async def execute_turn(
                 turn_id=turn_id,
                 hook_manager=runtime._hooks,
                 ask_guard=runtime._ask_guard,
-                invoke_subagent=invoke_child_agent,
+                run_child_agent=invoke_child_agent,
+                invoke_browser_inspect=invoke_browser_inspector,
                 request_human_input=request_human_input,
             )
 
@@ -299,6 +221,16 @@ async def execute_turn(
         )
         final_answer = error_msg_obj.error
     finally:
+        # Clean up runtime state FIRST, before cancellable hook calls.
+        # If the task is cancelled during on_turn_end/flush, these must
+        # already be cleared so the system doesn't stay permanently busy.
+        runtime._set_streaming_holder(sid, None)
+        runtime._finish_run(sid)
+        entry.transition_to(SessionStatus.IDLE)
+
+        # Clear notification state so page refresh doesn't show stale guards/notices
+        await runtime._hooks.dispatch("clear_session_state", session_id=sid)
+
         await runtime._hooks.on_turn_end(
             turn_id=turn_id,
             session_id=sid,
@@ -306,10 +238,4 @@ async def execute_turn(
             output_tokens=total_output_tokens,
         )
         await runtime._hooks.flush()
-
-        runtime._streaming_holder = None
-        if top_level:
-            runtime._running_session_id = None
-            runtime._loop_task = None
-        entry.transition_to(SessionStatus.IDLE)
     return final_answer or "SubAgent completed (no output)."

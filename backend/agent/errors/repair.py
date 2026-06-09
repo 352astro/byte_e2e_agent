@@ -24,7 +24,7 @@ _PipelineStage = Callable[[list[Message]], list[Message]]
 
 
 def _find_unpaired_messages(messages: list[Message]) -> list[Message]:
-    """扫描消息列表，找出最近一条 assistant 消息中尚未配对
+    """扫描消息列表，找出所有 assistant 消息中尚未配对
     tool_result 的 tool_call，为每一个生成一条 Error tool Message。
 
     纯函数，不依赖 Session。
@@ -59,7 +59,11 @@ def _find_unpaired_messages(messages: list[Message]) -> list[Message]:
                         tool_status_reason="user_interrupted_before_execution",
                     )
                 )
-        break  # 只处理最近一条 assistant 消息
+        # Note: intentionally no break — fix ALL unpaired tool_calls,
+        # not just the last assistant. Earlier messages may also have
+        # unpaired calls (e.g. after a subagent interrupt).
+        # _build_llm_context's close_open_tool_calls is the in-memory
+        # safety net when repair=False at runtime.
 
     return repairs
 

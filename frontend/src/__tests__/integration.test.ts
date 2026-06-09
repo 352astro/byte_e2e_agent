@@ -10,6 +10,9 @@
 import { describe, it, expect, beforeAll } from "vitest";
 
 const BASE = "http://localhost:8000";
+const runBackendIntegration =
+  globalThis.process?.env?.RUN_BACKEND_INTEGRATION === "1";
+const describeBackend = runBackendIntegration ? describe : describe.skip;
 
 async function post(endpoint: string, body?: Record<string, unknown>) {
   const payload =
@@ -84,7 +87,7 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-describe("full session trace", () => {
+describeBackend("full session trace", () => {
   let sid: string;
 
   beforeAll(async () => {

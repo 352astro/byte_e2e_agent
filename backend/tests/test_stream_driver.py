@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from agent.hook.stream_driver import StreamDriverHook
+from agent.hook.stream_hook import StreamDriverHook
 from shared.types import Message, StreamEvent, StreamEventKind
 
 # ═══════════════════════════════════════════════════════════

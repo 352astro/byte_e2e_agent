@@ -8,9 +8,11 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.actions import execute_one_tool, model_call, run_subagent
 from agent.core.workspace import Workspace
 from agent.errors import InterruptedError
+from agent.llm_streaming import stream_model_call
+from agent.runtime.subagents import run_inline_subagent
+from agent.tool_execution import execute_one_tool
 from agent.tools import tool_registry
 from agent.tools.toolset import ToolSet
 from shared.hooks import HookManager
@@ -65,7 +67,7 @@ class TestModelCall:
         hooks = AsyncMock(spec=HookManager)
         interrupt_event = asyncio.Event()
 
-        msg, finish_reason = await model_call(
+        msg, finish_reason = await stream_model_call(
             client,
             "test-model",
             "s1",
@@ -86,6 +88,13 @@ class TestModelCall:
         hooks.on_chunk_delta.assert_any_call(
             msg=msg, field="content", delta="answer", session_id="s1"
         )
+        hooks.on_message_finish.assert_called_once_with(
+            msg=msg,
+            finish_reason="stop",
+            usage={},
+            session_id="s1",
+            model_id="test-model",
+        )
 
     @pytest.mark.asyncio
     async def test_streams_tool_calls(self):
@@ -103,7 +112,7 @@ class TestModelCall:
         hooks = AsyncMock(spec=HookManager)
         interrupt_event = asyncio.Event()
 
-        msg, finish_reason = await model_call(
+        msg, finish_reason = await stream_model_call(
             client,
             "test-model",
             "s1",
@@ -127,7 +136,7 @@ class TestModelCall:
         interrupt_event.set()
 
         with pytest.raises(InterruptedError, match="Interrupted during LLM call"):
-            await model_call(
+            await stream_model_call(
                 client,
                 "test-model",
                 "s1",
@@ -148,10 +157,10 @@ class TestModelCall:
         interrupt_event = asyncio.Event()
 
         with (
-            patch("agent.actions._is_retriable_model_error", return_value=True),
-            patch("agent.actions._sleep_or_interrupt", new_callable=AsyncMock),
+            patch("agent.llm_streaming._is_retriable_model_error", return_value=True),
+            patch("agent.llm_streaming._sleep_or_interrupt", new_callable=AsyncMock),
         ):
-            msg, finish_reason = await model_call(
+            msg, finish_reason = await stream_model_call(
                 client,
                 "test-model",
                 "s1",
@@ -209,7 +218,7 @@ class TestExecuteOneTool:
 
     @pytest.mark.asyncio
     async def test_shell_executes_in_workspace(self, tmp_path):
-        ws = Workspace(tmp_path)
+        ws = Workspace(tmp_path, workspace_uuid="test-workspace")
         toolset = ToolSet(tool_registry, "Shell")
         interrupt_event = asyncio.Event()
 
@@ -228,7 +237,10 @@ class TestExecuteOneTool:
         toolset = ToolSet(tool_registry, "SubAgent", "Shell")
         interrupt_event = asyncio.Event()
 
-        with patch("agent.actions.run_subagent", new_callable=AsyncMock) as mock_run:
+        with patch(
+            "agent.runtime.subagents.run_inline_subagent",
+            new_callable=AsyncMock,
+        ) as mock_run:
             mock_run.return_value = "subagent result"
             result = await execute_one_tool(
                 {
@@ -247,7 +259,7 @@ class TestExecuteOneTool:
         assert mock_run.call_args.kwargs["interrupt_event"] is interrupt_event
 
 
-class TestRunSubagent:
+class TestRunInlineSubagent:
     @pytest.mark.asyncio
     async def test_returns_immediately_when_interrupted_before_first_step(self):
         ws = MagicMock(spec=Workspace)
@@ -255,7 +267,7 @@ class TestRunSubagent:
         interrupt_event = asyncio.Event()
         interrupt_event.set()
 
-        result = await run_subagent(
+        result = await run_inline_subagent(
             ws,
             toolset,
             "task",

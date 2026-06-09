@@ -1,13 +1,13 @@
 ---
 name: e2e-self-verification
-description: "MANDATORY when ANY frontend file is modified, created, or deleted — NO EXCEPTIONS. If you touched frontend/src/**, you MUST load this skill before claiming completion. Establishes the iron law that no frontend change is complete without browser verification: determine configured port from vite.config.ts, check if already running with ss, start with nohup only if needed, always curl with --noproxy '*', enumerate every page and feature, dispatch ONE BrowserInspect per feature (never batch multiple), kill service by port after verification. Evidence before assertions always."
+description: "MANDATORY when ANY frontend file is modified, created, or deleted — NO EXCEPTIONS. If you touched frontend/src/**, you MUST load this skill before claiming completion. Establishes the iron law that no frontend change is complete without browser verification: determine configured port from vite.config.ts, check if already running with ss, start with nohup only if needed, track whether this protocol started the service, always curl with --noproxy '*', enumerate every page and feature, dispatch ONE BrowserInspect per feature (never batch multiple), and only kill the dev server if this protocol started it. Evidence before assertions always."
 ---
 
 # Frontend Development Criteria
 
-This is not advice. This is the mandatory verification protocol for every frontend change. You do not have a choice. If you touched the frontend, you follow this protocol to the letter.
+This is not advice. This is the mandatory verification protocol for every frontend change. If you touched the frontend, follow this protocol exactly.
 
-**Core principle:** You cannot see the screen. The browser tools are your only eyes. If you didn't use them, you are blind. And a blind engineer shipping frontend code is negligence.
+**Core principle:** You cannot see the screen directly. Browser verification is the evidence source for rendered UI behavior.
 
 **Violating any step of this protocol is violating the entire protocol.**
 
@@ -19,7 +19,7 @@ NO FRONTEND CHANGE IS COMPLETE WITHOUT BROWSER VERIFICATION.
 IF YOU TOUCHED frontend/src/** → YOU MUST LOAD THIS SKILL → YOU MUST FOLLOW EVERY STEP.
 ```
 
-There is no "quick fix," no "trivial change," no "I'm confident it works." If a file under `frontend/src/` was modified, you follow this protocol. End of discussion.
+There is no "quick fix," no "trivial change," no "I'm confident it works." If a file under `frontend/src/` was modified, follow this protocol.
 
 ## When This Skill Applies
 
@@ -59,8 +59,9 @@ ss -tlnp | grep <CONFIGURED_PORT>
 ```
 
 **If a process IS bound to `<CONFIGURED_PORT>` →** the service is already
-running. Set `<PORT>` = `<CONFIGURED_PORT>` and jump to step 1d (curl).
-Do NOT start a second instance.
+running. Set `<PORT>` = `<CONFIGURED_PORT>` and
+`SERVICE_STARTED_BY_PROTOCOL=false`, then jump to step 1d (curl). Do NOT start
+a second instance.
 
 **If nothing is bound →** the service is not running. Proceed to 1c.
 
@@ -74,9 +75,10 @@ ss -tlnp | grep <CONFIGURED_PORT>
 
 `nohup ... &` prints the background PID — note it.
 
-If `ss` now shows `<CONFIGURED_PORT>`, set `<PORT>` = `<CONFIGURED_PORT>`.
-If still nothing, wait 3 more seconds and retry `ss`. If still no port after
-retries, the server may have crashed — read `frontend/nohup.out` for the error.
+If `ss` now shows `<CONFIGURED_PORT>`, set `<PORT>` = `<CONFIGURED_PORT>` and
+`SERVICE_STARTED_BY_PROTOCOL=true`. If still nothing, wait 3 more seconds and
+retry `ss`. If still no port after retries, the server may have crashed — read
+`frontend/nohup.out` for the error.
 
 #### 1d. Verify the server responds
 
@@ -142,20 +144,28 @@ Each `BrowserInspect` sub-agent gets exactly one feature to verify. It reports b
 **Correct — one feature per dispatch (use the `<PORT>` from Step 1):**
 
 ```
-# Feature 1
-BrowserInspect(prompt="Open http://localhost:<PORT>/. Verify: the home page renders without console errors. Check that the session sidebar is visible and lists existing sessions. Report PASS if the page loads cleanly with the sidebar present, FAIL with details otherwise.")
+BrowserInspect(
+  url="http://localhost:<PORT>/",
+  prompt="Verify exactly one feature: the home page renders without console errors. Check that the session sidebar is visible and lists existing sessions. Report PASS if the page loads cleanly with the sidebar present, FAIL with details otherwise."
+)
 
 # Read report. If PASS → next. If FAIL → fix and re-verify this feature.
 
 # Feature 2
-BrowserInspect(prompt="Open http://localhost:<PORT>/. Click the first session in the sidebar. Verify: the chat view opens showing the message history for that session. Check that no console errors appear after navigation. Report PASS/FAIL with details.")
+BrowserInspect(
+  url="http://localhost:<PORT>/",
+  prompt="Verify exactly one feature: click the first session in the sidebar. The chat view should open showing the message history for that session. Check that no console errors appear after navigation. Report PASS/FAIL with details."
+)
 ```
 
 **Wrong — batching (FORBIDDEN):**
 
 ```
 # ❌ NEVER DO THIS
-BrowserInspect(prompt="Open http://localhost:<PORT>/. Verify: 1) home page renders, 2) sidebar works, 3) chat opens, 4) messages appear, 5) SSE works, 6) markdown renders...")
+BrowserInspect(
+  url="http://localhost:<PORT>/",
+  prompt="Verify: 1) home page renders, 2) sidebar works, 3) chat opens, 4) messages appear, 5) SSE works, 6) markdown renders..."
+)
 ```
 
 Batching causes the sub-agent to skip or shallow-check later items. One feature, one dispatch, one report. Sequential only.
@@ -170,15 +180,28 @@ Batching causes the sub-agent to skip or shallow-check later items. One feature,
 
 **Do NOT proceed to the next feature until the current one passes.** A chain of verifications is only as strong as its weakest link.
 
-### Step 4: Kill the Service by Port
+### Step 4: Clean Up the Service
 
-After ALL verification targets pass, kill the frontend dev server. Target it by the port discovered in Step 1 — simple, precise, audit-clean:
+After ALL verification targets pass, clean up only services this protocol
+started.
+
+**If `SERVICE_STARTED_BY_PROTOCOL=false`:** do not kill anything. The dev
+server was already running before verification, so it may belong to the user or
+another workflow. Record this in the report:
+
+```
+Killed via: not killed (pre-existing service)
+```
+
+**If `SERVICE_STARTED_BY_PROTOCOL=true`:** kill only the frontend dev server
+bound to the discovered port:
 
 ```bash
 fuser -k <PORT>/tcp
 ```
 
-That's it. `fuser -k <PORT>/tcp` sends SIGTERM to whatever process is bound to the dev server port. No PID files, no wildcards, no scanning.
+`fuser -k <PORT>/tcp` sends SIGTERM to the process bound to the dev server
+port. No PID files, no wildcards, no scanning.
 
 **ABSOLUTELY FORBIDDEN:**
 
@@ -194,7 +217,10 @@ kill -9 ...
 fuser -k -9 <PORT>/tcp
 ```
 
-**The rule:** Kill ONLY the process on the discovered port. Use SIGTERM (`fuser -k`). Only if it doesn't exit within 3 seconds, and only with explicit user permission, use `fuser -k -9 <PORT>/tcp`. Never broadcast signals to all node processes.
+**The rule:** Kill ONLY the process on the discovered port, and ONLY if this
+protocol started it. Use SIGTERM (`fuser -k`). Only if it doesn't exit within 3
+seconds, and only with explicit user permission, use `fuser -k -9 <PORT>/tcp`.
+Never broadcast signals to all node processes.
 
 ## The Verification Report
 
@@ -203,7 +229,7 @@ After completing all steps, produce a verification report in this exact format:
 ```
 📋 Frontend Verification Report
    Service: <already running | started with nohup>, port <PORT>
-   Killed via: fuser -k <PORT>/tcp
+   Killed via: <not killed (pre-existing service) | fuser -k <PORT>/tcp>
    Targets identified: <N>
    Targets verified: <N>
    Targets passed: <N>
@@ -228,7 +254,7 @@ If any target failed: do NOT mark the task complete. Do NOT commit. Fix the fail
 | "I only changed backend code" | Frontend consumes the backend. Changed response shape = broken UI. |
 | "I'll verify all features in one BrowserInspect call" | Sub-agents skip details when given too many tasks. One feature per dispatch. Not negotiable. |
 | "I don't need nohup, the server is already running" | Is it? Use ss to check. If not running, start with nohup. |
-| "I can just killall node to clean up" | You just killed the user's terminal, editor, and other work. Kill by discovered port only. |
+| "I can just killall node to clean up" | You may kill the user's terminal, editor, or other work. Kill by discovered port only, and only if this protocol started it. |
 | "The change is too small to need all these steps" | The protocol scales down — for a one-line fix you may only have 1-2 targets. But you still follow every step. |
 | "I already verified this feature earlier today" | Code changes. State drifts. Verify FRESH. |
 | "BrowserInspect is slow" | Shipping broken UI is slower. One dispatch takes 15-30 seconds. |
@@ -255,9 +281,15 @@ If you catch yourself thinking ANY of these:
 
 ## Tools Used
 
-- `BrowserInspect` — The ONLY verification tool. Dispatches a sub-agent with browser + file + shell tools to verify ONE feature.
-- `Shell` — Used only for: `nohup npm run dev &`, `ss -tlnp`, `curl --noproxy '*'`, `fuser -k <PORT>/tcp`. No other shell commands.
-- `BrowserOpen` / `BrowserAct` — Used internally by BrowserInspect. Do NOT use these directly for verification; always go through BrowserInspect.
+- `BrowserInspect` — The UI behavior and visual verification entry point. Dispatches a sub-agent with browser + file + shell tools to verify ONE feature.
+- `Shell` — Used only for service discovery, service health, and safe cleanup:
+  - Read `frontend/vite.config.ts` with `rg`, `sed`, or `cat`
+  - Check the port with `ss -tlnp | grep <CONFIGURED_PORT>`
+  - Start the frontend only when needed with `cd frontend && nohup npm run dev &`
+  - Read `frontend/nohup.out` if the service fails to bind
+  - Health check with `curl -s --noproxy '*' -o /dev/null -w "%{http_code}" http://localhost:<PORT>`
+  - Clean up with `fuser -k <PORT>/tcp` only when `SERVICE_STARTED_BY_PROTOCOL=true`
+- `BrowserAct` — Used internally by BrowserInspect. Do NOT use it directly for verification; always go through BrowserInspect.
 
 ## Integration
 
@@ -279,8 +311,8 @@ If you catch yourself thinking ANY of these:
 
 ## The Bottom Line
 
-You are an AI agent. You cannot look at a screen. The browser tools are your only way to see what you built.
+You are an AI agent. You cannot look at a screen directly. The browser tools are your way to see what you built.
 
-If you ship frontend code without browser verification, you are shipping blind. That is not engineering. That is gambling.
+If you ship frontend code without browser verification, you are asserting UI behavior without UI evidence.
 
 Follow the protocol. Every step. Every time. No exceptions.

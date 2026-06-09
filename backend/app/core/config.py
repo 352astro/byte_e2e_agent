@@ -128,6 +128,12 @@ class Settings:
     side_llm_base_url: str
     side_llm_model_id: str
 
+    # ── SubAgent LLM ─────────────────────────────────
+    subagent_llm_api_key: str
+    subagent_llm_base_url: str
+    subagent_llm_model_id: str
+    subagent_llm_timeout: int | None
+
     # ── Memory ───────────────────────────────────────
     memory_enabled: bool
     memory_top_k: int
@@ -176,6 +182,11 @@ def get_settings() -> Settings:
         side_llm_api_key=os.environ.get("SIDE_LLM_API_KEY", ""),
         side_llm_base_url=os.environ.get("SIDE_LLM_BASE_URL", ""),
         side_llm_model_id=os.environ.get("SIDE_LLM_MODEL_ID", ""),
+        # ── SubAgent LLM ──────────────────────
+        subagent_llm_api_key=os.environ.get("SUBAGENT_LLM_API_KEY", ""),
+        subagent_llm_base_url=os.environ.get("SUBAGENT_LLM_BASE_URL", ""),
+        subagent_llm_model_id=os.environ.get("SUBAGENT_LLM_MODEL_ID", ""),
+        subagent_llm_timeout=_env_int_opt("SUBAGENT_LLM_TIMEOUT"),
         # ── Memory ─────────────────────────────
         memory_enabled=_env_bool("MEMORY_ENABLED", default=True),
         memory_top_k=_env_int("MEMORY_TOP_K", default=5),

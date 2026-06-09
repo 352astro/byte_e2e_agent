@@ -37,12 +37,6 @@ export interface UseAgentStreamReturn {
   updateQueuedSend: (index: number, value: string) => void;
   interrupt: () => Promise<void>;
   reloadMessages: () => Promise<void>;
-  respondPending: (
-    requestId: string,
-    response: Record<string, unknown>,
-  ) => Promise<void>;
-  respondGuard: (requestId: string, allow: boolean) => Promise<void>;
-
   // ── 命令（同步）──
   truncateMessages: (truncateTid: string, keep?: boolean) => void;
   resetRunning: () => void;
@@ -53,7 +47,6 @@ export interface UseAgentStreamReturn {
   scrollToMessage: (id: string) => void;
   runError: string | null;
   clearRunError: () => void;
-  pendingGuard: GuardRequest | null;
   notices: Notice[];
   dismissNotice: (id: string) => void;
 }
@@ -116,11 +109,11 @@ function applyToolMeta(message: Message, raw: string): Message {
 function hasRenderablePayload(message: Message): boolean {
   return Boolean(
     message.content ||
-      message.reasoning ||
-      message.error ||
-      message.tool_result ||
-      message.tool_name ||
-      (message.tool_calls && message.tool_calls.length > 0),
+    message.reasoning ||
+    message.error ||
+    message.tool_result ||
+    message.tool_name ||
+    (message.tool_calls && message.tool_calls.length > 0),
   );
 }
 
@@ -141,7 +134,7 @@ export default function useAgentStream({
   const [active, setActive] = useState<Message | null>(null);
   const [interrupting, setInterrupting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
-  const [pendingGuard, setPendingGuard] = useState<GuardRequest | null>(null);
+  const [pendingGuards, setPendingGuards] = useState<GuardRequest[]>([]);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [queuedSends, setQueuedSends] = useState<string[]>([]);
 
@@ -399,7 +392,9 @@ export default function useAgentStream({
         }
         lastIdRef.current = msgs.length ? msgs[msgs.length - 1].id : null;
         setRuntimeBusy(Boolean(data.runtime_busy));
-        setPendingGuard(data.pending_request?.message || null);
+        setPendingGuards(
+          data.pending_request?.message ? [data.pending_request.message] : [],
+        );
         if (data.session_running) {
           setRunning(true);
           streamSidRef.current = sid;
@@ -555,14 +550,28 @@ export default function useAgentStream({
         case "guard_request": {
           if (genRef.current !== gen) return;
           try {
-            setPendingGuard(JSON.parse(ev.full_content) as GuardRequest);
-          } catch {
-            setPendingGuard({
-              request_id: ev.message_id,
-              action_type: "unknown",
-              subject: ev.tool_name || "unknown",
-              payload: {},
+            const guard = JSON.parse(ev.full_content) as GuardRequest;
+            setPendingGuards((prev) => {
+              const idx = prev.findIndex(
+                (g) => g.request_id === guard.request_id,
+              );
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = guard;
+                return next;
+              }
+              return [...prev, guard];
             });
+          } catch {
+            setPendingGuards((prev) => [
+              ...prev,
+              {
+                request_id: ev.message_id,
+                action_type: "unknown",
+                subject: ev.tool_name || "unknown",
+                payload: {},
+              } as GuardRequest,
+            ]);
           }
           break;
         }
@@ -651,6 +660,7 @@ export default function useAgentStream({
         return null;
       });
       setRunning(false);
+      setRuntimeBusy(false);
       setInterrupting(false);
     },
     [appendCompleted],
@@ -661,7 +671,7 @@ export default function useAgentStream({
   // ═══════════════════════════════════════════════════
 
   const interrupt = useCallback(async (): Promise<void> => {
-    if (!sessionId || !runningRef.current) return;
+    if (!sessionId) return;
     // NOTE: intentionally NOT checking opGuardRef here. send() holds
     // opGuardRef while blocked on readSSEStream. Stop must still be able
     // to POST /interrupt, but the SSE connection must stay open so the
@@ -692,7 +702,9 @@ export default function useAgentStream({
         setRunError(`Pending response failed: ${res.status}`);
         return;
       }
-      setPendingGuard(null);
+      setPendingGuards((prev) =>
+        prev.filter((g) => g.request_id !== messageId),
+      );
     },
     [sessionId],
   );
@@ -724,7 +736,11 @@ export default function useAgentStream({
       const q = (prefill ? prefill + "\n" + question : question).trim();
       if (!q) return;
 
-      if (sessionId && runningRef.current && streamSidRef.current === sessionId) {
+      if (
+        sessionId &&
+        runningRef.current &&
+        streamSidRef.current === sessionId
+      ) {
         if (prefill) prefillRef.current = "";
         enqueueSend(sessionId, q);
         return;
@@ -736,7 +752,7 @@ export default function useAgentStream({
 
       try {
         setRunError(null);
-        setPendingGuard(null);
+        setPendingGuards([]);
         if (prefill) prefillRef.current = "";
 
         // Ensure session exists
@@ -773,11 +789,8 @@ export default function useAgentStream({
           const streamRes = await fetch(`/api/session/${sid}/chat`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question: q, max_steps: 50 }),
-            signal: AbortSignal.any([
-              controller.signal,
-              AbortSignal.timeout(300_000),
-            ]),
+            body: JSON.stringify({ question: q }),
+            signal: controller.signal,
           });
           if (!streamRes.ok) {
             if (streamRes.status === 409) {
@@ -950,7 +963,7 @@ export default function useAgentStream({
       setCompleted([]);
       completedIdsRef.current = new Set();
       setActive(null);
-      setPendingGuard(null);
+      setPendingGuards([]);
       setRunning(false);
       setRuntimeBusy(false);
       streamSidRef.current = null;
@@ -972,7 +985,7 @@ export default function useAgentStream({
     setCompleted([]);
     completedIdsRef.current = new Set();
     setActive(null);
-    setPendingGuard(null);
+    setPendingGuards([]);
     setRunning(false);
     setRuntimeBusy(false);
     streamSidRef.current = null;
@@ -1036,8 +1049,6 @@ export default function useAgentStream({
     updateQueuedSend,
     interrupt,
     reloadMessages,
-    respondPending,
-    respondGuard,
     truncateMessages,
     resetRunning,
     createSession,
@@ -1045,7 +1056,6 @@ export default function useAgentStream({
     scrollToMessage,
     runError,
     clearRunError,
-    pendingGuard,
     notices,
     dismissNotice,
   };

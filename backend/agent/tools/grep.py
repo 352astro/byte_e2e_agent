@@ -70,13 +70,14 @@ async def grep_handler(
     max_results: int = 200,
     max_bytes: int = 50_000,
     *,
-    ws,
+    workspace=None,
 ) -> str:
     """Search file contents with a regex pattern and return matching lines."""
+    workspace_obj = workspace
     try:
-        workspace = Path(ws.resolve_path("."))
+        workspace_path = Path(workspace_obj.resolve_path("."))
     except Exception:
-        workspace = Path(".")
+        workspace_path = Path(".")
 
     try:
         compiled = re.compile(regex)
@@ -87,7 +88,7 @@ async def grep_handler(
     files_scanned = 0
     results: list[str] = []
 
-    for p in workspace.rglob(include_pattern):
+    for p in workspace_path.rglob(include_pattern):
         if not p.is_file():
             continue
         if _is_binary(p):
@@ -98,7 +99,7 @@ async def grep_handler(
         if lines is None:
             continue
 
-        rel = str(p.relative_to(workspace))
+        rel = str(p.relative_to(workspace_path))
         for lineno, line in enumerate(lines, 1):
             if compiled.search(line):
                 match_count += 1

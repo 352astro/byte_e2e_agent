@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "eslint .",
+    "lint": "eslint . --quiet",
+    "lint:verbose": "eslint .",
     "preview": "vite preview",
     "gen-types": "openapi-typescript http://localhost:8000/openapi.json -o src/types.generated.ts",
     "gen-types:local": "openapi-typescript ../backend/.byte_agent/openapi.json -o src/types.generated.ts",

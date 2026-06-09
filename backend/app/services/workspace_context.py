@@ -13,15 +13,16 @@ from agent.core.workspace import Workspace as CoreWorkspace
 from agent.core.workspace import is_valid_session_id
 from agent.hook.logging_hook import LoggingHook
 from agent.hook.metrics_hook import MetricsHook
+from agent.hook.notification_hook import NotificationDriverHook
 from agent.hook.permission_hook import ToolPermissionHook
 from agent.hook.persistence_hook import PersistenceHook
 from agent.hook.shadow_commit_hook import ShadowCommitHook
-from agent.hook.stream_driver import StreamDriverHook
+from agent.hook.stream_hook import StreamDriverHook
 from agent.llm import get_model_id
 from agent.memory import MemoryHook, SQLiteMemoryStore
 from agent.metrics import SQLiteLLMMetricsStore
 from agent.runtime import AgentRuntime
-from agent.session import Session, load_session
+from agent.session import SessionTranscript, load_session
 from agent.shadow_repo import ShadowRepo
 from agent.tools.browser import close_all_browser_sessions_sync
 from app.services.errors import AgentBusy
@@ -45,8 +46,9 @@ class WorkspaceContext:
         from app.core.config import get_settings
 
         self._settings = get_settings()
-        self._sessions: dict[str, Session] = {}
+        self._sessions: dict[str, SessionTranscript] = {}
         self._runtime: AgentRuntime | None = None
+        self._notification_driver: NotificationDriverHook | None = None
         self._shadow_repo: ShadowRepo | None = None
         self._memory_store: SQLiteMemoryStore | None = None
         self._scoped_contexts = _shared_contexts if _shared_contexts is not None else {}
@@ -76,17 +78,23 @@ class WorkspaceContext:
         return self._memory_store
 
     @property
-    def scheduler(self) -> AgentRuntime:
+    def runtime(self) -> AgentRuntime:
         if self._runtime is None:
             self._runtime = self._build_runtime()
         return self._runtime
 
     @property
     def stream_driver(self) -> StreamDriverHook:
-        for hook in self.scheduler.hooks.hooks:
+        for hook in self.runtime.hooks.hooks:
             if isinstance(hook, StreamDriverHook):
                 return hook
         raise RuntimeError("StreamDriverHook not found in HookManager")
+
+    @property
+    def notification_driver(self) -> NotificationDriverHook:
+        if self._notification_driver is None:
+            self._notification_driver = NotificationDriverHook()
+        return self._notification_driver
 
     def ensure_storage_ready(self) -> None:
         self.core_workspace.agent_dir().mkdir(parents=True, exist_ok=True)
@@ -134,17 +142,17 @@ class WorkspaceContext:
         return self._any_runtime_busy()
 
     def create_runtime_session_entry(self, session_id: str):
-        entry = self.scheduler.get_session(session_id)
+        entry = self.runtime.get_session(session_id)
         if entry is not None:
             return entry
         config = self._load_session_config(session_id)
-        return self.scheduler.create_session(
+        return self.runtime.create_session(
             config,
             session_id=session_id,
-            ws=self.core_workspace,
+            workspace=self.core_workspace,
         )
 
-    def get_session(self, session_id: str) -> Session:
+    def get_session(self, session_id: str) -> SessionTranscript:
         if not self.messages_path(session_id).is_file():
             raise KeyError(f"Session not found: {session_id}")
         return self.build_session(session_id)
@@ -164,12 +172,12 @@ class WorkspaceContext:
             raise KeyError(f"Session not found: {session_id}")
         return {"session_id": session_id, "workspace": self._workspace}
 
-    def pop_session(self, session_id: str) -> Session | None:
+    def pop_session(self, session_id: str) -> SessionTranscript | None:
         return self._sessions.pop(session_id, None)
 
-    def build_session(self, session_id: str, *, repair: bool = True) -> Session:
-        ws = self.core_workspace
-        return load_session(session_id, ws=ws, repair=repair)
+    def build_session(self, session_id: str, *, repair: bool = True) -> SessionTranscript:
+        workspace = self.core_workspace
+        return load_session(session_id, workspace=workspace, repair=repair)
 
     def session_dir(self, session_id: str) -> Path:
         if not self.valid_session_id(session_id):
@@ -197,6 +205,7 @@ class WorkspaceContext:
     def _build_runtime(self) -> AgentRuntime:
         hook_list = [
             StreamDriverHook(),
+            self.notification_driver,
             MetricsHook(
                 self.metrics_store,
                 model_id=self._model_id,
@@ -240,6 +249,7 @@ class WorkspaceContext:
             custom_tools=_string_list(raw.get("custom_tools")),
             preloaded_skills=_string_list(raw.get("preloaded_skills")),
             rules=_string_list(raw.get("rules")),
+            assigned_task=str(raw.get("assigned_task") or ""),
         )
 
     def _any_runtime_busy(self) -> bool:

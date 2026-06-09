@@ -1,79 +1,113 @@
-"""Browser 工具 — Playwright 浏览器交互。
+"""Browser tools backed by BrowserGym BrowserEnv.
 
-BrowserOpen  打开页面，返回 HTML + console 日志。
-BrowserAct  点击 / 输入 / 按键，返回新的 HTML + console。
-BrowserInspect  启动浏览器子智能体（在 execute_one_tool 中分发）。
-
-设为有头模式：环境变量 BROWSER_HEADLESS=0。默认无头运行。
+BrowserInspect starts a browser inspection sub-agent. The child session owns a
+BrowserGym environment and can observe it with BrowserObserve or act on it with
+BrowserAct.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
-from contextvars import ContextVar
-from typing import Literal
+import json
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Literal
 
+from browsergym.core.action.highlevel import HighLevelActionSet
+from browsergym.core.env import BrowserEnv
+from browsergym.core.observation import extract_data_items_from_aria
+from browsergym.core.task import OpenEndedTask
 from langchain_core.tools import StructuredTool
-from playwright.async_api import Page, Playwright, async_playwright
 from pydantic import BaseModel, Field
 
-# ── Browser session scope ────────────────────────────────
+_browsergym_action_set = HighLevelActionSet(
+    subsets=["bid", "coord", "nav"],
+    multiaction=False,
+    strict=True,
+)
+
+# BrowserGym uses Playwright's sync API and a package-global Playwright object.
+# Keep all env calls on one worker thread so reset/step/close share the same
+# sync runtime and headed windows close reliably.
+_browsergym_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="browsergym")
 
 
-class BrowserSession:
-    """One Playwright browser/page lifecycle."""
+def _is_headless() -> bool:
+    from app.core.config import get_settings
 
-    def __init__(self) -> None:
-        self._page: Page | None = None
-        self._playwright = None
+    return get_settings().browser_headless
 
-    async def ensure_page(self) -> Page:
-        if self._page is not None:
-            try:
-                await self._page.title()
-                return self._page
-            except Exception:
-                self._page = None
 
-        headless = _is_headless()
-        self._playwright = await async_playwright().__aenter__()
-        browser = await self._playwright.chromium.launch(headless=headless)
-        self._page = await browser.new_page()
-        return self._page
+class BrowserGymSession:
+    """BrowserGym BrowserEnv lifecycle bound to one agent session."""
 
-    async def current_page(self) -> Page | None:
-        if self._page is None:
-            return None
-        try:
-            await self._page.title()
-            return self._page
-        except Exception:
-            self._page = None
-            return None
+    def __init__(self, *, url: str, goal: str) -> None:
+        self.url = url
+        self.goal = goal
+        self.env: BrowserEnv | None = None
+        self.obs: dict[str, Any] | None = None
+        self.info: dict[str, Any] = {}
+        self.reward: float = 0
+        self.terminated = False
+        self.truncated = False
+        self._lock = asyncio.Lock()
+
+    async def start(self) -> dict[str, Any]:
+        async with self._lock:
+            return await _run_browsergym(self._start_sync)
+
+    def _start_sync(self) -> dict[str, Any]:
+        if self.env is not None:
+            self.env.close()
+        self.env = BrowserEnv(
+            task_entrypoint=OpenEndedTask,
+            task_kwargs={"start_url": self.url, "goal": self.goal},
+            headless=_is_headless(),
+            wait_for_user_message=False,
+            terminate_on_infeasible=False,
+            slow_mo=0,
+            action_mapping=_browsergym_action_set.to_python_code,
+        )
+        self.obs, self.info = self.env.reset(seed=0)
+        self.reward = 0
+        self.terminated = False
+        self.truncated = False
+        return self.obs
+
+    async def step(self, action: str) -> dict[str, Any]:
+        async with self._lock:
+            return await _run_browsergym(lambda: self._step_sync(action))
+
+    def _step_sync(self, action: str) -> dict[str, Any]:
+        if self.env is None:
+            raise RuntimeError("BrowserGym environment is not open")
+        self.obs, self.reward, self.terminated, self.truncated, self.info = self.env.step(action)
+        return self.obs
 
     async def close(self) -> None:
-        if self._playwright is not None:
-            with contextlib.suppress(Exception):
-                await self._playwright.__aexit__(None, None, None)
-        self._playwright = None
-        self._page = None
+        async with self._lock:
+            await _run_browsergym(self._close_sync)
+
+    def _close_sync(self) -> None:
+        if self.env is not None:
+            self.env.close()
+            self.env = None
+        self.obs = None
 
 
-class BrowserSessionManager:
-    """Browser sessions keyed by agent session id."""
+class BrowserGymSessionManager:
+    """BrowserGym sessions keyed by agent session id."""
 
     def __init__(self) -> None:
-        self._sessions: dict[str, BrowserSession] = {}
+        self._sessions: dict[str, BrowserGymSession] = {}
 
-    def get(self, session_id: str) -> BrowserSession:
-        session = self._sessions.get(session_id)
-        if session is None:
-            session = BrowserSession()
-            self._sessions[session_id] = session
+    async def start(self, session_id: str, *, url: str, goal: str) -> BrowserGymSession:
+        await self.close(session_id)
+        session = BrowserGymSession(url=url, goal=goal)
+        self._sessions[session_id] = session
+        await session.start()
         return session
 
-    def peek(self, session_id: str) -> BrowserSession | None:
+    def peek(self, session_id: str) -> BrowserGymSession | None:
         return self._sessions.get(session_id)
 
     async def close(self, session_id: str) -> None:
@@ -84,147 +118,46 @@ class BrowserSessionManager:
     async def close_all(self) -> None:
         sessions = list(self._sessions.values())
         self._sessions.clear()
-        await asyncio.gather(
-            *(session.close() for session in sessions),
-            return_exceptions=True,
-        )
+        await asyncio.gather(*(session.close() for session in sessions), return_exceptions=True)
 
 
-_browser_sessions = BrowserSessionManager()
-
-_active_browser_session: ContextVar[BrowserSession | None] = ContextVar(
-    "active_browser_session",
-    default=None,
-)
+_browsergym_sessions = BrowserGymSessionManager()
 
 
-def set_active_browser_session(session: BrowserSession | None):
-    return _active_browser_session.set(session)
-
-
-def reset_active_browser_session(token) -> None:
-    _active_browser_session.reset(token)
+async def _run_browsergym(fn):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_browsergym_executor, fn)
 
 
 async def close_browser_session(session_id: str) -> None:
-    await _browser_sessions.close(session_id)
+    await _browsergym_sessions.close(session_id)
 
 
 async def close_all_browser_sessions() -> None:
-    await _browser_sessions.close_all()
-    await _shutdown_browser()
+    await _browsergym_sessions.close_all()
 
 
 def close_all_browser_sessions_sync() -> None:
     asyncio.run(close_all_browser_sessions())
 
 
-# ── Legacy global fallback ───────────────────────────────
-
-_page: Page | None = None
-_playwright: Playwright | None = None
-
-
-def _is_headless() -> bool:
-    from app.core.config import get_settings
-
-    return get_settings().browser_headless
-
-
-async def _ensure_browser(session_id: str = ""):
-    global _page, _playwright
-    scoped_session = _active_browser_session.get()
-    if scoped_session is not None:
-        return await scoped_session.ensure_page()
-    if session_id:
-        return await _browser_sessions.get(session_id).ensure_page()
-
-    if _page is not None:
-        try:
-            await _page.title()
-            return _page
-        except Exception:
-            _page = None
-
-    headless = _is_headless()
-    pw = await async_playwright().__aenter__()
-    browser = await pw.chromium.launch(headless=headless)
-    page = await browser.new_page()
-    _playwright = pw
-    _page = page
-    return page
-
-
-async def _shutdown_browser():
-    global _page, _playwright
-    if _playwright is not None:
-        with contextlib.suppress(Exception):
-            await _playwright.__aexit__(None, None, None)
-        _playwright = None
-        _page = None
-
-
-async def _capture_state(page, *, with_html: bool = True) -> dict:
-    console: list[str] = []
-
-    def _on_console(msg):
-        entry = f"[{msg.type}] {msg.text}"
-        loc = msg.location
-        if loc and loc.get("url", ""):
-            entry += f"  ({loc['url']}:{loc.get('lineNumber', '?')})"
-        console.append(entry)
-
-    page.on("console", _on_console)
-
-    result: dict = {}
-    if with_html:
-        try:
-            html = await page.content()
-            result["html"] = html
-        except Exception:
-            result["html"] = "(unable to read HTML)"
-
-    result["url"] = page.url
+async def start_browsergym_session(
+    session_id: str,
+    *,
+    url: str,
+    goal: str,
+    max_bytes: int = 50_000,
+) -> str:
+    """Start a BrowserGym BrowserEnv for a BrowserInspect child session."""
     try:
-        result["title"] = await page.title()
-    except Exception:
-        result["title"] = ""
-    result["console"] = console
-    return result
-
-
-async def _current_page(session_id: str = "") -> Page | None:
-    scoped_session = _active_browser_session.get()
-    if scoped_session is not None:
-        return await scoped_session.current_page()
-    if session_id:
-        session = _browser_sessions.peek(session_id)
-        return await session.current_page() if session is not None else None
-    return _page
-
-
-async def open_url(url: str, max_bytes: int = 50_000, *, session_id: str = "") -> str:
-    """Open a URL in the active browser scope and return page state."""
-    try:
-        page = await _ensure_browser(session_id=session_id)
-    except RuntimeError as exc:
-        return str(exc)
-
-    try:
-        await page.goto(url, wait_until="networkidle", timeout=15000)
-        state = await _capture_state(page)
+        session = await _browsergym_sessions.start(session_id, url=url, goal=goal)
     except Exception as exc:
-        return f"Error navigating to {url}: {exc}"
-
-    lines = [
-        f"Title: {state['title']}",
-        f"URL: {state['url']}",
-        "",
-        "── Console ──",
-    ]
-    lines.extend(state["console"] if state["console"] else ["(empty)"])
-    lines.extend(["", "── HTML ──", state["html"]])
-    return _truncate("\n".join(lines), max_bytes)
+        return f"Error starting BrowserGym environment for {url}: {exc}"
+    return _format_browsergym_env_observation(
+        session.obs or {},
+        max_bytes=max_bytes,
+        prefix="Initial BrowserGym observation:",
+    )
 
 
 def _truncate(text: str, max_bytes: int) -> str:
@@ -237,50 +170,441 @@ def _truncate(text: str, max_bytes: int) -> str:
     )
 
 
-# ═══════════════════════════════════════════════════
-# BrowserOpen
-# ═══════════════════════════════════════════════════
+def _format_browsergym_env_observation(
+    obs: dict[str, Any],
+    *,
+    max_bytes: int,
+    prefix: str = "",
+    detail: Literal["summary", "full"] = "full",
+) -> str:
+    lines: list[str] = []
+    if prefix:
+        lines.append(prefix)
+    lines.extend(
+        [
+            f"Title: {_active_browsergym_title(obs)}",
+            f"URL: {obs.get('url', '')}",
+            f"Viewport: {_browsergym_viewport(obs)}",
+            f"Focused bid: {obs.get('focused_element_bid') or '(none)'}",
+            f"Open pages: {', '.join(obs.get('open_pages_urls') or []) or '(none)'}",
+            f"Last action: {obs.get('last_action') or '(none)'}",
+            f"Last action error: {obs.get('last_action_error') or '(none)'}",
+            "",
+            "── Actionable Elements ──",
+        ]
+    )
+    lines.extend(_format_browsergym_interactive_elements(obs))
+    if detail == "full":
+        lines.extend(["", "── Page Outline ──"])
+        lines.extend(_format_browsergym_page_outline(obs))
+        lines.extend(["", "── All BrowserGym Elements ──"])
+        lines.extend(_format_browsergym_elements(obs))
+    return _truncate("\n".join(lines), max_bytes)
 
 
-class BrowserOpenInput(BaseModel):
-    """BrowserOpen 工具输入参数。"""
+def _browsergym_viewport(obs: dict[str, Any]) -> str:
+    screenshot = obs.get("screenshot")
+    shape = getattr(screenshot, "shape", None)
+    if shape and len(shape) >= 2:
+        return f"{shape[1]}x{shape[0]}"
+    return "(unknown)"
+
+
+def _active_browsergym_title(obs: dict[str, Any]) -> str:
+    titles = list(obs.get("open_pages_titles") or [])
+    active_index = obs.get("active_page_index")
+    try:
+        idx = int(active_index[0])
+    except Exception:
+        idx = 0
+    if 0 <= idx < len(titles):
+        return titles[idx]
+    return ""
+
+
+def _format_browsergym_elements(obs: dict[str, Any], *, max_nodes: int = 140) -> list[str]:
+    extra_properties = obs.get("extra_element_properties") or {}
+    nodes = (obs.get("axtree_object") or {}).get("nodes", [])
+    lines: list[str] = []
+    for node in nodes:
+        if node.get("ignored"):
+            continue
+        role = _ax_value(node.get("role"))
+        name = _ax_value(node.get("name"))
+        value = _ax_value(node.get("value"))
+        bid = str(node.get("browsergym_id") or "") or _extract_browsergym_bid_from_ax_node(node)
+        if not any([role, name, value, bid]):
+            continue
+        parts = []
+        if bid:
+            parts.append(f"[bid={bid}]")
+        if role:
+            parts.append(role)
+        if name:
+            parts.append(json.dumps(name, ensure_ascii=False))
+        if value:
+            parts.append(f"value={json.dumps(value, ensure_ascii=False)}")
+        props = extra_properties.get(bid) if bid else None
+        if props:
+            parts.extend(_format_browsergym_props(props))
+        lines.append(" ".join(parts))
+        if len(lines) >= max_nodes:
+            lines.append(f"... truncated after {max_nodes} accessibility nodes")
+            break
+    return lines or ["(no BrowserGym elements available)"]
+
+
+def _format_browsergym_interactive_elements(
+    obs: dict[str, Any],
+    *,
+    max_nodes: int = 120,
+) -> list[str]:
+    extra_properties = obs.get("extra_element_properties") or {}
+    nodes = (obs.get("axtree_object") or {}).get("nodes", [])
+    items: list[tuple[float, float, str]] = []
+    for node in nodes:
+        if node.get("ignored"):
+            continue
+        bid = str(node.get("browsergym_id") or "") or _extract_browsergym_bid_from_ax_node(node)
+        if not bid:
+            continue
+        props = extra_properties.get(bid) or {}
+        role = _ax_value(node.get("role"))
+        name = _ax_value(node.get("name"))
+        value = _ax_value(node.get("value"))
+        if not _is_interactive_browsergym_node(role, props):
+            continue
+        parts = [f"[bid={bid}]"]
+        if role:
+            parts.append(role)
+        if name:
+            parts.append(json.dumps(name, ensure_ascii=False))
+        if value:
+            parts.append(f"value={json.dumps(value, ensure_ascii=False)}")
+        parts.extend(_format_browsergym_props(props))
+        bbox = props.get("bbox") or [1_000_000, 1_000_000]
+        items.append((float(bbox[1]), float(bbox[0]), " ".join(parts)))
+
+    items.sort(key=lambda item: (item[0], item[1], item[2]))
+    lines = [line for _, _, line in items[:max_nodes]]
+    if len(items) > max_nodes:
+        lines.append(f"... truncated after {max_nodes} visible interactive elements")
+    return lines or ["(no visible interactive elements detected)"]
+
+
+def _format_browsergym_page_outline(obs: dict[str, Any], *, max_nodes: int = 180) -> list[str]:
+    extra_properties = obs.get("extra_element_properties") or {}
+    nodes = (obs.get("axtree_object") or {}).get("nodes", [])
+    by_id = {node.get("nodeId"): node for node in nodes if node.get("nodeId") is not None}
+    child_ids = {child for node in nodes for child in node.get("childIds", [])}
+    roots = [node for node in nodes if node.get("nodeId") not in child_ids]
+    lines: list[str] = []
+
+    def visit(node: dict, depth: int) -> None:
+        if len(lines) >= max_nodes or node.get("ignored"):
+            return
+        role = _ax_value(node.get("role"))
+        name = _ax_value(node.get("name"))
+        value = _ax_value(node.get("value"))
+        bid = str(node.get("browsergym_id") or "") or _extract_browsergym_bid_from_ax_node(node)
+        props = extra_properties.get(bid) if bid else None
+        if _is_meaningful_outline_node(role, name, value, bid, props):
+            parts = ["  " * min(depth, 6) + "-"]
+            if bid:
+                parts.append(f"[bid={bid}]")
+            if role:
+                parts.append(role)
+            if name:
+                parts.append(json.dumps(name, ensure_ascii=False))
+            if value:
+                parts.append(f"value={json.dumps(value, ensure_ascii=False)}")
+            if props:
+                parts.extend(_format_browsergym_props(props))
+            lines.append(" ".join(parts))
+        for child_id in node.get("childIds", []):
+            child = by_id.get(child_id)
+            if child is not None:
+                visit(child, depth + 1)
+
+    for root in roots:
+        visit(root, 0)
+        if len(lines) >= max_nodes:
+            break
+    if not lines:
+        for node in nodes:
+            if len(lines) >= max_nodes or node.get("ignored"):
+                continue
+            role = _ax_value(node.get("role"))
+            name = _ax_value(node.get("name"))
+            value = _ax_value(node.get("value"))
+            bid = str(node.get("browsergym_id") or "") or _extract_browsergym_bid_from_ax_node(node)
+            props = extra_properties.get(bid) if bid else None
+            if _is_meaningful_outline_node(role, name, value, bid, props):
+                parts = ["-"]
+                if bid:
+                    parts.append(f"[bid={bid}]")
+                if role:
+                    parts.append(role)
+                if name:
+                    parts.append(json.dumps(name, ensure_ascii=False))
+                if value:
+                    parts.append(f"value={json.dumps(value, ensure_ascii=False)}")
+                if props:
+                    parts.extend(_format_browsergym_props(props))
+                lines.append(" ".join(parts))
+    if len(lines) >= max_nodes:
+        lines.append(f"... truncated after {max_nodes} outline nodes")
+    return lines or ["(page outline unavailable)"]
+
+
+def _is_interactive_browsergym_node(role: str, props: dict) -> bool:
+    interactive_roles = {
+        "button",
+        "checkbox",
+        "combobox",
+        "link",
+        "menuitem",
+        "option",
+        "radio",
+        "searchbox",
+        "slider",
+        "spinbutton",
+        "switch",
+        "tab",
+        "textbox",
+    }
+    return bool(props.get("clickable") or props.get("set_of_marks") or role in interactive_roles)
+
+
+def _is_meaningful_outline_node(
+    role: str,
+    name: str,
+    value: str,
+    bid: str,
+    props: dict | None,
+) -> bool:
+    if bid or value:
+        return True
+    if role in {
+        "heading",
+        "button",
+        "link",
+        "textbox",
+        "searchbox",
+        "checkbox",
+        "radio",
+        "combobox",
+        "tab",
+        "menuitem",
+        "StaticText",
+        "text",
+    }:
+        return bool(name)
+    return bool(name and props and (props.get("clickable") or props.get("set_of_marks")))
+
+
+def _format_browsergym_props(props: dict) -> list[str]:
+    parts: list[str] = []
+    bbox = props.get("bbox")
+    if bbox and len(bbox) >= 4:
+        parts.append(
+            f"bbox=({_fmt_num(bbox[0])},{_fmt_num(bbox[1])},{_fmt_num(bbox[2])},{_fmt_num(bbox[3])})"
+        )
+    if props.get("visibility") is not None:
+        parts.append(f"visible={_fmt_num(props.get('visibility'))}")
+    if props.get("clickable"):
+        parts.append("clickable")
+    if props.get("set_of_marks"):
+        parts.append("mark")
+    return parts
+
+
+def _fmt_num(value) -> str:
+    try:
+        number = float(value)
+    except Exception:
+        return str(value)
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.2f}"
+
+
+def _extract_browsergym_bid_from_ax_node(node: dict) -> str:
+    for prop in node.get("properties", []):
+        if prop.get("name") == "roledescription":
+            data_items, _ = extract_data_items_from_aria(_ax_value(prop.get("value")))
+            if data_items:
+                return data_items[0]
+    description = _ax_value(node.get("description"))
+    if description:
+        data_items, _ = extract_data_items_from_aria(description)
+        if data_items:
+            return data_items[0]
+    return ""
+
+
+def _ax_value(payload) -> str:
+    if isinstance(payload, dict):
+        value = payload.get("value", "")
+        return "" if value is None else str(value)
+    if payload is None:
+        return ""
+    return str(payload)
+
+
+def _structured_action_to_browsergym(
+    *,
+    primitive: str,
+    bid: str,
+    target: str,
+    text: str,
+    key: str,
+    url: str,
+    x: float | None,
+    y: float | None,
+    to_x: float | None,
+    to_y: float | None,
+    dx: float,
+    dy: float,
+    button: str,
+    options: str | list[str],
+) -> str:
+    if primitive in {"click", "dblclick"}:
+        _require(bid, "bid")
+        return f"{primitive}({_literal(bid)}, {_literal(button)})"
+    if primitive == "hover":
+        _require(bid, "bid")
+        return f"hover({_literal(bid)})"
+    if primitive == "fill":
+        _require(bid, "bid")
+        return f"fill({_literal(bid)}, {_literal(text)})"
+    if primitive == "press":
+        _require(bid, "bid")
+        _require(key, "key")
+        return f"press({_literal(bid)}, {_literal(key)})"
+    if primitive in {"focus", "clear"}:
+        _require(bid, "bid")
+        return f"{primitive}({_literal(bid)})"
+    if primitive == "select_option":
+        _require(bid, "bid")
+        if options == "":
+            raise ValueError("options is required for select_option")
+        return f"select_option({_literal(bid)}, {_literal(options)})"
+    if primitive == "drag_and_drop":
+        _require(bid, "bid")
+        _require(target, "target")
+        return f"drag_and_drop({_literal(bid)}, {_literal(target)})"
+    if primitive == "mouse_move":
+        return f"mouse_move({_required_number(x, 'x')}, {_required_number(y, 'y')})"
+    if primitive == "mouse_down":
+        return (
+            f"mouse_down({_required_number(x, 'x')}, "
+            f"{_required_number(y, 'y')}, {_literal(button)})"
+        )
+    if primitive == "mouse_up":
+        return (
+            f"mouse_up({_required_number(x, 'x')}, {_required_number(y, 'y')}, {_literal(button)})"
+        )
+    if primitive in {"mouse_click", "mouse_dblclick"}:
+        return (
+            f"{primitive}({_required_number(x, 'x')}, "
+            f"{_required_number(y, 'y')}, {_literal(button)})"
+        )
+    if primitive == "mouse_drag_and_drop":
+        return (
+            f"mouse_drag_and_drop({_required_number(x, 'x')}, "
+            f"{_required_number(y, 'y')}, {_required_number(to_x, 'to_x')}, "
+            f"{_required_number(to_y, 'to_y')})"
+        )
+    if primitive in {"keyboard_down", "keyboard_up", "keyboard_press"}:
+        _require(key, "key")
+        return f"{primitive}({_literal(key)})"
+    if primitive == "keyboard_type":
+        return f"keyboard_type({_literal(text)})"
+    if primitive == "keyboard_insert_text":
+        return f"keyboard_insert_text({_literal(text)})"
+    if primitive == "scroll":
+        return f"scroll({dx}, {dy})"
+    if primitive == "goto":
+        _require(url, "url")
+        return f"goto({_literal(url)})"
+    if primitive in {"go_back", "go_forward", "noop"}:
+        return f"{primitive}()"
+    raise ValueError(f"Unsupported primitive: {primitive}")
+
+
+def _validate_browsergym_action(action: str) -> str:
+    _browsergym_action_set.to_python_code(action)
+    return action
+
+
+def _require(value: str, label: str) -> None:
+    if not value:
+        raise ValueError(f"{label} is required")
+
+
+def _required_number(value: float | None, label: str) -> float:
+    if value is None:
+        raise ValueError(f"{label} is required")
+    return value
+
+
+def _literal(value: Any) -> str:
+    return repr(value)
+
+
+class BrowserObserveInput(BaseModel):
+    """BrowserObserve tool input."""
 
     max_bytes: int = Field(
-        default=50_000,
+        default=80_000,
         ge=1000,
         le=500_000,
         description="Maximum UTF-8 bytes to return before truncating.",
     )
-    url: str = Field(..., description="URL to open (e.g. http://localhost:5173).")
+    detail: Literal["summary", "full"] = Field(
+        default="full",
+        description="Observation detail level. Use full when inspecting layout or page content.",
+    )
 
 
-async def browser_open_handler(
-    url: str,
-    max_bytes: int = 50_000,
+async def browser_observe_handler(
+    max_bytes: int = 80_000,
+    detail: str = "full",
     *,
-    ws=None,
+    workspace=None,
     session_id: str = "",
     interrupt_event=None,
 ) -> str:
-    """Open a URL in the headless browser and return the page HTML + console logs."""
-    return await open_url(url, max_bytes, session_id=session_id)
+    """Return the current BrowserGym observation for the active BrowserInspect session."""
+    if interrupt_event and interrupt_event.is_set():
+        return "[BrowserObserve interrupted]"
+    browsergym_session = _browsergym_sessions.peek(session_id) if session_id else None
+    if browsergym_session is None or browsergym_session.obs is None:
+        return "Error: BrowserGym environment is not open. Use BrowserInspect first."
+    if detail not in {"summary", "full"}:
+        return f"Error: unsupported detail level {detail!r}"
+    return _format_browsergym_env_observation(
+        browsergym_session.obs,
+        max_bytes=max_bytes,
+        prefix="Current BrowserGym observation:",
+        detail=detail,
+    )
 
 
-browser_open_tool = StructuredTool.from_function(
-    coroutine=browser_open_handler,
-    name="BrowserOpen",
-    description="Open a URL in the headless browser and return the page HTML + console logs.",
-    args_schema=BrowserOpenInput,
+browser_observe_tool = StructuredTool.from_function(
+    coroutine=browser_observe_handler,
+    name="BrowserObserve",
+    description=(
+        "Observe the current BrowserInspect BrowserGym environment. Does not navigate "
+        "or open URLs; it reads the same environment BrowserAct acts on."
+    ),
+    args_schema=BrowserObserveInput,
 )
 
 
-# ═══════════════════════════════════════════════════
-# BrowserAct
-# ═══════════════════════════════════════════════════
-
-
 class BrowserActInput(BaseModel):
-    """BrowserAct 工具输入参数。"""
+    """BrowserAct tool input."""
 
     max_bytes: int = Field(
         default=50_000,
@@ -288,72 +612,124 @@ class BrowserActInput(BaseModel):
         le=500_000,
         description="Maximum UTF-8 bytes to return before truncating.",
     )
-    action: Literal["click", "type", "key"] = Field(
+    primitive: Literal[
+        "click",
+        "dblclick",
+        "hover",
+        "fill",
+        "press",
+        "focus",
+        "clear",
+        "select_option",
+        "drag_and_drop",
+        "mouse_move",
+        "mouse_down",
+        "mouse_up",
+        "mouse_click",
+        "mouse_dblclick",
+        "mouse_drag_and_drop",
+        "keyboard_down",
+        "keyboard_up",
+        "keyboard_press",
+        "keyboard_type",
+        "keyboard_insert_text",
+        "scroll",
+        "goto",
+        "go_back",
+        "go_forward",
+        "noop",
+    ] = Field(
         ...,
-        description="Action: 'click' to click, 'type' to fill text, 'key' to press a keyboard key.",
+        description="BrowserGym action primitive.",
     )
-    selector: str = Field(..., description="CSS selector of the element to act on.")
-    value: str = Field(
+    bid: str = Field(
         default="",
-        description="Text to type (for 'type') or key name (for 'key', e.g. 'Enter', 'Escape').",
+        description="BrowserGym element id from BrowserInspect's observation.",
+    )
+    target: str = Field(default="", description="Target BrowserGym bid for drag/drop actions.")
+    text: str = Field(default="", description="Text for fill/keyboard_type/insert_text.")
+    key: str = Field(default="", description="Keyboard key or key combination.")
+    url: str = Field(default="", description="URL for goto.")
+    x: float | None = Field(default=None, description="Mouse x coordinate.")
+    y: float | None = Field(default=None, description="Mouse y coordinate.")
+    to_x: float | None = Field(default=None, description="Mouse drag target x coordinate.")
+    to_y: float | None = Field(default=None, description="Mouse drag target y coordinate.")
+    dx: float = Field(default=0, description="Horizontal scroll delta.")
+    dy: float = Field(default=0, description="Vertical scroll delta.")
+    button: Literal["left", "middle", "right"] = Field(
+        default="left",
+        description="Mouse button.",
+    )
+    options: str | list[str] = Field(
+        default="",
+        description="Option value(s) for select_option.",
     )
 
 
 async def browser_act_handler(
-    selector: str,
-    action: str,
-    value: str = "",
+    primitive: str,
     max_bytes: int = 50_000,
+    bid: str = "",
+    target: str = "",
+    text: str = "",
+    key: str = "",
+    url: str = "",
+    x: float | None = None,
+    y: float | None = None,
+    to_x: float | None = None,
+    to_y: float | None = None,
+    dx: float = 0,
+    dy: float = 0,
+    button: str = "left",
+    options: str | list[str] = "",
     *,
-    ws=None,
+    workspace=None,
     session_id: str = "",
     interrupt_event=None,
 ) -> str:
-    """Click, type into, or press a key on an element in the browser page."""
+    """Execute a structured browser action in the session's BrowserGym env."""
     if interrupt_event and interrupt_event.is_set():
         return "[BrowserAct interrupted]"
-    page = await _current_page(session_id=session_id)
-    if page is None:
-        return "Error: Browser not open. Use BrowserOpen first."
 
+    action = ""
     try:
-        if action == "click":
-            await page.click(selector, timeout=5000)
-        elif action == "type":
-            await page.fill(selector, value, timeout=5000)
-        elif action == "key":
-            await page.keyboard.press(value)
-        else:
-            return f"Error: unknown action '{action}'"
-
-        await asyncio.sleep(0.5)
-        state = await _capture_state(page)
+        action = _structured_action_to_browsergym(
+            primitive=primitive,
+            bid=bid,
+            target=target,
+            text=text,
+            key=key,
+            url=url,
+            x=x,
+            y=y,
+            to_x=to_x,
+            to_y=to_y,
+            dx=dx,
+            dy=dy,
+            button=button,
+            options=options,
+        )
+        action = _validate_browsergym_action(action)
+        browsergym_session = _browsergym_sessions.peek(session_id) if session_id else None
+        if browsergym_session is None:
+            return "Error: BrowserGym environment is not open. Use BrowserInspect first."
+        obs = await browsergym_session.step(action)
+        return _format_browsergym_env_observation(
+            obs,
+            max_bytes=max_bytes,
+            prefix=f"After action: {action}",
+        )
     except Exception as exc:
-        return f"Error on {action}('{selector}'): {exc}"
-
-    lines = [
-        f"After {action}('{selector}'):",
-        f"Title: {state['title']}",
-        f"URL: {state['url']}",
-        "",
-        "── Console ──",
-    ]
-    lines.extend(state["console"] if state["console"] else ["(empty)"])
-    lines.extend(["", "── HTML ──", state["html"]])
-    return _truncate("\n".join(lines), max_bytes)
+        label = action or f"primitive={primitive!r}"
+        return f"Error executing BrowserAct action {label}: {exc}"
 
 
 browser_act_tool = StructuredTool.from_function(
     coroutine=browser_act_handler,
     name="BrowserAct",
-    description="Click, type into, or press a key on an element in the browser page.",
+    description="Execute a structured BrowserGym action in the current BrowserInspect session.",
     args_schema=BrowserActInput,
 )
-
-
-# ═══════════════════════════════════════════════════
-# BrowserInspect
-# ═══════════════════════════════════════════════════
 
 
 class BrowserInspectInput(BaseModel):
@@ -390,6 +766,6 @@ async def browser_inspect_handler(**kwargs) -> str:
 browser_inspect_tool = StructuredTool.from_function(
     coroutine=browser_inspect_handler,
     name="BrowserInspect",
-    description="Launch a sub-agent with browser tools to inspect a web page.",
+    description="Launch a sub-agent with a BrowserGym environment to inspect a web page.",
     args_schema=BrowserInspectInput,
 )

@@ -20,12 +20,21 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from agent.tools.result import ToolResult
-from agent.tools.terminal import PersistentTerminal
-from agent.utils import sysguard
+from agent.utils import sandbox
+from agent.utils.terminal import PersistentTerminal
 
 _PLATFORM_MAP = {"linux": "Linux", "darwin": "macOS", "win32": "Windows"}
 _PERMISSION_DENIED_PATH_RE = re.compile(r"(?P<path>/[^\s:'\"]+):\s+Permission denied")
 _QUOTED_PERMISSION_DENIED_PATH_RE = re.compile(r"['\"](?P<path>/[^'\"]+)['\"]:\s+Permission denied")
+
+# bwrap ENOENT: "ls: cannot access '/foo': No such file or directory"
+_ENOENT_PATH_RE = re.compile(
+    r"(?P<path>/[^\s:'\"]+):\s+(?:No such file or directory|cannot access)"
+)
+_ENOENT_QUOTED_RE = re.compile(r"cannot access\s+['\"](?P<path>/[^'\"]+)['\"]")
+# bwrap EROFS: "touch: cannot touch '/foo': Read-only file system"
+_EROFS_PATH_RE = re.compile(r"(?P<path>/[^\s:'\"]+):\s+Read-only file system")
+_EROFS_QUOTED_RE = re.compile(r"['\"](?P<path>/[^'\"]+)['\"]:\s+Read-only file system")
 _WRITE_DENIAL_HINTS = (
     "cannot remove",
     "cannot create",
@@ -87,7 +96,7 @@ async def shell_handler(
     max_bytes: int = 20000,
     command: str = "",
     *,
-    ws,
+    workspace=None,
     interrupt_event: asyncio.Event | None = None,
 ) -> ToolResult:
     """Execute a shell command in the workspace with async interrupt.
@@ -100,7 +109,7 @@ async def shell_handler(
       5. Normal exit: collect all output, return with exit code annotation.
     """
     try:
-        workdir = str(ws.resolve(cwd, external_mode="readwrite"))
+        workdir = str(workspace.resolve(cwd, external_mode="readwrite"))
     except PermissionError as exc:
         return ToolResult(
             f"Error: {exc}",
@@ -124,7 +133,7 @@ async def shell_handler(
         )
 
     terminal = PersistentTerminal()
-    terminal.start(workdir, sandbox_root=str(ws.root), workspace_uuid=ws.uuid)
+    terminal.start(workdir, sandbox_root=str(workspace.root), workspace_uuid=workspace.uuid)
 
     result_queue: queue.Queue[object] = queue.Queue(maxsize=1)
     result_status = "success"
@@ -244,35 +253,48 @@ def _sysguard_denial_metadata(
         }
     if status != "error":
         return None
-    if "Permission denied" not in output:
-        return None
+
     write_denial = _looks_like_write_denial(output)
 
-    match = _QUOTED_PERMISSION_DENIED_PATH_RE.search(output)
-    if match:
-        path = match.group("path")
-        candidate = _external_denial_candidate(path, readwrite=write_denial)
-        if candidate:
-            return candidate
+    # ── bwrap / Landlock: Permission denied patterns ─────
+    if "Permission denied" in output:
+        match = _QUOTED_PERMISSION_DENIED_PATH_RE.search(output)
+        if match:
+            path = match.group("path")
+            candidate = _external_denial_candidate(path, readwrite=write_denial)
+            if candidate:
+                return candidate
 
-    match = _PERMISSION_DENIED_PATH_RE.search(output)
-    if not match:
+        match = _PERMISSION_DENIED_PATH_RE.search(output)
+        if match:
+            path = match.group("path")
+            candidate = _external_denial_candidate(path, readwrite=write_denial)
+            if candidate:
+                return candidate
+
+    # ── bwrap: Read-only file system (definite denial) ───
+    if "Read-only file system" in output:
+        for pat in (_EROFS_PATH_RE, _EROFS_QUOTED_RE):
+            match = pat.search(output)
+            if match:
+                path = match.group("path")
+                candidate = _external_denial_candidate(path, readwrite=True)
+                if candidate:
+                    return candidate
         return None
-    path = match.group("path")
-    candidate = _external_denial_candidate(path, readwrite=write_denial)
-    if candidate:
-        return candidate
-    if reason != "exit_code=126":
+
+    # ── bwrap: No such file or directory (suspected missing mount) ──
+    if "No such file or directory" in output or "cannot access" in output:
+        for pat in (_ENOENT_QUOTED_RE, _ENOENT_PATH_RE):
+            match = pat.search(output)
+            if match:
+                path = match.group("path")
+                candidate = _external_denial_candidate(path, readwrite=write_denial)
+                if candidate:
+                    return candidate
         return None
-    rule = sysguard.detect_command_rule(path)
-    if rule is None:
-        return None
-    return {
-        "label": rule.label,
-        "path": rule.path,
-        "description": rule.description,
-        "confidence": "suspected",
-    }
+
+    return None
 
 
 def _looks_like_write_denial(output: str) -> bool:
@@ -293,11 +315,11 @@ def _external_denial_candidate(path: str, *, readwrite: bool) -> dict | None:
     rule_path = _nearest_rule_path(resolved, readwrite=readwrite)
     if rule_path is None:
         return None
-    if sysguard._overlaps_project_root(resolved):
+    if sandbox._overlaps_project_root(resolved):
         return None
-    if sysguard._overlaps_project_root(rule_path):
+    if sandbox._overlaps_project_root(rule_path):
         return None
-    if sysguard.is_path_allowed(str(resolved), mode):
+    if sandbox.is_path_allowed(str(resolved), mode):
         return None
     return {
         "label": "Shell external path",

@@ -7,7 +7,7 @@ import logging
 import time
 
 from agent.memory.store import MEMORY_KINDS, MemoryRecord
-from app.services.context import WorkspaceContext
+from app.services.workspace_context import WorkspaceContext
 
 logger = logging.getLogger(__name__)
 

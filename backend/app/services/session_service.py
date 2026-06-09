@@ -16,15 +16,15 @@ from agent.session import clear
 from agent.tools import tool_registry
 from agent.tools.browser import close_browser_session
 from app.schemas.session import CreateSessionRequest
-from app.services.context import WorkspaceContext
 from app.services.errors import SessionNotFound
 from app.services.session_scope import (
     SESSION_META_FILE,
+    SessionLocation,
     SessionLocator,
-    SessionScope,
     read_session_metadata,
     write_session_metadata,
 )
+from app.services.workspace_context import WorkspaceContext
 from app.services.workspace_registry import list_workspaces, register_workspace
 
 
@@ -79,8 +79,8 @@ class SessionService:
             workspaces = [current, *workspaces]
 
         combined: list[dict[str, Any]] = []
-        for ws in workspaces:
-            combined.extend(self._sessions_for_workspace(ws))
+        for workspace_path in workspaces:
+            combined.extend(self._sessions_for_workspace(workspace_path))
         combined.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
         return combined
 
@@ -95,7 +95,7 @@ class SessionService:
             messages_path = entry / "messages.jsonl"
             if not messages_path.is_file():
                 continue
-            scope = SessionScope(
+            scope = SessionLocation(
                 session_id=entry.name,
                 workspace=workspace,
                 session_dir=entry,
@@ -150,7 +150,7 @@ class SessionService:
         scope = self._locator.resolve(session_id)
         await self._delete_session_scope(scope)
 
-    async def _delete_session_scope(self, scope: SessionScope) -> None:
+    async def _delete_session_scope(self, scope: SessionLocation) -> None:
         session_id = scope.session_id
         ctx = self._ctx.scoped(scope.workspace)
         child_scopes = self._child_scopes(scope.workspace, session_id)
@@ -184,15 +184,15 @@ class SessionService:
 
     def _child_scopes(
         self, workspace: str, parent_session_id: str | None = None
-    ) -> list[SessionScope]:
+    ) -> list[SessionLocation]:
         sessions_dir = _core_workspace_for_path(workspace).sessions_dir()
         if not sessions_dir.is_dir():
             return []
-        result: list[SessionScope] = []
+        result: list[SessionLocation] = []
         for entry in sessions_dir.iterdir():
             if not entry.is_dir() or not self._ctx.valid_session_id(entry.name):
                 continue
-            scope = SessionScope(
+            scope = SessionLocation(
                 session_id=entry.name,
                 workspace=workspace,
                 session_dir=entry,
@@ -221,7 +221,7 @@ class SessionService:
             ctx.get_info(session_id)
         except (KeyError, SessionNotFound) as exc:
             raise SessionNotFound(session_id) from exc
-        session_running = ctx.scheduler.is_running_session(session_id)
+        session_running = ctx.runtime.is_running_session(session_id)
         return {
             "session_running": session_running,
             "runtime_busy": self._ctx.any_runtime_running(),
@@ -237,10 +237,10 @@ class SessionService:
             ctx.get_info(session_id)
         except (KeyError, SessionNotFound) as exc:
             raise SessionNotFound(session_id) from exc
-        runtime = ctx.scheduler
+        runtime = ctx.runtime
         is_running = runtime.is_running_session(session_id)
         runtime_busy = self._ctx.any_runtime_running()
-        current_msg = runtime.current_message if is_running else None
+        current_msg = runtime.current_message_for_session(session_id) if is_running else None
         messages = ctx.get_session_messages(session_id, repair=not runtime_busy)
         return {
             "session": ctx.get_info(session_id),
@@ -248,7 +248,7 @@ class SessionService:
             "session_running": is_running,
             "runtime_busy": runtime_busy,
             "current_message": current_msg.model_dump(mode="json") if current_msg else None,
-            "pending_request": runtime.pending_request,
+            "pending_request": runtime.pending_request_for_session(session_id),
         }
 
     async def interrupt_session(self, session_id: str) -> bool:
@@ -258,13 +258,13 @@ class SessionService:
             ctx.get_info(session_id)
         except (KeyError, SessionNotFound) as exc:
             raise SessionNotFound(session_id) from exc
-        return await ctx.scheduler.interrupt()
+        return await ctx.runtime.interrupt(session_id)
 
     async def interrupt_current(self) -> bool:
-        return await self._ctx.scheduler.interrupt()
+        return await self._ctx.runtime.interrupt()
 
 
-def _load_config(scope: SessionScope) -> dict[str, Any]:
+def _load_config(scope: SessionLocation) -> dict[str, Any]:
     if not scope.config_path.is_file():
         return {}
     try:
@@ -274,7 +274,7 @@ def _load_config(scope: SessionScope) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _parent_id(scope: SessionScope) -> str:
+def _parent_id(scope: SessionLocation) -> str:
     access = _load_config(scope).get("access", {})
     owner = access.get("owner", {}) if isinstance(access, dict) else {}
     if not isinstance(owner, dict):
@@ -285,7 +285,7 @@ def _parent_id(scope: SessionScope) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _session_kind(scope: SessionScope) -> str:
+def _session_kind(scope: SessionLocation) -> str:
     metadata = read_session_metadata(scope)
     kind = metadata.get("session_kind")
     if isinstance(kind, str) and kind:

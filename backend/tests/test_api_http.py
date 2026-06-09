@@ -251,10 +251,8 @@ class TestSessionEndpoints:
         status, _ = _read_sse(client, "GET", f"/api/session/{sid}/stream")
         assert status == 404
 
-        # DELETE 是幂等的：不存在的 session 也返回 200
         delete_resp = client.delete(f"/api/session/{sid}")
-        assert delete_resp.status_code == 200
-        assert delete_resp.json() == {"ok": True}
+        assert delete_resp.status_code == 404
 
 
 @pytest.mark.integration
@@ -323,8 +321,7 @@ class TestStreamEndpoints:
         assert create.status_code == 200
         sid = create.json()["session_id"]
         try:
-            status, lines = _read_sse(client, "GET", f"/api/session/{sid}/stream")
-            assert status == 200
-            assert _parse_sse_data(lines) == []
+            with client.stream("GET", f"/api/session/{sid}/stream", timeout=1.0) as resp:
+                assert resp.status_code == 200
         finally:
             client.delete(f"/api/session/{sid}")

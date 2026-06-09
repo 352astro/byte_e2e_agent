@@ -1,27 +1,24 @@
-"""session 包 — Session 配置 / 状态 / 入口。
-
-向后兼容：from agent.session import Session 依然有效。
-"""
+"""session 包 — transcript / runtime session / status."""
 
 from agent.core.config import SessionConfig
-from agent.session._data import (
-    Session,
+from agent.session.session import (
+    SessionTranscript,
     clear,
     get_history,
     load_session,
     write_session_prefix,
 )
-from agent.session.entry import SessionEntry
+from agent.session.session_entry import RuntimeSession
 from agent.session.status import RuntimeStatus, SessionStatus
 
 __all__ = [
-    "Session",
+    "SessionTranscript",
     "clear",
     "get_history",
     "load_session",
     "RuntimeStatus",
+    "RuntimeSession",
     "SessionConfig",
-    "SessionEntry",
     "SessionStatus",
     "write_session_prefix",
 ]

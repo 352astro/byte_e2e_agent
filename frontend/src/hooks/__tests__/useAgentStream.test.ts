@@ -126,4 +126,56 @@ describe("useAgentStream", () => {
 
     expect(result.current.interrupting).toBe(false);
   });
+
+  it("does not use a fixed total timeout for chat SSE", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const encoder = new TextEncoder();
+    const sseBody = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            [
+              'data: {"kind":"message_start","session_id":"sid1","message_id":"m1","turn_id":"t1","role":"assistant"}',
+              'data: {"kind":"chunk_delta","session_id":"sid1","message_id":"m1","turn_id":"t1","field":"content","delta":"ok"}',
+              'data: {"kind":"message_finish","session_id":"sid1","message_id":"m1","turn_id":"t1"}',
+              'data: {"kind":"turn_complete","session_id":"sid1","turn_id":"t1","input_tokens":0,"output_tokens":0}',
+              "",
+            ].join("\n\n"),
+          ),
+        );
+        controller.close();
+      },
+    });
+
+    vi.mocked(globalThis.fetch).mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/chat")) {
+        return Promise.resolve({
+          ok: true,
+          body: sseBody,
+        } as Response);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            session: {},
+            messages: [],
+            session_running: false,
+            runtime_busy: false,
+          }),
+      } as Response);
+    });
+
+    const { result } = renderHook(() =>
+      useAgentStream({ sessionId: "sid1", cache: {} }),
+    );
+
+    await act(async () => {
+      await result.current.send("hello");
+    });
+
+    expect(timeoutSpy).not.toHaveBeenCalled();
+    expect(result.current.messages.at(-1)?.content).toBe("ok");
+  });
 });

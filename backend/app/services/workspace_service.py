@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from app.services.context import WorkspaceContext
+from app.services.workspace_context import WorkspaceContext
 from app.services.workspace_registry import register_workspace
 
 

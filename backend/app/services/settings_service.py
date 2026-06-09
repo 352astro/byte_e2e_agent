@@ -8,13 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from agent.tools import tool_registry
-from app.schemas.session import (
-    SessionRule,
-    SessionSettings,
-    SysguardRuleRequest,
-    ToolPermissionSettings,
-)
-from app.services.context import WorkspaceContext
+from app.schemas.settings import SessionRule, SessionSettings
+from app.schemas.sysguard import SysguardRuleRequest
+from app.schemas.tools import ToolPermissionSettings
+from app.services.workspace_context import WorkspaceContext
 from app.services.workspace_registry import workspaces_storage_dir
 
 SESSION_DEFAULTS_FILE = "session_defaults.json"
@@ -129,7 +126,7 @@ def _config_path(filename: str) -> Path:
 
 
 def load_sysguard_rules(workspace_uuid: str | None = None) -> dict[str, Any]:
-    from agent.utils.sysguard import list_builtin_rules
+    from agent.utils.sandbox import list_builtin_rules
 
     return {
         "builtin": [rule.__dict__ for rule in list_builtin_rules()],

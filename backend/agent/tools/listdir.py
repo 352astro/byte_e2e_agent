@@ -44,12 +44,13 @@ async def listdir_handler(
     max_entries: int = 200,
     include_hidden: bool = False,
     *,
-    ws,
+    workspace=None,
 ) -> str:
     """List files and directories under a workspace directory."""
+    workspace_obj = workspace
     try:
-        root = Path(ws.resolve_path("."))
-        target = ws.resolve(path, external_mode="readonly")
+        root = Path(workspace_obj.resolve_path("."))
+        target = workspace_obj.resolve(path, external_mode="readonly")
     except PermissionError as exc:
         return f"Error: {exc}"
     except Exception as exc:

@@ -8,7 +8,7 @@ from agent.tools.ask_user import ask_user_tool
 from agent.tools.browser import (
     browser_act_tool,
     browser_inspect_tool,
-    browser_open_tool,
+    browser_observe_tool,
 )
 from agent.tools.edit import edit_tool
 from agent.tools.glob import glob_tool
@@ -19,7 +19,7 @@ from agent.tools.read import read_tool
 from agent.tools.registry import ToolRegistry
 from agent.tools.search import web_fetch_tool, web_search_tool
 from agent.tools.shell import shell_tool
-from agent.tools.skill import load_skill_tool
+from agent.tools.skill import load_skill_tool, write_skill_tool
 from agent.tools.subagent import subagent_tool
 from agent.tools.task import task_list_tool, task_rewrite_tool, task_update_tool
 from agent.tools.toolset import ToolSet
@@ -42,8 +42,9 @@ tool_registry.register(web_search_tool)
 tool_registry.register(web_fetch_tool)
 tool_registry.register(ask_user_tool)
 tool_registry.register(load_skill_tool)
+tool_registry.register(write_skill_tool)
 tool_registry.register(subagent_tool)
-tool_registry.register(browser_open_tool)
+tool_registry.register(browser_observe_tool)
 tool_registry.register(browser_act_tool)
 tool_registry.register(browser_inspect_tool)
 tool_registry.register(task_list_tool)

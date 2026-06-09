@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { renderToolCard } from "./ToolCards";
 import CollapsibleCard from "./CollapsibleCard";
 import Icon from "./Icon";
@@ -124,6 +124,8 @@ function reduceStreamEvent(
         active: null,
         done: true,
       };
+    default:
+      return { messages, active, done: false };
   }
 }
 
@@ -137,7 +139,10 @@ function parseArgs(raw: string): Record<string, unknown> {
 
 function childSidFromResult(result: string | undefined): string {
   if (!result) return "";
-  return result.match(/SubAgent session ([A-Za-z0-9_-]+) completed/)?.[1] || "";
+  return (
+    result.match(/(?:SubAgent|BrowserInspect) session ([A-Za-z0-9_-]+) completed/)?.[1] ||
+    ""
+  );
 }
 
 function SubAgentTranscript({
@@ -283,12 +288,16 @@ function SubAgentTranscript({
   );
 }
 
-function SubAgentToolCard({
+function ChildSessionToolCard({
   pair,
+  label,
+  iconName,
   defaultCollapsed,
   depth,
 }: {
   pair: ToolPair;
+  label: string;
+  iconName: string;
   defaultCollapsed: boolean;
   depth: number;
 }) {
@@ -310,7 +319,40 @@ function SubAgentToolCard({
       : String(meta.status || (resultContent ? "complete" : "running"));
   const prompt = String(args.prompt || "");
   const maxSteps = args.max_steps != null ? String(args.max_steps) : "";
-  const canNest = Boolean(childSessionId) && depth < 3;
+  // TEMPORARY: poll /api/notifications/recover when SSE tool_meta is late
+  // 临时方案：SSE tool_meta 延迟时轮询 recover 兜底
+  const [polledChildSid, setPolledChildSid] = useState("");
+  const parentTcId = pair.toolCall?.id || "";
+  useEffect(() => {
+    if (childSessionId || resultContent || status !== "running" || !parentTcId)
+      return;
+    let attempts = 0;
+    const id = setInterval(async () => {
+      attempts += 1;
+      try {
+        const res = await fetch("/api/notifications/recover");
+        if (!res.ok) return;
+        const data = await res.json();
+        const subs = (data.active_subagents || []) as Array<
+          Record<string, unknown>
+        >;
+        const match = subs.find(
+          (s) => String(s.parent_tool_call_id || "") === parentTcId,
+        );
+        if (match?.child_session_id) {
+          setPolledChildSid(String(match.child_session_id));
+          clearInterval(id);
+        }
+      } catch {
+        /* ignore */
+      }
+      if (attempts >= 30) clearInterval(id);
+    }, 100);
+    return () => clearInterval(id);
+  }, [childSessionId, resultContent, status, parentTcId]);
+
+  const effectiveChildSid = childSessionId || polledChildSid;
+  const canNest = Boolean(effectiveChildSid) && depth < 3;
 
   return (
     <CollapsibleCard
@@ -321,10 +363,10 @@ function SubAgentToolCard({
       headerClassName="subagent-card-header"
       title={
         <>
-          <Icon name="robot" size={14} className="subagent-card-icon" />
-          <span className="subagent-card-label">SubAgent</span>
-          {childSessionId && (
-            <span className="subagent-card-sid">{childSessionId}</span>
+          <Icon name={iconName} size={14} className="subagent-card-icon" />
+          <span className="subagent-card-label">{label}</span>
+          {effectiveChildSid && (
+            <span className="subagent-card-sid">{effectiveChildSid}</span>
           )}
         </>
       }
@@ -345,7 +387,7 @@ function SubAgentToolCard({
           </div>
         )}
         {canNest ? (
-          <SubAgentTranscript sessionId={childSessionId} depth={depth + 1} />
+          <SubAgentTranscript sessionId={effectiveChildSid} depth={depth + 1} />
         ) : resultContent ? (
           <pre className="subagent-result">{resultContent}</pre>
         ) : (
@@ -381,10 +423,12 @@ const ToolPairCard = React.memo(function ToolPairCard({
 
   const bodyContent = toolName === "Write" && rest ? rest : undefined;
 
-  if (toolName === "SubAgent") {
+  if (toolName === "SubAgent" || toolName === "BrowserInspect") {
     return (
-      <SubAgentToolCard
+      <ChildSessionToolCard
         pair={pair}
+        label={toolName}
+        iconName={toolName === "BrowserInspect" ? "eye" : "robot"}
         defaultCollapsed={defaultCollapsed}
         depth={depth}
       />

@@ -35,6 +35,14 @@ def _env_configured() -> bool:
     )
 
 
+def _backend_available() -> bool:
+    try:
+        with Client(base_url=BACKEND, timeout=1.0) as client:
+            return client.get("/api/hello").status_code == 200
+    except Exception:
+        return False
+
+
 def _read_sse(client: Client, sid: str, question: str) -> list[dict]:
     """POST /chat, read SSE stream, return all parsed events."""
     events: list[dict] = []
@@ -80,6 +88,7 @@ def _messages_by_role(events: list[dict]) -> dict[str, set[str]]:
 
 @pytest.mark.integration
 @pytest.mark.skipif(not _env_configured(), reason="LLM env vars not set")
+@pytest.mark.skipif(not _backend_available(), reason="backend server is not running on localhost:8000")
 class TestFullSessionTrace:
     """End-to-end: 2 chats + refresh."""
 

@@ -8,8 +8,10 @@ from datetime import UTC, datetime
 
 from agent.core.config import SessionConfig, ToolSetPreset
 from agent.core.workspace import Workspace
-from agent.runtime.context_builder import build_preloaded_skills_context
+from agent.llm import create_client
+from agent.runtime.llm_context_builder import build_preloaded_skills_context
 from agent.session.status import SessionStatus
+from app.core.config import get_settings
 
 
 def build_subagent_preamble(with_skills: list[str]) -> str:
@@ -61,7 +63,51 @@ def write_subagent_metadata(
     )
 
 
-async def invoke_agent(
+def get_subagent_llm(runtime):
+    """Return the LLM client/model for SubAgent and BrowserInspect sessions."""
+    settings = get_settings()
+    if not any(
+        [
+            settings.subagent_llm_api_key,
+            settings.subagent_llm_base_url,
+            settings.subagent_llm_model_id,
+            settings.subagent_llm_timeout is not None,
+        ]
+    ):
+        return runtime._get_llm()
+
+    parent_client, parent_model_id = runtime._get_llm()
+    model_id = settings.subagent_llm_model_id or parent_model_id
+    if not any(
+        [
+            settings.subagent_llm_api_key,
+            settings.subagent_llm_base_url,
+            settings.subagent_llm_timeout is not None,
+        ]
+    ):
+        return parent_client, model_id
+
+    api_key = settings.subagent_llm_api_key or settings.llm_api_key
+    base_url = settings.subagent_llm_base_url or settings.llm_base_url
+    timeout = (
+        settings.subagent_llm_timeout
+        if settings.subagent_llm_timeout is not None
+        else settings.llm_timeout
+    )
+    if (
+        api_key == settings.llm_api_key
+        and base_url == settings.llm_base_url
+        and timeout == settings.llm_timeout
+    ):
+        return parent_client, model_id
+    return create_client(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=timeout,
+    ), model_id
+
+
+async def invoke_existing_session(
     runtime,
     caller_id: str,
     target_id: str,
@@ -86,13 +132,10 @@ async def invoke_agent(
     if caller_entry:
         caller_entry.transition_to(SessionStatus.PENDING)
 
-    created_interrupt_event = False
-    if runtime._interrupt_event is None:
-        import asyncio
-
-        runtime._interrupt_event = asyncio.Event()
-        created_interrupt_event = True
-    previous_running = runtime._running_session_id
+    parent_run = runtime._runs.get(caller_id)
+    interrupt_event = (
+        parent_run.interrupt_event if parent_run is not None else runtime._interrupt_event
+    )
     try:
         await runtime._hooks.on_subagent_start(
             task=task,
@@ -102,15 +145,13 @@ async def invoke_agent(
             parent_tool_call_id=parent_tool_call_id,
             max_steps=max_turns or 10,
         )
-        runtime._running_session_id = target.id
-        target.transition_to(SessionStatus.RUNNING)
+        runtime._begin_run(target, interrupt_event=interrupt_event)
         result = await runtime._execute_turn(
             target,
             task,
             max_turns or 10,
             top_level=False,
         )
-        runtime._running_session_id = previous_running
         await runtime._hooks.on_subagent_end(
             result=result,
             parent_session_id=caller_id,
@@ -120,16 +161,13 @@ async def invoke_agent(
         )
         return result
     finally:
-        runtime._running_session_id = previous_running
-        if created_interrupt_event:
-            runtime._interrupt_event = None
         if target.status == SessionStatus.RUNNING:
             target.transition_to(SessionStatus.IDLE)
         if caller_entry:
             caller_entry.transition_to(SessionStatus.RUNNING)
 
 
-async def invoke_subagent(
+async def create_and_run_subagent(
     runtime,
     caller_id: str,
     task: str,
@@ -139,7 +177,7 @@ async def invoke_subagent(
     parent_message_id: str = "",
     parent_tool_call_id: str = "",
 ) -> str:
-    openai_client, model_id = runtime._get_llm()
+    openai_client, model_id = get_subagent_llm(runtime)
     child_id = f"{caller_id}-sub-{_uuid.uuid4().hex[:8]}"
     preamble = build_subagent_preamble(with_skills or [])
     child_tools = [
@@ -153,7 +191,7 @@ async def invoke_subagent(
         preamble=preamble,
         tool_set_preset=ToolSetPreset.CUSTOM,
         custom_tools=child_tools,
-        rules=[task],
+        assigned_task=task,
         access=SessionConfig.subagent(
             parent_id=caller_id,
             name=f"subagent:{caller_id}",
@@ -165,7 +203,7 @@ async def invoke_subagent(
         config,
         session_id=child_id,
         llm_client=openai_client,
-        ws=runtime._workspace,
+        workspace=runtime._workspace,
     )
     write_subagent_metadata(
         runtime._workspace,
@@ -175,7 +213,7 @@ async def invoke_subagent(
         parent_tool_call_id=parent_tool_call_id,
         task=task,
     )
-    result = await runtime.invoke_agent(
+    result = await runtime.invoke_existing_session(
         caller_id,
         child_id,
         task,
@@ -184,3 +222,219 @@ async def invoke_subagent(
         parent_tool_call_id=parent_tool_call_id,
     )
     return f"SubAgent session {child_id} completed.\n\n{result}"
+
+
+async def invoke_browser_inspect(
+    runtime,
+    caller_id: str,
+    *,
+    url: str,
+    prompt: str,
+    max_steps: int = 8,
+    parent_message_id: str = "",
+    parent_tool_call_id: str = "",
+) -> str:
+    openai_client, model_id = get_subagent_llm(runtime)
+    child_id = f"{caller_id}-browser-{_uuid.uuid4().hex[:8]}"
+    config = SessionConfig(
+        name=f"browser:{caller_id}",
+        model_id=model_id,
+        preamble=(
+            "You are a browser inspection sub-agent. Your toolset contains "
+            "ONLY BrowserObserve and BrowserAct. The page is already open inside "
+            "a BrowserGym environment. BrowserObserve reads the current page as "
+            "a rich text observation with actionable elements, page outline, bbox, "
+            "and visibility data; it never opens URLs. BrowserAct takes a "
+            "structured action with a primitive such as click, fill, "
+            "keyboard_press, scroll, or goto. Prefer bid over CSS selectors for "
+            "element actions. Inspect the current page and report what you see. "
+            "Keep your reasoning extremely brief."
+        ),
+        tool_set_preset=ToolSetPreset.CUSTOM,
+        custom_tools=["BrowserObserve", "BrowserAct"],
+        assigned_task=prompt,
+        access=SessionConfig.subagent(
+            parent_id=caller_id,
+            name=f"browser:{caller_id}",
+            task=prompt,
+            model_id=model_id,
+        ).access,
+    )
+    runtime.create_session(
+        config,
+        session_id=child_id,
+        llm_client=openai_client,
+        workspace=runtime._workspace,
+    )
+    write_subagent_metadata(
+        runtime._workspace,
+        child_id,
+        parent_id=caller_id,
+        parent_message_id=parent_message_id,
+        parent_tool_call_id=parent_tool_call_id,
+        task=prompt,
+    )
+
+    from agent.tools.browser import close_browser_session, start_browsergym_session
+
+    try:
+        open_result = await start_browsergym_session(
+            child_id,
+            url=url,
+            goal=prompt,
+            max_bytes=20_000,
+        )
+        task = (
+            f"{prompt}\n\n"
+            f"The page has already been opened at: {url}\n"
+            "Use BrowserObserve with detail='full' whenever you need to inspect "
+            "the current page again. Use the bid values from BrowserObserve and "
+            "the initial BrowserGym observation below. Use BrowserAct with "
+            "structured actions, for example "
+            "{primitive: 'click', bid: '12'}, "
+            "{primitive: 'fill', bid: '23', text: 'hello'}, "
+            "{primitive: 'keyboard_press', key: 'Enter'}, "
+            "{primitive: 'scroll', dy: 600}, or "
+            "{primitive: 'goto', url: 'http://...'}."
+            "\n\nInitial page state:\n"
+            f"{open_result}"
+        )
+        result = await runtime.invoke_existing_session(
+            caller_id,
+            child_id,
+            task,
+            max_turns=max_steps,
+            parent_message_id=parent_message_id,
+            parent_tool_call_id=parent_tool_call_id,
+        )
+        return f"BrowserInspect session {child_id} completed.\n\n{result}"
+    finally:
+        await close_browser_session(child_id)
+
+
+# ═══════════════════════════════════════════════════════════
+# run_inline_subagent — standalone subagent loop (moved from actions.py)
+# ═══════════════════════════════════════════════════════════
+
+
+async def run_inline_subagent(
+    workspace,
+    toolset,
+    prompt: str,
+    max_steps: int,
+    *,
+    openai_client=None,
+    model_id: str = "",
+    session_id: str,
+    interrupt_event,
+    with_skills: list[str] | None = None,
+    system_extra: str | None = None,
+    hook_manager=None,
+    human_input_requester=None,
+) -> str:
+    """Run a sub-agent within the same session from a blank context."""
+    import uuid as _uuid
+
+    from agent.llm_streaming import stream_model_call
+    from agent.tool_execution import execute_one_tool
+    from agent.tools.skill import get_skill
+
+    subagent_tools = toolset.without(
+        "SubAgent", "BrowserInspect", "TaskList", "TaskRewrite"
+    ).openai_tools
+
+    subagent_messages: list[dict] = [
+        {
+            "role": "system",
+            "content": (
+                "You are a sub-agent. Complete the assigned task and return a final answer."
+            ),
+        },
+    ]
+
+    if with_skills:
+        for skill_name in with_skills:
+            skill = get_skill(skill_name)
+            if skill is not None:
+                subagent_messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            f"[SKILL: {skill_name}]\n\n"
+                            f"The following skill methodology is pre-loaded "
+                            f"into your context. Follow it exactly.\n\n"
+                            f"{skill.read()}"
+                        ),
+                    }
+                )
+
+    if system_extra:
+        subagent_messages.append({"role": "system", "content": system_extra})
+
+    subagent_messages.append({"role": "user", "content": prompt})
+
+    last_answer = ""
+
+    for _ in range(max_steps):
+        if interrupt_event.is_set():
+            break
+
+        stream_id = _uuid.uuid4().hex
+
+        msg, finish_reason = await stream_model_call(
+            openai_client,
+            model_id,
+            session_id,
+            subagent_messages,
+            subagent_tools,
+            message_id=stream_id,
+            turn_id=stream_id,
+            interrupt_event=interrupt_event,
+            hook_manager=hook_manager,
+        )
+
+        content = msg.content
+        tool_calls = [tc.model_dump() for tc in msg.tool_calls] if msg.tool_calls else []
+
+        if content:
+            last_answer = content
+
+        if finish_reason == "stop" or not tool_calls:
+            break
+
+        subagent_messages.append(
+            {
+                "role": "assistant",
+                "content": content or None,
+                "tool_calls": tool_calls,
+                **({"reasoning_content": msg.reasoning} if msg.reasoning else {}),
+            }
+        )
+
+        for tc in tool_calls:
+            if interrupt_event.is_set():
+                break
+            result = await execute_one_tool(
+                tc,
+                workspace,
+                toolset,
+                interrupt_event=interrupt_event,
+                openai_client=openai_client,
+                model_id=model_id,
+                session_id=session_id,
+                hook_manager=hook_manager,
+                human_input_requester=human_input_requester,
+            )
+            subagent_messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": result.output,
+                }
+            )
+
+    return (
+        f"SubAgent completed. Result: {last_answer}"
+        if last_answer
+        else "SubAgent completed (no output)."
+    )

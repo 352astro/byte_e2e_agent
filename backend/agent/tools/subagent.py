@@ -1,6 +1,6 @@
 """SubAgent 工具：启动子智能体执行独立任务。
 
-实际执行由 agent.actions.execute_one_tool 原地分发，
+实际执行由 agent.tool_execution.execute_one_tool 原地分发，
 本模块仅承载参数定义和 OpenAI schema 生成。
 """
 

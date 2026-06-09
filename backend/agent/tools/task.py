@@ -13,14 +13,14 @@ from pydantic import BaseModel, Field
 TaskStatus = Literal["pending", "progress", "done"]
 
 
-def task_context_message(ws, session_id: str = "") -> dict:
+def task_context_message(workspace, session_id: str = "") -> dict:
     """返回本轮任务列表的系统消息。
 
     Deprecated: tasks are no longer injected as temporary context.
     Kept for backward compatibility with existing callers.
     """
     try:
-        tasks = _load_tasks_for_context(ws, session_id)
+        tasks = _load_tasks_for_context(workspace, session_id)
         content = _format_task_context(tasks)
     except Exception as exc:
         content = f"## Current Tasks\nTask context unavailable: {exc}"
@@ -38,9 +38,11 @@ class TaskListInput(BaseModel):
     pass
 
 
-async def task_list_handler(*, ws=None, session_id: str = "", **kwargs) -> str:
+async def task_list_handler(
+    *, workspace=None, session_id: str = "", **kwargs
+) -> str:
     """Read the current task list."""
-    tasks = await _load_tasks(ws, session_id)
+    tasks = await _load_tasks(workspace, session_id)
     return _dump({"tasks": _with_blocked(tasks)})
 
 
@@ -81,12 +83,14 @@ class TaskRewriteInput(BaseModel):
     )
 
 
-async def task_rewrite_handler(tasks: list[dict], *, ws=None, session_id: str = "") -> str:
+async def task_rewrite_handler(
+    tasks: list[dict], *, workspace=None, session_id: str = ""
+) -> str:
     """Rewrite the full task list."""
     error = _validate_tasks(tasks)
     if error:
         return f"Error: {error}"
-    await _save_tasks(ws, tasks, session_id)
+    await _save_tasks(workspace, tasks, session_id)
     return "Task list updated."
 
 
@@ -115,14 +119,19 @@ class TaskUpdateInput(BaseModel):
 
 
 async def task_update_handler(
-    id: str, status: str, summary: str, *, ws=None, session_id: str = ""
+    id: str,
+    status: str,
+    summary: str,
+    *,
+    workspace=None,
+    session_id: str = "",
 ) -> str:
     """Update one task status and summary.
 
     Returns enriched output with current task state and the next
     actionable task so the model knows what to work on next.
     """
-    tasks = await _load_tasks(ws, session_id)
+    tasks = await _load_tasks(workspace, session_id)
     index = _find_task_index(tasks, id)
     if index is None:
         return f"Error: task id does not exist: {id}"
@@ -149,7 +158,7 @@ async def task_update_handler(
                 unfinished
             )
 
-    await _save_tasks(ws, next_tasks, session_id)
+    await _save_tasks(workspace, next_tasks, session_id)
 
     # Build enriched response with next-step guidance
     annotated = _with_blocked(next_tasks)
@@ -177,20 +186,20 @@ task_update_tool = StructuredTool.from_function(
 # ═══════════════════════════════════════════════════
 
 
-def _tasks_path(ws, session_id: str) -> Path:
+def _tasks_path(workspace, session_id: str) -> Path:
     """获取 session 对应的 tasks.json 路径。"""
-    return ws.tasks_path(session_id)
+    return workspace.tasks_path(session_id)
 
 
-def _load_tasks_for_context(ws, session_id: str) -> list[dict]:
-    path = _tasks_path(ws, session_id)
+def _load_tasks_for_context(workspace, session_id: str) -> list[dict]:
+    path = _tasks_path(workspace, session_id)
     if not path.exists():
         return []
     return _load_tasks_sync(path)
 
 
-async def _load_tasks(ws, session_id: str) -> list[dict]:
-    path = _tasks_path(ws, session_id)
+async def _load_tasks(workspace, session_id: str) -> list[dict]:
+    path = _tasks_path(workspace, session_id)
     if not path.exists():
         return []
     return await asyncio.to_thread(_load_tasks_sync, path)
@@ -204,8 +213,8 @@ def _load_tasks_sync(path: Path) -> list[dict]:
     return data
 
 
-async def _save_tasks(ws, tasks: list[dict], session_id: str) -> None:
-    path = _tasks_path(ws, session_id)
+async def _save_tasks(workspace, tasks: list[dict], session_id: str) -> None:
+    path = _tasks_path(workspace, session_id)
     await asyncio.to_thread(_save_tasks_sync, path, tasks)
 
 

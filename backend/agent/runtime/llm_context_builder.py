@@ -36,5 +36,5 @@ def build_llm_messages(
     """
     from agent.session import load_session
 
-    session = load_session(session_id, ws=workspace)
+    session = load_session(session_id, workspace=workspace)
     return session.get_llm_context()

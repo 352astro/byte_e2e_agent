@@ -16,13 +16,16 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.core.workspace import Workspace
 from agent.tools import tool_registry
 from agent.tools.toolset import ToolSet
+from agent.utils.sandbox import bwrap_available
 
 # ═══════════════════════════════════════════════════════════
 # Helpers
@@ -61,9 +64,9 @@ class TestShellExecution:
         from agent.core.workspace import Workspace
 
         handler = _get_handler("Shell")
-        ws = Workspace(tmp_path)
+        ws = Workspace(tmp_path, workspace_uuid="test-workspace")
 
-        result = await handler(command="echo hello", ws=ws)
+        result = await handler(command="echo hello", workspace=ws)
         assert "hello" in result
 
     @pytest.mark.asyncio
@@ -72,9 +75,9 @@ class TestShellExecution:
         from agent.core.workspace import Workspace
 
         handler = _get_handler("Shell")
-        ws = Workspace(tmp_path)
+        ws = Workspace(tmp_path, workspace_uuid="test-workspace")
 
-        result = await handler(command="exit 7", ws=ws)
+        result = await handler(command="exit 7", workspace=ws)
         assert "exit code: 7" in result
 
     @pytest.mark.asyncio
@@ -87,9 +90,9 @@ class TestShellExecution:
         from agent.core.workspace import Workspace
 
         handler = _get_handler("Shell")
-        ws = Workspace(tmp_path)
+        ws = Workspace(tmp_path, workspace_uuid="test-workspace")
 
-        result = await handler(command="sleep 120", timeout_ms=1000, ws=ws)
+        result = await handler(command="sleep 120", timeout_ms=1000, workspace=ws)
         assert "timed out" in result.lower()
         assert "interrupted" not in result.lower()
 
@@ -108,7 +111,7 @@ class TestShellExecution:
         from agent.core.workspace import Workspace
 
         handler = _get_handler("Shell")
-        ws = Workspace(tmp_path)
+        ws = Workspace(tmp_path, workspace_uuid="test-workspace")
         interrupt_event = asyncio.Event()
         interrupt_event.set()
 
@@ -116,7 +119,7 @@ class TestShellExecution:
         result = await handler(
             command="sleep 120",
             timeout_ms=5000,
-            ws=ws,
+            workspace=ws,
             interrupt_event=interrupt_event,
         )
         elapsed = time.perf_counter() - t0
@@ -137,7 +140,7 @@ class TestShellExecution:
         from agent.core.workspace import Workspace
 
         handler = _get_handler("Shell")
-        ws = Workspace(tmp_path)
+        ws = Workspace(tmp_path, workspace_uuid="test-workspace")
         interrupt_event = asyncio.Event()
 
         async def trigger():
@@ -149,7 +152,7 @@ class TestShellExecution:
         result = await handler(
             command="sleep 120",
             timeout_ms=5000,
-            ws=ws,
+            workspace=ws,
             interrupt_event=interrupt_event,
         )
         elapsed = time.perf_counter() - t0
@@ -174,7 +177,7 @@ class TestReadExecution:
         handler = _get_handler("Read")
         ws = _make_ws(read_file_ret="line1\nline2\nline3")
 
-        result = await handler(path="test.py", ws=ws)
+        result = await handler(path="test.py", workspace=ws)
         assert "line1" in result
         assert "line2" in result
 
@@ -184,7 +187,7 @@ class TestReadExecution:
         handler = _get_handler("Read")
         ws = _make_ws(read_file_ret="a\nb\nc\nd\ne")
 
-        result = await handler(path="test.py", start_line=2, end_line=4, ws=ws)
+        result = await handler(path="test.py", start_line=2, end_line=4, workspace=ws)
         assert "b" in result
         assert "c" in result
         assert "d" in result
@@ -196,7 +199,7 @@ class TestReadExecution:
         handler = _get_handler("Read")
         ws = _make_ws(read_file_ret="Error: file not found")
 
-        result = await handler(path="nope.txt", ws=ws)
+        result = await handler(path="nope.txt", workspace=ws)
         assert "Error" in result or "not found" in result.lower()
 
     @pytest.mark.asyncio
@@ -219,7 +222,7 @@ class TestWriteExecution:
         handler = _get_handler("Write")
         ws = _make_ws()
 
-        result = await handler(path="new.py", content="print(1)", ws=ws)
+        result = await handler(path="new.py", content="print(1)", workspace=ws)
         assert "Successfully" in result
 
     @pytest.mark.asyncio
@@ -228,7 +231,7 @@ class TestWriteExecution:
         handler = _get_handler("Write")
         ws = _make_ws(write_file_ret="Error: permission denied")
 
-        result = await handler(path="/root/x.py", content="bad", ws=ws)
+        result = await handler(path="/root/x.py", content="bad", workspace=ws)
         assert "Error" in result
 
     @pytest.mark.asyncio
@@ -252,8 +255,8 @@ class TestEditExecution:
 
         result = await handler(
             path="test.py",
-            edits=[{"old_text": "a", "new_text": "b"}],
-            ws=ws,
+            edits=[{"old_string": "a", "new_string": "b"}],
+            workspace=ws,
         )
         assert "Successfully" in result
 
@@ -261,12 +264,12 @@ class TestEditExecution:
     async def test_edit_error(self):
         """Edit returns error on failure."""
         handler = _get_handler("Edit")
-        ws = _make_ws(edit_file_ret="Error: cannot find old_text")
+        ws = _make_ws(edit_file_ret="Error: cannot find old_string")
 
         result = await handler(
             path="test.py",
-            edits=[{"old_text": "missing", "new_text": "x"}],
-            ws=ws,
+            edits=[{"old_string": "missing", "new_string": "x"}],
+            workspace=ws,
         )
         assert "Error" in result
 
@@ -293,7 +296,7 @@ class TestGlobExecution:
         (tmp_path / "b.py").write_text("")
         (tmp_path / "c.txt").write_text("")
 
-        result = await handler(pattern="*.py", ws=ws)
+        result = await handler(pattern="*.py", workspace=ws)
         assert "a.py" in result
         assert "b.py" in result
         assert "c.txt" not in result
@@ -304,7 +307,7 @@ class TestGlobExecution:
         handler = _get_handler("Glob")
         ws = _make_ws(resolve_path_ret=str(tmp_path))
 
-        result = await handler(pattern="*.js", ws=ws)
+        result = await handler(pattern="*.js", workspace=ws)
         assert "No files matching" in result
 
     @pytest.mark.asyncio
@@ -329,7 +332,7 @@ class TestGrepExecution:
         (tmp_path / "a.py").write_text("def foo():\n    pass\n")
         (tmp_path / "b.py").write_text("def bar():\n    pass\n")
 
-        result = await handler(regex=r"def \w+", ws=ws)
+        result = await handler(regex=r"def \w+", workspace=ws)
         assert "foo" in result
         assert "bar" in result
 
@@ -341,7 +344,7 @@ class TestGrepExecution:
 
         (tmp_path / "a.py").write_text("hello")
 
-        result = await handler(regex="zzzzNOTFOUNDzzzz", ws=ws)
+        result = await handler(regex="zzzzNOTFOUNDzzzz", workspace=ws)
         assert "No matches" in result
 
     @pytest.mark.asyncio
@@ -350,7 +353,7 @@ class TestGrepExecution:
         handler = _get_handler("Grep")
         ws = _make_ws(resolve_path_ret=str(tmp_path))
 
-        result = await handler(regex="[open", ws=ws)
+        result = await handler(regex="[open", workspace=ws)
         assert "Error" in result
 
     @pytest.mark.asyncio
@@ -442,6 +445,32 @@ class TestPyReplExecution:
 
             result = await handler(code="while True: pass", timeout_ms=100)
             assert "timed out" in result.lower()
+
+    @pytest.mark.skipif(
+        sys.platform == "linux" and not bwrap_available(),
+        reason="bwrap not installed",
+    )
+    @pytest.mark.asyncio
+    async def test_real_execution_allows_imports_and_workspace_io(self, tmp_path):
+        handler = _get_handler("PyRepl")
+        ws = Workspace(tmp_path, workspace_uuid="pyrepl-test")
+
+        result = await handler(
+            code=(
+                "import json\n"
+                "import pydantic\n"
+                "from pathlib import Path\n"
+                "Path('data.json').write_text(json.dumps({'answer': 42}))\n"
+                "print(Path('data.json').read_text())\n"
+                "print('pydantic', pydantic.__version__)\n"
+            ),
+            timeout_ms=5000,
+            workspace=ws,
+        )
+
+        assert '{"answer": 42}' in result
+        assert "pydantic" in result
+        assert (tmp_path / "data.json").read_text() == '{"answer": 42}'
 
 
 # ═══════════════════════════════════════════════════════════
@@ -680,52 +709,71 @@ class TestSubAgentExecution:
 
 
 # ═══════════════════════════════════════════════════════════
-# BrowserOpen
+# BrowserObserve
 # ═══════════════════════════════════════════════════════════
 
 
-class TestBrowserOpenExecution:
-    """BrowserOpen tool — accepts interrupt_event parameter but relies on Playwright."""
+class TestBrowserObserveExecution:
+    """BrowserObserve tool — reads the current BrowserGym session only."""
+
+    def _obs(self):
+        return {
+            "url": "http://example.com",
+            "screenshot": MagicMock(shape=(720, 1280, 3)),
+            "open_pages_urls": ("http://example.com",),
+            "open_pages_titles": ("Example",),
+            "active_page_index": [0],
+            "focused_element_bid": "12",
+            "last_action": "",
+            "last_action_error": "",
+            "axtree_object": {
+                "nodes": [
+                    {
+                        "nodeId": "root",
+                        "childIds": ["button"],
+                        "role": {"value": "RootWebArea"},
+                        "name": {"value": "Example"},
+                    },
+                    {
+                        "nodeId": "button",
+                        "browsergym_id": "12",
+                        "role": {"value": "button"},
+                        "name": {"value": "Submit"},
+                    },
+                ]
+            },
+            "extra_element_properties": {
+                "12": {
+                    "bbox": [10, 20, 100, 30],
+                    "visibility": 1,
+                    "clickable": True,
+                    "set_of_marks": True,
+                }
+            },
+        }
 
     @pytest.mark.asyncio
-    async def test_basic_execution(self):
-        """BrowserOpen navigates to a URL."""
-        handler = _get_handler("BrowserOpen")
+    async def test_observe_current_browsergym_session(self):
+        handler = _get_handler("BrowserObserve")
+        session = MagicMock()
+        session.obs = self._obs()
 
-        with patch("agent.tools.browser._ensure_browser") as mock_browser:
-            mock_page = AsyncMock()
-            mock_page.content = AsyncMock(return_value="<html>test</html>")
-            mock_page.url = "http://example.com"
-            mock_page.title = AsyncMock(return_value="Example")
-            mock_browser.return_value = mock_page
+        with patch("agent.tools.browser._browsergym_sessions.peek", return_value=session):
+            result = await handler(session_id="sid")
 
-            result = await handler(url="http://example.com")
-            assert "Example" in result or "test" in result
-
-    @pytest.mark.asyncio
-    async def test_session_id_uses_per_session_browser(self):
-        """BrowserOpen routes ordinary calls through the per-session manager."""
-        handler = _get_handler("BrowserOpen")
-
-        with patch("agent.tools.browser._ensure_browser") as mock_browser:
-            mock_page = AsyncMock()
-            mock_page.on = MagicMock()
-            mock_page.content = AsyncMock(return_value="<html>session</html>")
-            mock_page.url = "http://example.com"
-            mock_page.title = AsyncMock(return_value="Session Browser")
-            mock_browser.return_value = mock_page
-
-            result = await handler(url="http://example.com", session_id="sid-a")
-
-        mock_browser.assert_called_once_with(session_id="sid-a")
-        assert "Session Browser" in result or "session" in result
+        assert "Current BrowserGym observation" in result
+        assert "Viewport: 1280x720" in result
+        assert '[bid=12] button "Submit"' in result
+        assert "bbox=(10,20,100,30)" in result
+        assert "Actionable Elements" in result
 
     @pytest.mark.asyncio
-    async def test_interrupt_not_supported(self):
-        pytest.skip(
-            "BrowserOpen accepts interrupt_event parameter but "
-            "does not meaningfully use it during Playwright navigation"
-        )
+    async def test_no_browsergym_session(self):
+        handler = _get_handler("BrowserObserve")
+
+        result = await handler(session_id="missing")
+
+        assert "BrowserGym environment is not open" in result
 
 
 # ═══════════════════════════════════════════════════════════
@@ -736,28 +784,96 @@ class TestBrowserOpenExecution:
 class TestBrowserActExecution:
     """BrowserAct tool — supports interrupt_event."""
 
+    def _obs(self, *, last_action: str = ""):
+        return {
+            "url": "http://example.com",
+            "screenshot": MagicMock(shape=(720, 1280, 3)),
+            "open_pages_urls": ("http://example.com",),
+            "open_pages_titles": ("Example",),
+            "active_page_index": [0],
+            "focused_element_bid": "",
+            "last_action": last_action,
+            "last_action_error": "",
+            "axtree_object": {
+                "nodes": [
+                    {
+                        "nodeId": "button",
+                        "browsergym_id": "12",
+                        "role": {"value": "button"},
+                        "name": {"value": "Submit"},
+                    }
+                ]
+            },
+            "extra_element_properties": {
+                "12": {
+                    "bbox": [10, 20, 100, 30],
+                    "visibility": 1,
+                    "clickable": True,
+                    "set_of_marks": True,
+                }
+            },
+        }
+
     @pytest.mark.asyncio
     async def test_basic_execution(self):
-        """BrowserAct performs click action."""
+        """BrowserAct sends click action to the BrowserGym session."""
         handler = _get_handler("BrowserAct")
 
-        with patch("agent.tools.browser._page") as mock_page:
-            mock_page = AsyncMock()
-            mock_page.click = AsyncMock()
-            mock_page.content = AsyncMock(return_value="<html>clicked</html>")
-            mock_page.url = "http://example.com"
-            mock_page.title = AsyncMock(return_value="After Click")
+        session = MagicMock()
+        session.step = AsyncMock(return_value=self._obs(last_action="click('12', 'left')"))
+        with patch("agent.tools.browser._browsergym_sessions.peek", return_value=session):
+            result = await handler(primitive="click", bid="12", session_id="sid")
 
-            # Inject the mock page
-            import agent.tools.browser as browser_mod
+        session.step.assert_called_once_with("click('12', 'left')")
+        assert "After action: click('12', 'left')" in result
+        assert "[bid=12]" in result
 
-            old_page = browser_mod._page
-            browser_mod._page = mock_page
-            try:
-                result = await handler(selector="#btn", action="click")
-                assert "After Click" in result or "clicked" in result
-            finally:
-                browser_mod._page = old_page
+    @pytest.mark.asyncio
+    async def test_fill_action(self):
+        """BrowserAct sends fill action to the BrowserGym session."""
+        handler = _get_handler("BrowserAct")
+
+        session = MagicMock()
+        session.step = AsyncMock(return_value=self._obs(last_action="fill('12', 'hello')"))
+        with patch("agent.tools.browser._browsergym_sessions.peek", return_value=session):
+            result = await handler(primitive="fill", bid="12", text="hello", session_id="sid")
+
+        session.step.assert_called_once_with("fill('12', 'hello')")
+        assert "fill('12', 'hello')" in result
+
+    @pytest.mark.asyncio
+    async def test_bid_click_action(self):
+        """BrowserAct validates bid-only element actions."""
+        handler = _get_handler("BrowserAct")
+
+        session = MagicMock()
+        session.step = AsyncMock(return_value=self._obs(last_action="click('12', 'left')"))
+        with patch("agent.tools.browser._browsergym_sessions.peek", return_value=session):
+            result = await handler(primitive="click", bid="12", session_id="sid")
+
+        session.step.assert_called_once_with("click('12', 'left')")
+        assert "Submit" in result
+
+    @pytest.mark.asyncio
+    async def test_keyboard_press_action(self):
+        """BrowserAct sends keyboard action to the BrowserGym session."""
+        handler = _get_handler("BrowserAct")
+
+        session = MagicMock()
+        session.step = AsyncMock(return_value=self._obs(last_action="keyboard_press('Enter')"))
+        with patch("agent.tools.browser._browsergym_sessions.peek", return_value=session):
+            result = await handler(primitive="keyboard_press", key="Enter", session_id="sid")
+
+        session.step.assert_called_once_with("keyboard_press('Enter')")
+        assert "keyboard_press('Enter')" in result
+
+    @pytest.mark.asyncio
+    async def test_missing_required_action_field(self):
+        """BrowserAct rejects missing required fields."""
+        handler = _get_handler("BrowserAct")
+
+        result = await handler(primitive="click")
+        assert "bid is required" in result
 
     @pytest.mark.asyncio
     async def test_interrupt_before_start(self):
@@ -766,23 +882,21 @@ class TestBrowserActExecution:
         interrupt_event = asyncio.Event()
         interrupt_event.set()
 
-        result = await handler(selector="#btn", action="click", interrupt_event=interrupt_event)
+        result = await handler(
+            primitive="click",
+            bid="12",
+            interrupt_event=interrupt_event,
+        )
         assert "interrupted" in result.lower()
 
     @pytest.mark.asyncio
     async def test_no_browser_open(self):
-        """BrowserAct returns error when no browser page is open."""
+        """BrowserAct returns error when no BrowserGym session is open."""
         handler = _get_handler("BrowserAct")
 
-        import agent.tools.browser as browser_mod
-
-        old_page = browser_mod._page
-        browser_mod._page = None
-        try:
-            result = await handler(selector="#btn", action="click")
-            assert "Error" in result or "Browser not open" in result
-        finally:
-            browser_mod._page = old_page
+        result = await handler(primitive="click", bid="12")
+        assert "Error" in result
+        assert "BrowserGym environment is not open" in result
 
 
 # ═══════════════════════════════════════════════════════════
@@ -801,26 +915,22 @@ class TestBrowserInspectExecution:
         assert "must be dispatched" in result.lower() or "Error" in result
 
     @pytest.mark.asyncio
-    async def test_dispatch_uses_ephemeral_browser_session(self, tmp_path):
-        """BrowserInspect creates and closes an isolated browser scope."""
-        from agent.actions import execute_one_tool
+    async def test_dispatch_uses_browsergym_session(self, tmp_path):
+        """BrowserInspect creates and closes a BrowserGym session."""
         from agent.core.workspace import Workspace
-
-        closed = False
-
-        class FakeBrowserSession:
-            async def close(self):
-                nonlocal closed
-                closed = True
+        from agent.tool_execution import execute_one_tool
 
         with (
-            patch("agent.actions.BrowserSession", return_value=FakeBrowserSession()),
-            patch("agent.actions.set_active_browser_session") as set_active,
-            patch("agent.actions.reset_active_browser_session") as reset_active,
-            patch("agent.actions.open_url", AsyncMock(return_value="opened")),
-            patch("agent.actions.run_subagent", AsyncMock(return_value="inspected")),
+            patch(
+                "agent.tool_execution.start_browsergym_session",
+                AsyncMock(return_value="opened"),
+            ) as start_browsergym,
+            patch("agent.tool_execution.close_browser_session", AsyncMock()) as close_browsergym,
+            patch(
+                "agent.runtime.subagents.run_inline_subagent",
+                AsyncMock(return_value="inspected"),
+            ),
         ):
-            set_active.return_value = "token"
             result = await execute_one_tool(
                 {
                     "id": "tc_browser",
@@ -834,15 +944,15 @@ class TestBrowserInspectExecution:
                         ),
                     },
                 },
-                Workspace(tmp_path),
+                Workspace(tmp_path, workspace_uuid="test-workspace"),
                 ToolSet(tool_registry, "BrowserInspect"),
                 interrupt_event=asyncio.Event(),
                 session_id="sid",
             )
 
         assert result.output == "inspected"
-        assert closed
-        reset_active.assert_called_once_with("token")
+        start_browsergym.assert_called_once()
+        close_browsergym.assert_called_once_with("sid")
 
     @pytest.mark.asyncio
     async def test_interrupt_not_supported(self):
@@ -868,7 +978,7 @@ class TestTaskListExecution:
         ws = MagicMock()
         ws.tasks_path.return_value = Path("/tmp/nonexistent_tasks.json")
 
-        result = await handler(ws=ws, session_id="s1")
+        result = await handler(workspace=ws, session_id="s1")
         assert "tasks" in result.lower() or "No tasks" in result
 
     @pytest.mark.asyncio
@@ -905,7 +1015,7 @@ class TestTaskRewriteExecution:
                         "summary": "",
                     }
                 ],
-                ws=ws,
+                workspace=ws,
                 session_id="s1",
             )
             assert "updated" in result.lower() or "Task list" in result
@@ -918,7 +1028,7 @@ class TestTaskRewriteExecution:
 
         result = await handler(
             tasks=[{"id": "", "status": "pending"}],
-            ws=ws,
+            workspace=ws,
             session_id="s1",
         )
         assert "Error" in result
@@ -967,7 +1077,7 @@ class TestTaskUpdateExecution:
                 id="1",
                 status="done",
                 summary="Completed",
-                ws=ws,
+                workspace=ws,
                 session_id="s1",
             )
             assert "updated" in result.lower() or "Task" in result
@@ -985,7 +1095,7 @@ class TestTaskUpdateExecution:
             id="nonexistent",
             status="done",
             summary="x",
-            ws=ws,
+            workspace=ws,
             session_id="s1",
         )
         assert "Error" in result or "does not exist" in result.lower()
@@ -1006,8 +1116,8 @@ class TestExecuteOneToolInterrupt:
     @pytest.mark.asyncio
     async def test_interrupt_before_any_execution(self):
         """execute_one_tool raises InterruptedError if event is set before dispatch."""
-        from agent.actions import execute_one_tool
         from agent.errors import InterruptedError
+        from agent.tool_execution import execute_one_tool
 
         ws = _make_ws()
         toolset = ToolSet(tool_registry, "Shell")
@@ -1025,7 +1135,7 @@ class TestExecuteOneToolInterrupt:
     @pytest.mark.asyncio
     async def test_unknown_tool_parse_error(self):
         """execute_one_tool returns error for unknown tool name."""
-        from agent.actions import execute_one_tool
+        from agent.tool_execution import execute_one_tool
 
         ws = _make_ws()
         toolset = ToolSet(tool_registry, "Shell")

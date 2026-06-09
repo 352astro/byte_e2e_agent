@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.session._data import _build_llm_context
+from agent.session.session import _build_llm_context
 from shared.types import Message, MessageStatus, ToolCall, ToolCallFunction
 
 

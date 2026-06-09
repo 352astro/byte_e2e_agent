@@ -1,6 +1,6 @@
-"""Session — 会话数据容器，Message 的唯一真相源。
+"""SessionTranscript — append-only message transcript and LLM projection.
 
-每个 Session 持有：
+每个 SessionTranscript 持有：
 - _messages: list[Message] — Pydantic 消息列表（内存 + 磁盘真相源）
 - JSONL 磁盘持久化（Message.model_dump(mode='json')）
 - _llm_context: 从 messages 派生的 OpenAI 格式缓存
@@ -26,24 +26,24 @@ def _default_toolset() -> ToolSet:
 
 
 # ═══════════════════════════════════════════════════════════
-# Session
+# SessionTranscript
 # ═══════════════════════════════════════════════════════════
 
 
-class Session:
-    """一个 agent 会话的完整数据容器。"""
+class SessionTranscript:
+    """Append-only transcript for one agent session."""
 
     def __init__(
         self,
-        ws: Workspace,
+        workspace: Workspace,
         llm_client=None,
         toolset: ToolSet | None = None,
         session_id: str | None = None,
     ) -> None:
         self.llm_client = llm_client
         self._toolset = toolset or _default_toolset()
-        self._ws = ws
-        self._workspace_uuid = ws.uuid
+        self._workspace = workspace
+        self._workspace_uuid = workspace.uuid
         self.session_id = session_id or _uuid.uuid4().hex[:12]
         self._messages: list[Message] = []
         self._llm_context: list[dict] = []
@@ -57,7 +57,7 @@ class Session:
 
         # 同步落盘
         _save_message_sync(
-            self._ws,
+            self._workspace,
             self.session_id,
             msg,
         )
@@ -81,7 +81,7 @@ class Session:
         self._messages = messages
         self._llm_context = _build_llm_context(messages)
         if persist:
-            _rewrite_messages_file(self._ws, self.session_id, messages)
+            _rewrite_messages_file(self._workspace, self.session_id, messages)
 
     def truncate_by_id(self, msg_id: str, keep: bool = False) -> int:
         """按 message id 截断。keep=False → 删除此 id 及以后；keep=True → 保留此 id。"""
@@ -100,7 +100,7 @@ class Session:
         removed = len(self._messages) - cutoff
         self._messages = kept
         self._llm_context = _build_llm_context(kept)
-        _rewrite_messages_file(self._ws, self.session_id, kept)
+        _rewrite_messages_file(self._workspace, self.session_id, kept)
         return removed
 
 
@@ -111,23 +111,24 @@ class Session:
 
 def load_session(
     session_id: str,
-    ws: Workspace,
+    workspace: Workspace | None = None,
     llm_client=None,
     toolset: ToolSet | None = None,
-    *,
     repair: bool = True,
     persist_repair: bool = True,
-) -> Session:
-    """从磁盘 JSONL 重建 Session。"""
-    session = Session(
-        ws=ws,
+) -> SessionTranscript:
+    """从磁盘 JSONL 重建 SessionTranscript。"""
+    if workspace is None:
+        raise ValueError("load_session requires a workspace")
+    transcript = SessionTranscript(
+        workspace=workspace,
         llm_client=llm_client,
         toolset=toolset,
         session_id=session_id,
     )
-    messages_path = _messages_path(ws, session_id)
+    messages_path = _messages_path(workspace, session_id)
     if not messages_path.exists():
-        return session
+        return transcript
 
     msgs = _load_messages(messages_path)
     if msgs and repair:
@@ -135,16 +136,16 @@ def load_session(
 
         msgs = repair_messages(msgs)
     if msgs:
-        session.replace_messages(msgs, persist=repair and persist_repair)
-    return session
+        transcript.replace_messages(msgs, persist=repair and persist_repair)
+    return transcript
 
 
-def get_history(session: Session) -> list[dict]:
+def get_history(session: SessionTranscript) -> list[dict]:
     """Return the persisted Message stream for the legacy history endpoint."""
     return session.get_messages()
 
 
-async def clear(session: Session) -> None:
+async def clear(session: SessionTranscript) -> None:
     session.replace_messages([])
 
 
@@ -173,12 +174,12 @@ def _load_messages(messages_path: Path) -> list[Message]:
 
 
 def _save_message_sync(
-    ws: Workspace,
+    workspace: Workspace,
     session_id: str,
     msg: Message,
 ) -> None:
     """追加一条 Message 到 JSONL。"""
-    messages_path = _messages_path(ws, session_id)
+    messages_path = _messages_path(workspace, session_id)
     messages_path.parent.mkdir(parents=True, exist_ok=True)
     record = msg.model_dump(mode="json")
     with open(messages_path, "a", encoding="utf-8") as fh:
@@ -187,12 +188,12 @@ def _save_message_sync(
 
 
 def _rewrite_messages_file(
-    ws: Workspace,
+    workspace: Workspace,
     session_id: str,
     messages: list[Message],
 ) -> None:
     """重写整个 JSONL 文件。"""
-    messages_path = _messages_path(ws, session_id)
+    messages_path = _messages_path(workspace, session_id)
     messages_path.parent.mkdir(parents=True, exist_ok=True)
     with open(messages_path, "w", encoding="utf-8") as fh:
         for m in messages:
@@ -388,14 +389,14 @@ def _safe_json_loads(value: str) -> dict:
 # ═══════════════════════════════════════════════════════════
 
 
-def _messages_path(ws: Workspace, session_id: str) -> Path:
-    return _session_dir(ws, session_id) / "messages.jsonl"
+def _messages_path(workspace: Workspace, session_id: str) -> Path:
+    return _session_dir(workspace, session_id) / "messages.jsonl"
 
 
-def _session_dir(ws: Workspace, session_id: str) -> Path:
+def _session_dir(workspace: Workspace, session_id: str) -> Path:
     from agent.paths import session_dir as _sdir
 
-    return _sdir(ws.uuid, session_id)
+    return _sdir(workspace.uuid, session_id)
 
 
 def _validate_session_id(session_id: str) -> None:
@@ -407,7 +408,11 @@ def _validate_session_id(session_id: str) -> None:
 # ═══════════════════════════════════════════════════════════
 
 
-def write_session_prefix(ws: Workspace, session_id: str, config: SessionConfig) -> None:
+def write_session_prefix(
+    workspace: Workspace | None = None,
+    session_id: str = "",
+    config: SessionConfig | None = None,
+) -> None:
     """Write the immutable prefix messages to a new session's JSONL.
 
     These messages form the KV-cache anchor — they never change across
@@ -418,7 +423,9 @@ def write_session_prefix(ws: Workspace, session_id: str, config: SessionConfig) 
     from agent.core.prompts import SYSTEM_PROMPT
     from agent.tools.shell import get_platform_hint
     from agent.tools.skill import get_skill, skill_context_message
-    from app.core.config import AGENT_DATA_DIR
+
+    if workspace is None or config is None:
+        raise ValueError("write_session_prefix requires workspace and config")
 
     turn_id = _uuid.uuid4().hex
 
@@ -428,16 +435,6 @@ def write_session_prefix(ws: Workspace, session_id: str, config: SessionConfig) 
             _uuid.uuid4().hex,
             turn_id,
             f"## Platform\n{get_platform_hint()}",
-        ),
-        Message.system_message(
-            _uuid.uuid4().hex,
-            turn_id,
-            (
-                f"## System Directory\n"
-                f"The `{AGENT_DATA_DIR}/` directory at the project root is managed by "
-                f"the system for internal storage. "
-                f"Do NOT read, edit, create, or delete files under `{AGENT_DATA_DIR}`."
-            ),
         ),
         Message.system_message(_uuid.uuid4().hex, turn_id, skill_context_message()["content"]),
     ]
@@ -462,6 +459,15 @@ def write_session_prefix(ws: Workspace, session_id: str, config: SessionConfig) 
     if config.preamble:
         prefix_messages.append(Message.system_message(_uuid.uuid4().hex, turn_id, config.preamble))
 
+    if config.assigned_task:
+        prefix_messages.append(
+            Message.system_message(
+                _uuid.uuid4().hex,
+                turn_id,
+                "## Assigned Task\n" + config.assigned_task,
+            )
+        )
+
     if config.rules:
         prefix_messages.append(
             Message.system_message(
@@ -472,4 +478,4 @@ def write_session_prefix(ws: Workspace, session_id: str, config: SessionConfig) 
         )
 
     for msg in prefix_messages:
-        _save_message_sync(ws, session_id, msg)
+        _save_message_sync(workspace, session_id, msg)

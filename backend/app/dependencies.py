@@ -3,11 +3,11 @@ from functools import lru_cache
 from app.core.config import get_settings
 from app.services.chat_service import ChatService
 from app.services.checkpoint_service import CheckpointService
-from app.services.context import WorkspaceContext
 from app.services.memory_service import MemoryService
 from app.services.metrics_service import MetricsService
 from app.services.session_service import SessionService
 from app.services.settings_service import SettingsService
+from app.services.workspace_context import WorkspaceContext
 from app.services.workspace_service import WorkspaceService
 
 

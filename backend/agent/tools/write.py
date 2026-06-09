@@ -11,9 +11,9 @@ class WriteInput(BaseModel):
     content: str = Field(..., description="Text content to write to the file.")
 
 
-async def write_handler(path: str, content: str, *, ws) -> str:
+async def write_handler(path: str, content: str, *, workspace=None) -> str:
     """Write text content to a file in the workspace."""
-    return await ws.write_file(path, content)
+    return await workspace.write_file(path, content)
 
 
 write_tool = StructuredTool.from_function(

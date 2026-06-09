@@ -199,6 +199,15 @@ class BaseHook:
         """
         return []
 
+    async def clear_session_state(self, *, session_id: str, **kwargs: Any) -> None:
+        """Clear per-session notification state (guards, notices).
+
+        Called at turn end / interrupt.  Hooks that hold mutable state
+        (e.g. NotificationDriverHook) override this to drop stale data
+        so a page refresh does not show resolved guard dialogs.
+        """
+        ...
+
 
 # ═══════════════════════════════════════════════════════════
 # HookManager
