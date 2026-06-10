@@ -8,13 +8,14 @@ BrowserAct.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
 
 from browsergym.core.action.highlevel import HighLevelActionSet
 from browsergym.core.env import BrowserEnv
-from browsergym.core.observation import extract_data_items_from_aria
+from browsergym.core.observation import BID_ATTR, extract_data_items_from_aria
 from browsergym.core.task import OpenEndedTask
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
@@ -40,7 +41,7 @@ def _is_headless() -> bool:
 class BrowserGymSession:
     """BrowserGym BrowserEnv lifecycle bound to one agent session."""
 
-    def __init__(self, *, url: str, goal: str) -> None:
+    def __init__(self, *, url: str, goal: str | None) -> None:
         self.url = url
         self.goal = goal
         self.env: BrowserEnv | None = None
@@ -68,6 +69,7 @@ class BrowserGymSession:
             action_mapping=_browsergym_action_set.to_python_code,
         )
         self.obs, self.info = self.env.reset(seed=0)
+        _disable_browsergym_chat(self.env)
         self.reward = 0
         self.terminated = False
         self.truncated = False
@@ -87,6 +89,19 @@ class BrowserGymSession:
         async with self._lock:
             await _run_browsergym(self._close_sync)
 
+    async def source(self, *, max_bytes: int) -> str:
+        async with self._lock:
+            return await _run_browsergym(lambda: self._source_sync(max_bytes=max_bytes))
+
+    def _source_sync(self, *, max_bytes: int) -> str:
+        if self.env is None or self.env.page is None:
+            raise RuntimeError("BrowserGym environment is not open")
+        return _format_browsergym_page_source(
+            self.env.page,
+            self.obs or {},
+            max_bytes=max_bytes,
+        )
+
     def _close_sync(self) -> None:
         if self.env is not None:
             self.env.close()
@@ -100,7 +115,7 @@ class BrowserGymSessionManager:
     def __init__(self) -> None:
         self._sessions: dict[str, BrowserGymSession] = {}
 
-    async def start(self, session_id: str, *, url: str, goal: str) -> BrowserGymSession:
+    async def start(self, session_id: str, *, url: str, goal: str | None) -> BrowserGymSession:
         await self.close(session_id)
         session = BrowserGymSession(url=url, goal=goal)
         self._sessions[session_id] = session
@@ -124,6 +139,33 @@ class BrowserGymSessionManager:
 _browsergym_sessions = BrowserGymSessionManager()
 
 
+class _NoopBrowserGymChat:
+    """Minimal Chat replacement after BrowserGym's visual chat window is closed."""
+
+    def __init__(self, messages: list[dict] | None = None) -> None:
+        self.messages = list(messages or [])
+
+    def add_message(self, role: str, msg: str) -> None:
+        if role in {"user", "user_image", "assistant", "infeasible"}:
+            self.messages.append({"role": role, "timestamp": 0, "message": msg})
+
+    def wait_for_user_message(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+def _disable_browsergym_chat(env: BrowserEnv) -> None:
+    chat = getattr(env, "chat", None)
+    if chat is None:
+        return
+    messages = list(getattr(chat, "messages", []) or [])
+    with contextlib.suppress(Exception):
+        chat.close()
+    env.chat = _NoopBrowserGymChat(messages)
+
+
 async def _run_browsergym(fn):
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_browsergym_executor, fn)
@@ -145,7 +187,7 @@ async def start_browsergym_session(
     session_id: str,
     *,
     url: str,
-    goal: str,
+    goal: str | None = None,
     max_bytes: int = 50_000,
 ) -> str:
     """Start a BrowserGym BrowserEnv for a BrowserInspect child session."""
@@ -199,6 +241,128 @@ def _format_browsergym_env_observation(
         lines.extend(_format_browsergym_page_outline(obs))
         lines.extend(["", "── All BrowserGym Elements ──"])
         lines.extend(_format_browsergym_elements(obs))
+    return _truncate("\n".join(lines), max_bytes)
+
+
+def _format_browsergym_page_source(page, obs: dict[str, Any], *, max_bytes: int) -> str:
+    try:
+        with contextlib.suppress(Exception):
+            page.wait_for_load_state("domcontentloaded", timeout=1000)
+        payload = page.evaluate(
+            """(bidAttr) => {
+                const attr = (el, name) => el.getAttribute(name) || "";
+                const clip = (value, max) => {
+                    value = String(value || "").replace(/\\s+/g, " ").trim();
+                    return value.length > max ? value.slice(0, max) + "..." : value;
+                };
+                const selectorFor = (el) => {
+                    if (!el || !el.tagName) return "";
+                    const parts = [];
+                    let cur = el;
+                    while (cur && cur.nodeType === Node.ELEMENT_NODE && parts.length < 5) {
+                        let part = cur.tagName.toLowerCase();
+                        if (cur.id) {
+                            part += "#" + cur.id;
+                            parts.unshift(part);
+                            break;
+                        }
+                        const parent = cur.parentElement;
+                        if (parent) {
+                            const siblings = Array.from(parent.children)
+                                .filter((node) => node.tagName === cur.tagName);
+                            if (siblings.length > 1) {
+                                part += `:nth-of-type(${siblings.indexOf(cur) + 1})`;
+                            }
+                        }
+                        parts.unshift(part);
+                        cur = parent;
+                    }
+                    return parts.join(" > ");
+                };
+                const compactOuterHTML = (el) => {
+                    const clone = el.cloneNode(true);
+                    clone.querySelectorAll("script, style, svg").forEach((node) => node.remove());
+                    let html = clone.outerHTML || "";
+                    html = html.replace(/\\s+/g, " ").trim();
+                    return html.length > 1200 ? html.slice(0, 1200) + "..." : html;
+                };
+                const rawElements = Array.from(document.querySelectorAll("*"));
+                const elements = rawElements
+                    .map((el) => ({
+                        tag: el.tagName.toLowerCase(),
+                        bid: attr(el, bidAttr),
+                        id: el.id || "",
+                        className: attr(el, "class"),
+                        name: attr(el, "name"),
+                        role: attr(el, "role"),
+                        ariaLabel: attr(el, "aria-label"),
+                        type: attr(el, "type"),
+                        text: clip(el.innerText || el.textContent || "", 240),
+                        selector: selectorFor(el),
+                        outerHTML: compactOuterHTML(el),
+                    }))
+                    .filter((item) =>
+                        item.bid ||
+                        item.id ||
+                        item.role ||
+                        item.ariaLabel ||
+                        ["a", "button", "input", "select", "textarea", "label", "form"].includes(item.tag)
+                    )
+                    .slice(0, 300);
+                return {
+                    title: document.title || "",
+                    url: location.href,
+                    doctype: document.doctype ? `<!DOCTYPE ${document.doctype.name}>` : "",
+                    html: document.documentElement ? document.documentElement.outerHTML : "",
+                    elements,
+                    totalElements: rawElements.length,
+                };
+            }""",
+            BID_ATTR,
+        )
+    except Exception as exc:
+        return f"Error reading Browser page source: {exc}"
+
+    lines = [
+        "Current BrowserGym source observation:",
+        f"Title: {payload.get('title') or _active_browsergym_title(obs)}",
+        f"URL: {payload.get('url') or obs.get('url', '')}",
+        f"Viewport: {_browsergym_viewport(obs)}",
+        f"Focused bid: {obs.get('focused_element_bid') or '(none)'}",
+        f"Total DOM elements: {payload.get('totalElements', '(unknown)')}",
+        "",
+        "── Element Source Snippets ──",
+    ]
+    elements = payload.get("elements") or []
+    if elements:
+        for item in elements:
+            header = [f"<{item.get('tag', '')}>"]
+            if item.get("bid"):
+                header.append(f"bid={item['bid']}")
+            if item.get("id"):
+                header.append(f"id={json.dumps(item['id'], ensure_ascii=False)}")
+            if item.get("className"):
+                header.append(f"class={json.dumps(item['className'], ensure_ascii=False)}")
+            if item.get("role"):
+                header.append(f"role={json.dumps(item['role'], ensure_ascii=False)}")
+            if item.get("ariaLabel"):
+                header.append(f"aria-label={json.dumps(item['ariaLabel'], ensure_ascii=False)}")
+            if item.get("type"):
+                header.append(f"type={json.dumps(item['type'], ensure_ascii=False)}")
+            if item.get("text"):
+                header.append(f"text={json.dumps(item['text'], ensure_ascii=False)}")
+            lines.append(" ".join(header))
+            if item.get("selector"):
+                lines.append(f"selector: {item['selector']}")
+            lines.append(f"source: {item.get('outerHTML', '')}")
+            lines.append("")
+    else:
+        lines.append("(no element snippets matched; see full page HTML below)")
+        lines.append("")
+
+    doctype = payload.get("doctype")
+    html = payload.get("html") or ""
+    lines.extend(["── Full Page HTML ──", f"{doctype}\n{html}" if doctype else html])
     return _truncate("\n".join(lines), max_bytes)
 
 
@@ -562,9 +726,12 @@ class BrowserObserveInput(BaseModel):
         le=500_000,
         description="Maximum UTF-8 bytes to return before truncating.",
     )
-    detail: Literal["summary", "full"] = Field(
+    detail: Literal["summary", "full", "source"] = Field(
         default="full",
-        description="Observation detail level. Use full when inspecting layout or page content.",
+        description=(
+            "Observation detail level. Use full for accessibility/layout detail; "
+            "use source when you need DOM element source and full page HTML."
+        ),
     )
 
 
@@ -582,8 +749,13 @@ async def browser_observe_handler(
     browsergym_session = _browsergym_sessions.peek(session_id) if session_id else None
     if browsergym_session is None or browsergym_session.obs is None:
         return "Error: BrowserGym environment is not open. Use BrowserInspect first."
-    if detail not in {"summary", "full"}:
+    if detail not in {"summary", "full", "source"}:
         return f"Error: unsupported detail level {detail!r}"
+    if detail == "source":
+        try:
+            return await browsergym_session.source(max_bytes=max_bytes)
+        except Exception as exc:
+            return f"Error reading BrowserObserve source: {exc}"
     return _format_browsergym_env_observation(
         browsergym_session.obs,
         max_bytes=max_bytes,

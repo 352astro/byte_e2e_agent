@@ -384,6 +384,77 @@ class TestToolHandlers:
 
 
 # ═══════════════════════════════════════════════════════════════
+#  Browser source formatting
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestBrowserSourceFormatting:
+    def test_format_browsergym_page_source_includes_element_source(self):
+        from agent.tools.browser import _format_browsergym_page_source
+
+        class FakePage:
+            def wait_for_load_state(self, *args, **kwargs):
+                return None
+
+            def evaluate(self, script, bid_attr):
+                assert bid_attr == "bid"
+                return {
+                    "title": "Example",
+                    "url": "http://example.com",
+                    "doctype": "<!DOCTYPE html>",
+                    "totalElements": 3,
+                    "elements": [
+                        {
+                            "tag": "button",
+                            "bid": "12",
+                            "id": "submit",
+                            "className": "primary",
+                            "role": "button",
+                            "ariaLabel": "Submit form",
+                            "type": "button",
+                            "text": "Submit",
+                            "selector": "html > body > button#submit",
+                            "outerHTML": '<button bid="12" id="submit">Submit</button>',
+                        }
+                    ],
+                    "html": '<html><body><button id="submit">Submit</button></body></html>',
+                }
+
+        obs = {
+            "url": "http://example.com",
+            "focused_element_bid": "12",
+            "screenshot": None,
+            "open_pages_titles": ("Example",),
+            "active_page_index": [0],
+        }
+
+        result = _format_browsergym_page_source(FakePage(), obs, max_bytes=20_000)
+
+        assert "Current BrowserGym source observation" in result
+        assert "Element Source Snippets" in result
+        assert "bid=12" in result
+        assert '<button bid="12" id="submit">Submit</button>' in result
+        assert "Full Page HTML" in result
+
+    def test_disable_browsergym_chat_closes_visual_chat_and_preserves_messages(self):
+        from unittest.mock import MagicMock
+
+        from agent.tools.browser import _disable_browsergym_chat
+
+        chat = MagicMock()
+        chat.messages = [{"role": "assistant", "message": "hello"}]
+        env = MagicMock()
+        env.chat = chat
+
+        _disable_browsergym_chat(env)
+
+        chat.close.assert_called_once()
+        assert env.chat.messages == [{"role": "assistant", "message": "hello"}]
+        env.chat.add_message("assistant", "later")
+        assert env.chat.messages[-1]["message"] == "later"
+
+
+# ═══════════════════════════════════════════════════════════════
 #  Integration
 # ═══════════════════════════════════════════════════════════════
 
