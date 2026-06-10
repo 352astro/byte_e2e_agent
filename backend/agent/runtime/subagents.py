@@ -244,7 +244,8 @@ async def invoke_browser_inspect(
             "ONLY BrowserObserve and BrowserAct. The page is already open inside "
             "a BrowserGym environment. BrowserObserve reads the current page as "
             "a rich text observation with actionable elements, page outline, bbox, "
-            "and visibility data; it never opens URLs. BrowserAct takes a "
+            "and visibility data; detail='source' returns DOM element source "
+            "snippets and full page HTML. BrowserObserve never opens URLs. BrowserAct takes a "
             "structured action with a primitive such as click, fill, "
             "keyboard_press, scroll, or goto. Prefer bid over CSS selectors for "
             "element actions. Inspect the current page and report what you see. "
@@ -281,14 +282,16 @@ async def invoke_browser_inspect(
         open_result = await start_browsergym_session(
             child_id,
             url=url,
-            goal=prompt,
+            goal=None,
             max_bytes=20_000,
         )
         task = (
             f"{prompt}\n\n"
             f"The page has already been opened at: {url}\n"
             "Use BrowserObserve with detail='full' whenever you need to inspect "
-            "the current page again. Use the bid values from BrowserObserve and "
+            "the current page again. Use BrowserObserve with detail='source' "
+            "when you need DOM element source, attributes, selectors, or full "
+            "HTML. Use the bid values from BrowserObserve and "
             "the initial BrowserGym observation below. Use BrowserAct with "
             "structured actions, for example "
             "{primitive: 'click', bid: '12'}, "

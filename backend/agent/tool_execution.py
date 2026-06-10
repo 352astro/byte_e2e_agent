@@ -884,7 +884,7 @@ async def execute_one_tool(
                 open_result = await start_browsergym_session(
                     session_id,
                     url=inspect_url,
-                    goal=args.get("prompt", ""),
+                    goal=None,
                     max_bytes=20_000,
                 )
 

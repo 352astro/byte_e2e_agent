@@ -768,6 +768,21 @@ class TestBrowserObserveExecution:
         assert "Actionable Elements" in result
 
     @pytest.mark.asyncio
+    async def test_observe_source_mode_reads_session_source(self):
+        handler = _get_handler("BrowserObserve")
+        session = MagicMock()
+        session.obs = self._obs()
+        session.source = AsyncMock(
+            return_value="Current BrowserGym source observation:\n<button>OK</button>"
+        )
+
+        with patch("agent.tools.browser._browsergym_sessions.peek", return_value=session):
+            result = await handler(session_id="sid", detail="source", max_bytes=12345)
+
+        session.source.assert_called_once_with(max_bytes=12345)
+        assert "<button>OK</button>" in result
+
+    @pytest.mark.asyncio
     async def test_no_browsergym_session(self):
         handler = _get_handler("BrowserObserve")
 
@@ -952,6 +967,7 @@ class TestBrowserInspectExecution:
 
         assert result.output == "inspected"
         start_browsergym.assert_called_once()
+        assert start_browsergym.call_args.kwargs["goal"] is None
         close_browsergym.assert_called_once_with("sid")
 
     @pytest.mark.asyncio
